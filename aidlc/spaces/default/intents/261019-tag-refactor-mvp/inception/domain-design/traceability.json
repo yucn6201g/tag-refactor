@@ -1,0 +1,23 @@
+{
+  "stage": "domain-design",
+  "upstream_ids": [
+    "US1.1", "US1.2", "US2.1", "US3.1", "US3.2",
+    "US4.1", "US4.2", "US5.1", "US6.1", "US6.2",
+    "US7.1", "US7.2", "US7.3"
+  ],
+  "coverage": [
+    { "id": "US1.1", "status": "OK", "target": "Inventory, AwsAccess" },
+    { "id": "US1.2", "status": "OK", "target": "AwsAccess, Cli" },
+    { "id": "US2.1", "status": "OK", "target": "RuleEngine" },
+    { "id": "US3.1", "status": "OK", "target": "Planner, Display" },
+    { "id": "US3.2", "status": "OK", "target": "ImpactAnalyzer" },
+    { "id": "US4.1", "status": "OK", "target": "Applier, Cli" },
+    { "id": "US4.2", "status": "OK", "target": "Applier, Journal" },
+    { "id": "US5.1", "status": "OK", "target": "Rollbacker, Journal" },
+    { "id": "US6.1", "status": "OK", "target": "Cli, Display" },
+    { "id": "US6.2", "status": "N/A", "target": "配布(GitHub Releases と go install)は部品ではなく、リリースの仕組みで扱う。ビルドと配布は CI Pipeline のステージで設計する" },
+    { "id": "US7.1", "status": "OK", "target": "IacWriter" },
+    { "id": "US7.2", "status": "OK", "target": "IacWriter" },
+    { "id": "US7.3", "status": "OK", "target": "IacWriter" }
+  ]
+}

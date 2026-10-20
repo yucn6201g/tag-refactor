@@ -1,0 +1,23 @@
+{
+  "stage": "units-generation",
+  "upstream_ids": [
+    "US1.1", "US1.2", "US2.1", "US3.1", "US3.2",
+    "US4.1", "US4.2", "US5.1", "US6.1", "US6.2",
+    "US7.1", "US7.2", "US7.3"
+  ],
+  "coverage": [
+    { "id": "US1.1", "status": "OK", "target": "U2" },
+    { "id": "US1.2", "status": "OK", "target": "U2" },
+    { "id": "US2.1", "status": "OK", "target": "U3" },
+    { "id": "US3.1", "status": "OK", "target": "U4" },
+    { "id": "US3.2", "status": "OK", "target": "U5" },
+    { "id": "US4.1", "status": "OK", "target": "U6" },
+    { "id": "US4.2", "status": "OK", "target": "U6" },
+    { "id": "US5.1", "status": "OK", "target": "U7" },
+    { "id": "US6.1", "status": "OK", "target": "U4" },
+    { "id": "US6.2", "status": "N/A", "target": "配布の仕組みは今回の作業単位に含めず、別の作業として後で行うと利用者が決めた(units-generation-questions.md Q3、Q4)" },
+    { "id": "US7.1", "status": "OK", "target": "U8" },
+    { "id": "US7.2", "status": "OK", "target": "U8" },
+    { "id": "US7.3", "status": "OK", "target": "U8" }
+  ]
+}
