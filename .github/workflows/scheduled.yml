@@ -1,0 +1,29 @@
+# Weekly vulnerability check of main, to catch advisories published after a
+# merge (NFR8.7). It never calls AWS.
+name: scheduled
+
+on:
+  schedule:
+    - cron: "17 3 * * 1" # every Monday 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GOTOOLCHAIN: local
+
+jobs:
+  vuln-weekly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - name: govulncheck
+        run: go tool govulncheck ./...

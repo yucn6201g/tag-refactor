@@ -1,0 +1,16 @@
+# Weekly updates of the Go modules (including tools managed by the tool
+# directive, such as govulncheck) and of the pinned GitHub Actions.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"

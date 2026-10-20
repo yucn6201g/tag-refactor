@@ -56,7 +56,13 @@ func newSession(t *testing.T, fake *testutil.FakeAWS, mutate func(o *Options)) (
 	return s, sink
 }
 
-func requireKind(t *testing.T, err error, kind errkind.Kind, reason errkind.Reason) *errkind.Error {
+func requireKind(t *testing.T, err error, kind errkind.Kind, reason errkind.Reason) {
+	t.Helper()
+	_ = checkKind(t, err, kind, reason)
+}
+
+// checkKind is requireKind returning the error for further checks.
+func checkKind(t *testing.T, err error, kind errkind.Kind, reason errkind.Reason) *errkind.Error {
 	t.Helper()
 	e, ok := errkind.As(err)
 	if !ok {
@@ -250,7 +256,7 @@ func TestSDKErrorsBecomeErrorKinds(t *testing.T) {
 
 			_, err := s.ListTaggedResources(context.Background(), "us-east-1")
 
-			e := requireKind(t, err, tc.kind, tc.reason)
+			e := checkKind(t, err, tc.kind, tc.reason)
 			if e.Op != OpGetResources || e.Region != "us-east-1" {
 				t.Fatalf("op/region = %q/%q", e.Op, e.Region)
 			}
@@ -303,7 +309,7 @@ func TestResolveReportsAnExpiredSSOSessionWithoutCallingAWS(t *testing.T) {
 
 	_, err = s.Resolve(context.Background())
 
-	e := requireKind(t, err, errkind.CredentialsMissing, errkind.ReasonSSOSessionExpired)
+	e := checkKind(t, err, errkind.CredentialsMissing, errkind.ReasonSSOSessionExpired)
 	if e.Subject != "dev" {
 		t.Fatalf("subject = %q", e.Subject)
 	}
@@ -331,7 +337,7 @@ func TestNewSessionValidatesProfileAndRegion(t *testing.T) {
 
 			_, err := NewSession(context.Background(), tc.opts)
 
-			e := requireKind(t, err, errkind.InvalidInput, tc.reason)
+			e := checkKind(t, err, errkind.InvalidInput, tc.reason)
 			if e.Subject != tc.subject {
 				t.Fatalf("subject = %q, want %q", e.Subject, tc.subject)
 			}

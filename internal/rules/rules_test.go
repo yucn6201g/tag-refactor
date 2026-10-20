@@ -59,10 +59,10 @@ func TestLoadReadsAliasesFromCRLFFileWithBOM(t *testing.T) {
 
 func TestLoadAcceptsOnlyReadableRegularFilesUpTo1MiB(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
-	requireRuleError(t, err, errkind.NotFound, 0, "")
+	_ = requireRuleError(t, err, errkind.NotFound, 0, "")
 
 	_, err = Load(t.TempDir())
-	requireRuleError(t, err, errkind.InvalidInput, 0, "")
+	_ = requireRuleError(t, err, errkind.InvalidInput, 0, "")
 
 	big := "version: 1\n" + strings.Repeat("#", MaxFileSize)
 	_, err = Load(writeFile(t, big))
@@ -99,14 +99,14 @@ func TestParseRejectsUnsafeYAMLFeatures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse("r.yaml", []byte(tc.content))
-			requireRuleError(t, err, errkind.InvalidInput, tc.line, tc.key)
+			_ = requireRuleError(t, err, errkind.InvalidInput, tc.line, tc.key)
 		})
 	}
 	// Many aliases expanding a large structure (a "YAML bomb") never get
 	// expanded: the first anchor is rejected.
 	bomb := "version: 1\na: &a [x, x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n"
 	_, err := Parse("bomb.yaml", []byte(bomb))
-	requireRuleError(t, err, errkind.InvalidInput, 2, "")
+	_ = requireRuleError(t, err, errkind.InvalidInput, 2, "")
 }
 
 func TestParseVersionAndStructureErrors(t *testing.T) {
@@ -128,7 +128,7 @@ func TestParseVersionAndStructureErrors(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Parse("r.yaml", []byte(tc.content))
-			requireRuleError(t, err, tc.kind, tc.line, tc.key)
+			_ = requireRuleError(t, err, tc.kind, tc.line, tc.key)
 		})
 	}
 }
@@ -170,7 +170,7 @@ func TestAliasesBelongToOneCanonicalKey(t *testing.T) {
 	}
 
 	_, err = Parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [Env]\n  Env:\n    aliases: [e]\n"))
-	requireRuleError(t, err, errkind.InvalidInput, 4, "Env")
+	_ = requireRuleError(t, err, errkind.InvalidInput, 4, "Env")
 
 	rs, err := Parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [env, env, ENV]\n  environment:\n    aliases: [x]\n"))
 	if err != nil {
