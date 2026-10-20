@@ -43,10 +43,25 @@ func New(stdout, stderr io.Writer) *Printer {
 func (p *Printer) SetDebug(on bool) { p.debug = on }
 
 // Stdout returns the result writer, for the help text of the command parser.
-func (p *Printer) Stdout() io.Writer { return p.out }
+// Write errors through it are kept like those of the printer itself.
+func (p *Printer) Stdout() io.Writer { return recordingWriter{p: p, w: p.out} }
 
 // Stderr returns the message writer, for the command parser.
-func (p *Printer) Stderr() io.Writer { return p.errOut }
+func (p *Printer) Stderr() io.Writer { return recordingWriter{p: p, w: p.errOut} }
+
+// recordingWriter passes writes through and keeps the first write error.
+type recordingWriter struct {
+	p *Printer
+	w io.Writer
+}
+
+func (r recordingWriter) Write(b []byte) (int, error) {
+	n, err := r.w.Write(b)
+	if err != nil && r.p.werr == nil {
+		r.p.werr = err
+	}
+	return n, err
+}
 
 // WriteErr returns the first error met while writing, if any.
 func (p *Printer) WriteErr() error { return p.werr }
