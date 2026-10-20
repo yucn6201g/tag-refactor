@@ -245,6 +245,18 @@ func TestUnusedItemsAreStillChecked(t *testing.T) {
 	}
 }
 
+// The rule file of the sandbox checkpoint must load without warnings.
+func TestSandboxRuleFileIsValid(t *testing.T) {
+	rs, err := Load(filepath.Join("..", "..", "test", "sandbox", "u1-rules.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rs.KeyRules) != 1 || rs.KeyRules[0].CanonicalKey != "Environment" ||
+		strings.Join(rs.KeyRules[0].Aliases, ",") != "env,Env" || len(rs.Warnings) != 0 {
+		t.Fatalf("rule set = %+v", rs)
+	}
+}
+
 func TestSuggestAndEditDistance(t *testing.T) {
 	if got := suggest("Aliases", keyRuleKeys); got != "aliases" {
 		t.Fatalf("suggest = %q", got)
