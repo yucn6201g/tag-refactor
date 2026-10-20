@@ -299,7 +299,9 @@ func TestAcceptance_AC1_2_5_CredentialsNeverAppearInOutput(t *testing.T) {
 				w.givenResources(sandboxResources()...)
 				w.givenAttachedPolicies(map[string]string{policyP1: policyEnvCondition})
 			},
-			args:     func(rules string) []string { return []string{"plan", "--debug", "--rules", rules, "--region", "us-east-1"} },
+			args: func(rules string) []string {
+				return []string{"plan", "--debug", "--rules", rules, "--region", "us-east-1"}
+			},
 			wantExit: 2,
 		},
 	}
