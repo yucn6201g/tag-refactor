@@ -1,0 +1,4 @@
+# Check out every text file with LF line endings on all platforms, so Go
+# sources and test data (expected output, rule files, JSON) are identical on
+# Linux, macOS and Windows runners. CRLF rule files are built inside tests.
+* text=auto eol=lf

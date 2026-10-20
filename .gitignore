@@ -23,3 +23,12 @@ aidlc/spaces/*/intents/*/.aidlc-*
 aidlc/diagnostics/
 .claude/settings.local.json
 # END AI-DLC:gitignore
+
+# Go build and test output
+/tag-refactor
+/tag-refactor.exe
+/dist/
+*.test
+*.exe
+coverage.out
+coverage.html
