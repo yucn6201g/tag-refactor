@@ -30,13 +30,15 @@ func (l *loader) loadRoot(root ast.Node) error {
 	if err := l.checkVersion(entries); err != nil {
 		return err
 	}
+	keysLine, keyCount := 1, 0
 	for _, e := range entries {
 		name := scalarText(e.Key)
 		var err error
 		switch name {
 		case "version":
 		case "keys":
-			err = l.loadKeys(e.Value)
+			keysLine = lineOf(e.Key)
+			keyCount, err = l.loadKeys(e.Value)
 		case "required":
 			err = l.loadRequired(e)
 		case "remove":
@@ -47,6 +49,11 @@ func (l *loader) loadRoot(root ast.Node) error {
 		if err != nil {
 			return err
 		}
+	}
+	if keyCount == 0 {
+		// A file without key rules is valid but plans nothing; say so rather
+		// than report "No changes needed" as if the keys had been checked.
+		l.warn(keysLine, "keys", `no key rules: "keys" is missing or empty, so no tag key is renamed`)
 	}
 	return nil
 }
@@ -131,23 +138,24 @@ func (l *loader) mapping(n ast.Node, what, hint string) ([]*ast.MappingValueNode
 	return entries, nil
 }
 
-func (l *loader) loadKeys(n ast.Node) error {
+// loadKeys reads the key rules and returns how many entries "keys" has.
+func (l *loader) loadKeys(n ast.Node) (int, error) {
 	entries, err := l.mapping(n, `"keys"`, "list each canonical tag key under keys, for example \"Environment:\"")
 	if err != nil {
-		return err
+		return 0, err
 	}
 	for _, e := range entries {
 		canonical, err := l.keyName(e, "a tag key")
 		if err != nil {
-			return err
+			return 0, err
 		}
 		line := lineOf(e.Key)
 		if canonical == "" {
-			return l.fail(errkind.InvalidInput, line, "", "a tag key must not be empty", "remove the empty key")
+			return 0, l.fail(errkind.InvalidInput, line, "", "a tag key must not be empty", "remove the empty key")
 		}
 		aliases, aliasLines, err := l.loadKeyRule(e, canonical)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		if IsAWSReservedKey(canonical) {
 			l.warn(line, canonical, fmt.Sprintf("keys starting with aws: belong to AWS; the rule for %q is ignored", canonical))
@@ -169,7 +177,7 @@ func (l *loader) loadKeys(n ast.Node) error {
 		l.rs.KeyRules = append(l.rs.KeyRules, rule)
 		l.aliasLines = append(l.aliasLines, lines)
 	}
-	return nil
+	return len(entries), nil
 }
 
 // loadKeyRule reads the body of one canonical key: its aliases and values.

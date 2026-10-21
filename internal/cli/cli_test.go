@@ -230,6 +230,22 @@ func TestPlanWithoutChangesReadsNoPolicies(t *testing.T) {
 	}
 }
 
+// Review R-07: a rule file without key rules still plans nothing, and says so
+// on standard error.
+func TestPlanWarnsAboutARuleFileWithoutKeyRules(t *testing.T) {
+	w := newWorld(t)
+	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"env": "dev"}})
+	rules := w.givenRuleFile("version: 1\n")
+
+	r := w.run("plan", "--rules", rules, "--region", "us-east-1")
+
+	r.requireExit(t, 0)
+	if r.stdout != "No changes needed\nSummary: 1 resource scanned · 0 to change\n" {
+		t.Fatalf("stdout = %q", r.stdout)
+	}
+	requireContains(t, "stderr", r.stderr, "warning: "+display.Sanitize(rules)+` line 1: no key rules: "keys" is missing or empty, so no tag key is renamed`)
+}
+
 // Review R-04: the scope of the check is stated on standard error, and
 // standard output keeps only the results (BR6.1).
 func TestScanAndPlanStateWhatTheyChecked(t *testing.T) {

@@ -311,6 +311,40 @@ remove: [tmp-owner]
 	}
 }
 
+// Review R-07: a file without key rules is accepted but warned about, so a
+// forgotten or misplaced "keys" does not pass silently as "No changes needed".
+func TestMissingOrEmptyKeysGiveAWarning(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		line    int
+	}{
+		{"no keys", "version: 1\n", 1},
+		{"keys without a value", "version: 1\nkeys:\n", 2},
+		{"empty keys", "version: 1\nremove: [x]\nkeys: {}\n", 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rs, err := Parse("r.yaml", []byte(tc.content))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rs.KeyRules) != 0 {
+				t.Fatalf("key rules = %+v", rs.KeyRules)
+			}
+			last := rs.Warnings[len(rs.Warnings)-1]
+			if last.Line != tc.line || last.Key != "keys" || !strings.HasPrefix(last.Message, "no key rules") {
+				t.Fatalf("warnings = %+v", rs.Warnings)
+			}
+		})
+	}
+	// Keys that are all ignored (aws:) are already warned about one by one.
+	rs, err := Parse("r.yaml", []byte("version: 1\nkeys:\n  aws:x:\n    aliases: [y]\n"))
+	if err != nil || len(rs.Warnings) != 1 || strings.Contains(rs.Warnings[0].Message, "no key rules") {
+		t.Fatalf("warnings = %+v, err = %v", rs, err)
+	}
+}
+
 func TestUnusedItemsAreStillChecked(t *testing.T) {
 	cases := map[string]string{
 		"values not a mapping":   "version: 1\nkeys:\n  A:\n    values: [a]\n",
