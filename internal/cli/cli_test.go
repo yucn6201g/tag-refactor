@@ -184,6 +184,22 @@ func TestRegionProblemsSayHowToChooseARegion(t *testing.T) {
 		r.requireExit(t, 1)
 		requireContains(t, "stderr", r.stderr, "Error: the region me-central-1 is not available for this account")
 	})
+	t.Run("disabled opt-in region rejects the credentials", func(t *testing.T) {
+		w := newWorld(t)
+		w.fake.Handle("sts:GetCallerIdentity", func(c testutil.Call) testutil.Reply {
+			if c.Region == "me-south-1" {
+				return testutil.QueryError(http.StatusForbidden, "InvalidClientTokenId", "The security token included in the request is invalid.")
+			}
+			return testutil.CallerIdentity(testutil.TestAccount, testutil.TestCallerARN)
+		})
+
+		r := w.run("scan", "--region", "me-south-1")
+
+		r.requireExit(t, 1)
+		requireTwoLineError(t, r)
+		requireContains(t, "stderr", r.stderr, "Error: the region me-south-1 is not available for this account")
+		requireNotContains(t, "stderr", r.stderr, "rejected the credentials")
+	})
 	t.Run("environment region", func(t *testing.T) {
 		w := newWorld(t)
 		t.Setenv("AWS_REGION", "eu-west-1")

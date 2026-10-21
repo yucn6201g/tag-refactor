@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -170,7 +171,8 @@ func configError(err error, profile string) error {
 }
 
 // Resolve checks the credentials, identifies the caller with STS and checks
-// that the region is enabled for the account (BR1.1, BR1.3).
+// that the region is enabled for the account (BR1.1, BR1.3). A rejection by
+// STS is re-checked, because a disabled opt-in region looks the same.
 func (s *Session) Resolve(ctx context.Context) (AccountContext, error) {
 	if err := s.checkCredentials(ctx); err != nil {
 		return AccountContext{}, err
@@ -182,7 +184,7 @@ func (s *Session) Resolve(ctx context.Context) (AccountContext, error) {
 		return err
 	})
 	if err != nil {
-		return AccountContext{}, err
+		return AccountContext{}, s.recheckRejectedRegion(ctx, err)
 	}
 	if err := s.checkRegionEnabled(ctx); err != nil {
 		return AccountContext{}, err
@@ -221,21 +223,71 @@ func (s *Session) checkCredentials(ctx context.Context) error {
 // checkRegionEnabled fails with InvalidInput when the region is not one of
 // the regions enabled for the account (BR1.1).
 func (s *Session) checkRegionEnabled(ctx context.Context) error {
-	var out *ec2.DescribeRegionsOutput
-	err := s.invoke(ctx, OpDescribeRegions, s.region, func(ctx context.Context, add apiOption) error {
-		var err error
-		out, err = s.ec2.DescribeRegions(ctx, &ec2.DescribeRegionsInput{}, func(o *ec2.Options) { o.APIOptions = append(o.APIOptions, add) })
-		return err
-	})
+	names, err := s.enabledRegions(ctx, s.region)
 	if err != nil {
 		return err
-	}
-	names := make([]string, 0, len(out.Regions))
-	for _, r := range out.Regions {
-		names = append(names, aws.ToString(r.RegionName))
 	}
 	if !slices.Contains(names, s.region) {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionUnavailable, Region: s.region}
 	}
 	return nil
+}
+
+// enabledRegions lists the regions enabled for the account, asking the EC2
+// endpoint of the region from.
+func (s *Session) enabledRegions(ctx context.Context, from string) ([]string, error) {
+	var out *ec2.DescribeRegionsOutput
+	err := s.invoke(ctx, OpDescribeRegions, from, func(ctx context.Context, add apiOption) error {
+		var err error
+		out, err = s.ec2.DescribeRegions(ctx, &ec2.DescribeRegionsInput{}, func(o *ec2.Options) {
+			o.Region = from
+			o.APIOptions = append(o.APIOptions, add)
+		})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(out.Regions))
+	for _, r := range out.Regions {
+		names = append(names, aws.ToString(r.RegionName))
+	}
+	return names, nil
+}
+
+// recheckRegion is the region asked for the enabled regions when STS in the
+// chosen region rejects the credentials. It is enabled in every account of
+// the commercial partition, the only partition with opt-in regions.
+const recheckRegion = "us-east-1"
+
+// recheckRejectedRegion handles a rejection of the credentials by STS in the
+// chosen region. STS in an opt-in region the account has not enabled rejects
+// the credentials as if they were invalid, so the enabled regions are read
+// from recheckRegion: when the chosen region is not among them, the region
+// is reported as unavailable instead (BR1.1). In every other case, including
+// a failure of the re-check, the original error stands (BR1.3).
+func (s *Session) recheckRejectedRegion(ctx context.Context, stsErr error) error {
+	e, ok := errkind.As(stsErr)
+	if !ok || e.Reason != errkind.ReasonCredentialsRejected || !hasOptInRegions(s.region) {
+		return stsErr
+	}
+	names, err := s.enabledRegions(ctx, recheckRegion)
+	if err != nil || slices.Contains(names, s.region) {
+		return stsErr
+	}
+	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionUnavailable, Region: s.region, Cause: stsErr}
+}
+
+// hasOptInRegions reports whether region is a region of the commercial
+// partition other than recheckRegion: only those can be opt-in regions.
+func hasOptInRegions(region string) bool {
+	if region == recheckRegion {
+		return false
+	}
+	for _, prefix := range []string{"us-gov-", "cn-", "us-iso", "eu-iso"} {
+		if strings.HasPrefix(region, prefix) {
+			return false
+		}
+	}
+	return true
 }

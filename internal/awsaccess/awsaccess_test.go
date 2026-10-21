@@ -296,6 +296,67 @@ func TestResolveRejectsARegionThatIsNotEnabled(t *testing.T) {
 	requireKind(t, err, errkind.InvalidInput, errkind.ReasonRegionUnavailable)
 }
 
+// STS in an opt-in region the account has not enabled rejects the
+// credentials (InvalidClientTokenId). The enabled regions are then read from
+// us-east-1, so the region is reported as unavailable, not the credentials
+// as bad (BR1.1, review R-02). Real bad credentials are still reported as such.
+func TestResolveRechecksARejectionByStsAgainstTheEnabledRegions(t *testing.T) {
+	rejected := testutil.QueryError(http.StatusForbidden, "InvalidClientTokenId", "The security token included in the request is invalid.")
+	cases := []struct {
+		name        string
+		region      string
+		describe    testutil.Reply
+		kind        errkind.Kind
+		reason      errkind.Reason
+		wantRecheck bool
+	}{
+		{"disabled opt-in region", "me-south-1", testutil.Regions("us-east-1", "eu-west-1"), errkind.InvalidInput, errkind.ReasonRegionUnavailable, true},
+		{"enabled region, bad credentials", "eu-west-1", testutil.Regions("us-east-1", "eu-west-1"), errkind.CredentialsMissing, errkind.ReasonCredentialsRejected, true},
+		{"re-check also rejected", "me-south-1", testutil.EC2Error(http.StatusUnauthorized, "AuthFailure", "no"), errkind.CredentialsMissing, errkind.ReasonCredentialsRejected, true},
+		{"us-east-1 itself", "us-east-1", testutil.Regions("us-east-1"), errkind.CredentialsMissing, errkind.ReasonCredentialsRejected, false},
+		{"GovCloud has no opt-in regions", "us-gov-west-1", testutil.Regions("us-east-1"), errkind.CredentialsMissing, errkind.ReasonCredentialsRejected, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := testutil.NewFakeAWS(t)
+			fake.Handle("sts:GetCallerIdentity", testutil.Static(rejected))
+			fake.Handle("ec2:DescribeRegions", func(c testutil.Call) testutil.Reply {
+				if c.Region != "us-east-1" {
+					t.Errorf("DescribeRegions was asked in %s, want us-east-1", c.Region)
+				}
+				return tc.describe
+			})
+			s, _ := newSession(t, fake, func(o *Options) { o.Region = tc.region })
+
+			_, err := s.Resolve(context.Background())
+
+			e := checkKind(t, err, tc.kind, tc.reason)
+			if tc.kind == errkind.InvalidInput && e.Region != tc.region {
+				t.Fatalf("region = %q, want %q", e.Region, tc.region)
+			}
+			if tc.kind == errkind.CredentialsMissing && e.Op != OpGetCallerIdentity {
+				t.Fatalf("op = %q, want the original STS error", e.Op)
+			}
+			if got := fake.Count("ec2:DescribeRegions") == 1; got != tc.wantRecheck {
+				t.Fatalf("re-check made = %v, want %v (calls: %v)", got, tc.wantRecheck, fake.Ops())
+			}
+		})
+	}
+}
+
+func TestOtherStsErrorsAreNotRechecked(t *testing.T) {
+	fake := testutil.NewFakeAWS(t)
+	fake.Handle("sts:GetCallerIdentity", testutil.Static(testutil.QueryError(http.StatusForbidden, "ExpiredToken", "expired")))
+	s, _ := newSession(t, fake, func(o *Options) { o.Region = "me-south-1" })
+
+	_, err := s.Resolve(context.Background())
+
+	requireKind(t, err, errkind.CredentialsMissing, errkind.ReasonCredentialsExpired)
+	if fake.Count("ec2:DescribeRegions") != 0 {
+		t.Fatalf("an expired token must not be re-checked: %v", fake.Ops())
+	}
+}
+
 func TestResolveReportsAnExpiredSSOSessionWithoutCallingAWS(t *testing.T) {
 	fake := testutil.NewFakeAWS(t)
 	env := testutil.IsolateAWSEnv(t)
