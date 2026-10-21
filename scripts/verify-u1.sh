@@ -4,7 +4,7 @@
 # 1. Runs the whole U1 test suite (no AWS; the same tests as CI).
 # 2. Runs scan and plan end to end against the sandbox AWS account
 #    (internal/cli/integration_test.go). This needs the fixture stack from
-#    test/sandbox/u1-fixtures.yaml in us-east-1, a valid SSO login, and the
+#    test/sandbox/u1-fixtures.yaml in ap-northeast-1, a valid SSO login, and the
 #    read-only profile (default tag-refactor-readonly; override with
 #    TAG_REFACTOR_IT_PROFILE).
 #

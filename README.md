@@ -115,7 +115,7 @@ go tool govulncheck ./...
 
 実際の AWS アカウントを使う確認は、手元だけで行います(CI では行いません)。少額の費用がかかる場合があります。
 
-1. 確認用のリソースを `test/sandbox/u1-fixtures.yaml`(CloudFormation、`us-east-1`)で作ります。手順、期待する結果、削除の方法は、インフラの設計 [`infrastructure-specification.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u1-walking-skeleton/infrastructure-design/infrastructure-specification.md) にあります。
+1. 確認用のリソースを `test/sandbox/u1-fixtures.yaml`(CloudFormation、`ap-northeast-1`)で作ります。手順、期待する結果、削除の方法は、インフラの設計 [`infrastructure-specification.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u1-walking-skeleton/infrastructure-design/infrastructure-specification.md) にあります。
 2. 読み取り用のロール R2 を引き受けるプロファイル(例 `tag-refactor-readonly`)を手元の AWS の設定に足します。
 3. 検証用アカウントのテストを動かします。ルールファイルは `test/sandbox/u1-rules.yaml` です。
 

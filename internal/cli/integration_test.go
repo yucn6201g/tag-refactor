@@ -9,7 +9,7 @@ package cli_test
 //
 //	TAG_REFACTOR_IT_PROFILE=tag-refactor-readonly go test -mod=readonly -tags integration -run 'TestIntegration' ./internal/cli/...
 //
-// The fixtures come from test/sandbox/u1-fixtures.yaml in us-east-1; the
+// The fixtures come from test/sandbox/u1-fixtures.yaml in ap-northeast-1; the
 // expected results are those of infrastructure-specification.md. Other
 // resources in the account add to the counts, so the test checks that the
 // fixture results are included.
@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	integrationRegion   = "us-east-1"
+	integrationRegion   = "ap-northeast-1"
 	fixtureWaitAttempts = 10
 	fixtureWaitInterval = 30 * time.Second
 )
@@ -82,7 +82,7 @@ func TestIntegrationSandboxScanAndPlan(t *testing.T) {
 		requireNotContains(t, "stdout", plan.stdout, "Impact analysis is incomplete")
 		requireMatch(t, "stdout", plan.stdout, `(?m)^  ~ rename key\s+env -> Environment\s+`)
 		requireMatch(t, "stdout", plan.stdout, `(?m)^  ~ rename key\s+Env -> Environment\s+`)
-		requireMatch(t, "stdout", plan.stdout, `(?m)^  arn:aws:sqs:us-east-1:\d{12}:\S+\s+env="dev"\s+Environment="prod"$`)
+		requireMatch(t, "stdout", plan.stdout, `(?m)^  arn:aws:sqs:`+integrationRegion+`:\d{12}:\S+\s+env="dev"\s+Environment="prod"$`)
 		requireMatch(t, "stdout", plan.stdout, `(?m)^\s+Statement "AllowDevQueues"\s+Condition StringEquals aws:ResourceTag/env = "dev"$`)
 		// P1 is affected ("!"), not undecided ("?"): its policy line comes
 		// right before the AllowDevQueues statement.
