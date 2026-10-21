@@ -1,0 +1,29 @@
+{
+  "stage": "code-generation",
+  "unit": "u1-walking-skeleton",
+  "version": 1,
+  "writes": [
+    { "path": ".gitattributes" },
+    { "path": ".gitignore" },
+    { "path": ".github/dependabot.yml" },
+    { "path": ".github/workflows/ci.yml" },
+    { "path": ".github/workflows/scheduled.yml" },
+    { "path": "README.md" },
+    { "path": "go.mod" },
+    { "path": "go.sum" },
+    { "path": "cmd/tag-refactor/" },
+    { "path": "docs/iam/readonly-policy.json" },
+    { "path": "internal/awsaccess/" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/errkind/" },
+    { "path": "internal/impact/" },
+    { "path": "internal/inventory/" },
+    { "path": "internal/planner/" },
+    { "path": "internal/rules/" },
+    { "path": "internal/testutil/" },
+    { "path": "scripts/verify-u1.sh" },
+    { "path": "test/sandbox/u1-fixtures.yaml" },
+    { "path": "test/sandbox/u1-rules.yaml" }
+  ]
+}

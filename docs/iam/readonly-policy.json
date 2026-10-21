@@ -1,0 +1,23 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TagRefactorReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeRegions",
+        "tag:GetResources",
+        "iam:ListPolicies"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TagRefactorReadCustomerPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:GetPolicyVersion"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:policy/*"
+    }
+  ]
+}

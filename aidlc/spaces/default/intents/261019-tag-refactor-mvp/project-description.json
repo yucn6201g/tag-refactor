@@ -1,0 +1,1 @@
+"AWSのタグを後から統一するCLIツール tag-refactor を作りたい。まず読み取り専用の scan と plan(影響分析つき)を MVP とする"

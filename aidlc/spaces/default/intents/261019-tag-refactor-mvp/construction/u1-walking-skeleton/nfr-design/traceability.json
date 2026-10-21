@@ -1,0 +1,41 @@
+{
+  "stage": "nfr-design",
+  "unit": "u1-walking-skeleton",
+  "upstream_ids": [
+    "NFR1.1", "NFR1.2", "NFR1.3", "NFR1.4", "NFR1.5",
+    "NFR3.1", "NFR3.2",
+    "NFR5.1", "NFR5.2", "NFR5.3",
+    "NFR8.1", "NFR8.2", "NFR8.3", "NFR8.4", "NFR8.5", "NFR8.6", "NFR8.7", "NFR8.8",
+    "NFR9.1", "NFR9.2",
+    "NFR10.1", "NFR10.2",
+    "NFR11.1", "NFR11.2", "NFR11.3", "NFR11.4"
+  ],
+  "coverage": [
+    { "id": "NFR1.1", "status": "OK", "target": "performance-design.md 測り方: 終わりに時間と件数を標準エラーに出す" },
+    { "id": "NFR1.2", "status": "OK", "target": "performance-design.md 測り方: チェックポイントの記録に残す" },
+    { "id": "NFR1.3", "status": "OK", "target": "performance-design.md 読み方: 最大件数とページの印で最後まで読む" },
+    { "id": "NFR1.4", "status": "OK", "target": "scalability-design.md と performance-design.md: 小さな形でメモリに置き、1万件の性能テスト" },
+    { "id": "NFR1.5", "status": "OK", "target": "performance-design.md 計算の手間: 条件キーの表で引く、性能テスト" },
+    { "id": "NFR3.1", "status": "OK", "target": "security-design.md 1: 読み取りのインターフェースだけを渡し、HTTP の層の差し替えで操作を記録して確かめる(reliability-design.md テストの差し込み口)" },
+    { "id": "NFR3.2", "status": "OK", "target": "security-design.md 2: docs/iam/readonly-policy.json と、操作の一覧の一致テスト" },
+    { "id": "NFR5.1", "status": "OK", "target": "reliability-design.md: 試行ごとに30秒、操作全体に120秒の上限、時計の差し込み口で確かめる" },
+    { "id": "NFR5.2", "status": "OK", "target": "reliability-design.md: SDK の標準の再試行、使い切ったら Transient" },
+    { "id": "NFR5.3", "status": "OK", "target": "reliability-design.md 不完全を正しく知らせる" },
+    { "id": "NFR8.1", "status": "OK", "target": "security-design.md 3・5: エラーの種類と操作の名前だけを出す、Internal とパニックの受け止め、偽のキーのテスト" },
+    { "id": "NFR8.2", "status": "OK", "target": "security-design.md 3 と observability-design.md --debug: 4つの項目だけの1行" },
+    { "id": "NFR8.3", "status": "OK", "target": "security-design.md 3: 認証情報は SDK が標準の設定から読む" },
+    { "id": "NFR8.4", "status": "OK", "target": "security-design.md 4: 読んだバイト数で 64 KiB を判定、ライブラリの前に入れ子の深さを判定、アンカー・別名・統合キー・重複キーを構文木で拒む、知らないキーを誤りにする" },
+    { "id": "NFR8.5", "status": "OK", "target": "security-design.md 6: govulncheck をプルリクエストのたびと週1回に実行し、ブランチの保護で必須にする" },
+    { "id": "NFR8.6", "status": "OK", "target": "security-design.md 4 表示の前の置き換え: Cc・Cf・Zl・Zp と不正な UTF-8 を置き換え、直接の書き込みをテストで禁止" },
+    { "id": "NFR8.7", "status": "OK", "target": "security-design.md 6: SHA の固定、権限の最小化、版の固定、-mod=readonly と go mod verify、Dependabot、週1回の定期実行、ブランチの保護" },
+    { "id": "NFR8.8", "status": "OK", "target": "security-design.md 3・7: SDK のログを出さない、AWS と認証情報の解決以外へ通信しない" },
+    { "id": "NFR9.1", "status": "OK", "target": "reliability-design.md 3つの OS: 改行をそろえる、パスの扱い" },
+    { "id": "NFR9.2", "status": "OK", "target": "reliability-design.md 3つの OS: CGO_ENABLED=0 と空のディレクトリでの --help" },
+    { "id": "NFR10.1", "status": "OK", "target": "reliability-design.md テストの組み立て: CI でカバレッジ80%未満を失敗にする" },
+    { "id": "NFR10.2", "status": "OK", "target": "reliability-design.md テストの組み立て: 受け入れ条件のテストを先にコミットし、チェックポイントで確かめる" },
+    { "id": "NFR11.1", "status": "OK", "target": "observability-design.md 記号と色" },
+    { "id": "NFR11.2", "status": "OK", "target": "observability-design.md 出力先の分け方" },
+    { "id": "NFR11.3", "status": "OK", "target": "observability-design.md --debug の1行の形" },
+    { "id": "NFR11.4", "status": "OK", "target": "observability-design.md エラーの2行" }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u1-walking-skeleton",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10", "NFR11", "NFR12"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "NFR1.1, NFR1.2, NFR1.3, NFR1.4, NFR1.5" },
+    { "id": "NFR2", "status": "N/A", "target": "検出率100%の確認は、すべての参照元と条件キーを扱う U5 が受け持つ。U1 は IAM の管理ポリシーの最小版の照合だけで、その正しさは機能設計の規則のテストで確かめる" },
+    { "id": "NFR3", "status": "OK", "target": "NFR3.1, NFR3.2" },
+    { "id": "NFR4", "status": "N/A", "target": "U1 は書き換えも取り消しも行わない(U6・U7)" },
+    { "id": "NFR5", "status": "OK", "target": "NFR5.1, NFR5.2, NFR5.3" },
+    { "id": "NFR6", "status": "N/A", "target": "U1 は書き換えの記録を作らない(U6)" },
+    { "id": "NFR7", "status": "N/A", "target": "U1 は読み取りだけで、apply と rollback の同時実行がない(U6・U7)" },
+    { "id": "NFR8", "status": "OK", "target": "NFR8.1, NFR8.2, NFR8.3, NFR8.4, NFR8.5, NFR8.6, NFR8.7, NFR8.8" },
+    { "id": "NFR9", "status": "OK", "target": "NFR9.1, NFR9.2" },
+    { "id": "NFR10", "status": "OK", "target": "NFR10.1, NFR10.2" },
+    { "id": "NFR11", "status": "OK", "target": "NFR11.1, NFR11.2, NFR11.3, NFR11.4" },
+    { "id": "NFR12", "status": "N/A", "target": "配布の仕組みは作業単位に含めず、別の作業で行う(units-generation-questions.md Q3、Q4)" }
+  ]
+}

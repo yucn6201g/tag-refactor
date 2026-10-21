@@ -1,0 +1,6 @@
+# Rule file for the U1 checkpoint in the sandbox account
+# (infrastructure-specification.md, expected results).
+version: 1
+keys:
+  Environment:
+    aliases: [env, Env]
