@@ -83,7 +83,7 @@ keys:
 
 ## 必要な権限
 
-読み取りの権限だけで動きます。必要な操作は [`docs/iam/readonly-policy.json`](docs/iam/readonly-policy.json) にまとめています。
+読み取りの権限だけで動きます。必要な操作は [`docs/iam/readonly-policy.json`](docs/iam/readonly-policy.json) にまとめています。この例の `<account-id>` は、使うアカウントの ID(12桁)に置き換えてください。`iam:GetPolicyVersion` は、そのアカウントの、利用者が作った管理ポリシー(`arn:aws:iam::<account-id>:policy/*`)だけに絞っています。ほかの操作はリソースを絞れないため `*` です。
 
 | 操作 | 使う場面 |
 |---|---|

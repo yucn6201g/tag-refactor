@@ -155,8 +155,9 @@ Resources:
                   - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/*/AWSReservedSSO_${SsoPermissionSetName}_*
                   - Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_${SsoPermissionSetName}_*
 
-  # R2: read-only role with exactly docs/iam/readonly-policy.json (NFR3.2).
-  # A test keeps this inline policy equal to that file.
+  # R2: read-only role with exactly docs/iam/readonly-policy.json (NFR3.2),
+  # where the file's <account-id> placeholder is this account. A test keeps
+  # this inline policy equal to that file.
   R2:
     Type: AWS::IAM::Role
     Properties:
@@ -186,8 +187,13 @@ Resources:
                   - ec2:DescribeRegions
                   - tag:GetResources
                   - iam:ListPolicies
-                  - iam:GetPolicyVersion
                 Resource: "*"
+              - Sid: TagRefactorReadCustomerPolicies
+                Effect: Allow
+                Action:
+                  - iam:GetPolicyVersion
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/*
 
 Outputs:
   R1Arn:

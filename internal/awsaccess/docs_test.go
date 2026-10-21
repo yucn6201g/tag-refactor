@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -81,8 +82,39 @@ func TestReadOnlyPolicyExampleMatchesTheOperationsTable(t *testing.T) {
 	}
 }
 
+// accountPlaceholder is the part of the example policy that the user replaces
+// with the account ID.
+const accountPlaceholder = "<account-id>"
+
+// iam:GetPolicyVersion is limited to the customer managed policies of the
+// account (review R-06); the other actions cannot be limited to resources.
+func TestReadOnlyPolicyExampleLimitsPolicyVersionsToTheAccount(t *testing.T) {
+	doc, _ := readPolicyExample(t)
+	found := false
+	for _, st := range doc.Statement {
+		if !slices.Contains(st.Action, OpGetPolicyVersion) {
+			if st.Resource != "*" {
+				t.Errorf("statement for %v has resource %q, want *", st.Action, st.Resource)
+			}
+			continue
+		}
+		found = true
+		if len(st.Action) != 1 {
+			t.Errorf("%s must have its own statement, got %v", OpGetPolicyVersion, st.Action)
+		}
+		if st.Resource != "arn:aws:iam::"+accountPlaceholder+":policy/*" {
+			t.Errorf("%s resource = %q", OpGetPolicyVersion, st.Resource)
+		}
+	}
+	if !found {
+		t.Fatalf("no statement allows %s", OpGetPolicyVersion)
+	}
+}
+
 // The read-only role R2 of the sandbox template must carry exactly the
 // example policy, so the checkpoint tests what the documentation promises.
+// The template's Fn::Sub values are compared after resolving them, with the
+// account ID standing for the example's placeholder.
 func TestSandboxReadOnlyRoleMatchesThePolicyExample(t *testing.T) {
 	raw, err := os.ReadFile(sandboxPath)
 	if err != nil {
@@ -112,11 +144,45 @@ func TestSandboxReadOnlyRoleMatchesThePolicyExample(t *testing.T) {
 	}
 	inline := policies[0].(map[string]any)["PolicyDocument"]
 	_, example := readPolicyExample(t)
-	if !reflect.DeepEqual(normalize(inline), normalize(example)) {
+	if !reflect.DeepEqual(resolveSub(normalize(inline)), normalize(example)) {
 		t.Fatalf("R2 inline policy differs from docs/iam/readonly-policy.json:\n%#v\n%#v", inline, example)
 	}
 	if _, attached := template.Resources["P3"].Properties["Roles"]; attached {
 		t.Fatal("P3 must not be attached")
+	}
+}
+
+// resolveSub replaces each {"Fn::Sub": "..."} of a CloudFormation value with
+// its string, resolving ${AWS::Partition} to aws and ${AWS::AccountId} to the
+// placeholder of the example policy. Other variables stay as written, so they
+// make the comparison fail.
+func resolveSub(v any) any {
+	switch t := v.(type) {
+	case map[string]any:
+		if s, ok := t["Fn::Sub"].(string); ok && len(t) == 1 {
+			return strings.NewReplacer("${AWS::Partition}", "aws", "${AWS::AccountId}", accountPlaceholder).Replace(s)
+		}
+		out := map[string]any{}
+		for k, x := range t {
+			out[k] = resolveSub(x)
+		}
+		return out
+	case []any:
+		out := make([]any, len(t))
+		for i, x := range t {
+			out[i] = resolveSub(x)
+		}
+		return out
+	default:
+		return t
+	}
+}
+
+func TestResolveSub(t *testing.T) {
+	got := resolveSub(map[string]any{"a": []any{map[string]any{"Fn::Sub": "arn:${AWS::Partition}:iam::${AWS::AccountId}:x/${Other}"}}, "b": "c"})
+	want := map[string]any{"a": []any{"arn:aws:iam::<account-id>:x/${Other}"}, "b": "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveSub = %#v", got)
 	}
 }
 
