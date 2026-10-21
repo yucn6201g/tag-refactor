@@ -27,18 +27,38 @@ export GOTOOLCHAIN=local
 
 profile="${TAG_REFACTOR_IT_PROFILE:-tag-refactor-readonly}"
 
+# run_go_test runs `go test` and prints its output. Windows Application Control
+# sometimes blocks a freshly built test binary; only that case is retried (up
+# to 3 attempts). A real test failure is never retried.
+run_go_test() {
+  local attempt status out
+  for attempt in 1 2 3; do
+    status=0
+    out="$(go test "$@" 2>&1)" || status=$?
+    printf '%s\n' "$out"
+    if [ "$status" -eq 0 ]; then
+      LAST_OUTPUT="$out"
+      return 0
+    fi
+    if ! printf '%s\n' "$out" | grep -q 'An Application Control policy has blocked this file'; then
+      return "$status"
+    fi
+    echo "verify-u1: Application Control blocked a test binary; retrying ($attempt of 3)" >&2
+  done
+  return "$status"
+}
+
 echo "verify-u1: running the U1 test suite"
-go test -mod=readonly -count=1 ./...
+run_go_test -mod=readonly -count=1 ./...
 
 echo "verify-u1: running scan and plan against the sandbox account (profile $profile)"
-status=0
-out="$(TAG_REFACTOR_IT_PROFILE="$profile" go test -mod=readonly -count=1 -tags integration -run 'TestIntegration' -v ./internal/cli/... 2>&1)" || status=$?
-printf '%s\n' "$out"
-if [ "$status" -ne 0 ]; then
+LAST_OUTPUT=""
+export TAG_REFACTOR_IT_PROFILE="$profile"
+if ! run_go_test -mod=readonly -count=1 -tags integration -run 'TestIntegration' -v ./internal/cli/...; then
   echo "verify-u1: the sandbox test failed" >&2
-  exit "$status"
+  exit 1
 fi
-if ! printf '%s\n' "$out" | grep -q -- '--- PASS: TestIntegrationSandboxScanAndPlan'; then
+if ! printf '%s\n' "$LAST_OUTPUT" | grep -q -- '--- PASS: TestIntegrationSandboxScanAndPlan'; then
   echo "verify-u1: the sandbox test did not run (skipped or not found)" >&2
   exit 1
 fi
