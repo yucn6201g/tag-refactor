@@ -47,6 +47,7 @@ Summary: 412 resources scanned in 1 region (us-east-1) · 2 variant groups
 Account 123456789012 · region us-east-1
 scan: us-east-1 started
 scan: us-east-1 done (412 resources)
+Checked: only the resources that the tagging API returns in us-east-1
 Exit code: 2 (issues found)
 ```
 
@@ -89,10 +90,10 @@ Conflicts (not changed; values differ): 2 resources
 
 Impact (references that use the tags being changed)
   ! IAM policy  arn:aws:iam::123456789012:policy/DevAccess
-      Statement "AllowDevEC2"  Condition aws:ResourceTag/env = "dev"
+      Statement "AllowDevEC2"  Condition StringEquals aws:ResourceTag/env = "dev"
       affected by: rename key env -> Environment
   ? IAM policy  arn:aws:iam::123456789012:policy/TeamAccess
-      Statement "#0"  Condition aws:ResourceTag/${aws:PrincipalTag/team}
+      Statement "#0"  Condition StringEquals aws:ResourceTag/${aws:PrincipalTag/team}
       cannot decide (policy variable)
 
 Summary: 208 to change · 2 conflicts · 1 affected · 1 undecided

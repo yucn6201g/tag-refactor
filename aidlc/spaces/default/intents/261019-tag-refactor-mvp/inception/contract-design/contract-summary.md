@@ -375,9 +375,10 @@ TagReader:                       # 読み取り
   ListTaggedResources(region) -> []Resource
   FindUntaggedResources(region) -> []Resource, discoveryMethod, truncated(bool) | error(Unavailable with reason)
   GetTags(arn) -> map[key]value
-PolicyReader:                    # 読み取り
-  ListIamPolicies() -> []PolicySource
-  GetResourcePolicies(kind) -> []PolicySource
+PolicyReader:                    # 読み取り(U1 で改訂: 一覧と1件の読み取りに分ける。1件だけ読めなくても残りを続けるため。BR5.5)
+  ListAttachedCustomerPolicies() -> []IAMPolicyRef      # U1 で実装
+  GetPolicyDocument(IAMPolicyRef) -> policyDocument      # U1 で実装
+  GetResourcePolicies(kind) -> []PolicySource            # U5 で足す
 TagWriter:                       # 書き込み(U6・U7 だけに渡す)
   TagResources(region, arns, tags) -> perResourceResult
   UntagResources(region, arns, keys) -> perResourceResult
@@ -428,7 +429,7 @@ U4(Planner)がインターフェースと入出力の型を定義し、U5 が実
 ```yaml
 # go-interface contract (in-process)
 ImpactAnalyzer:
-  Analyze(ctx, PolicyReader, []TagChangeInput) -> ImpactResult
+  Analyze(ctx, []TagChangeInput) -> ImpactResult   # U1 で改訂: PolicyReader は引数ではなく実装が持つ(impact.New(reader))。planner が awsaccess に依存しないため
 TagChangeInput:
   fields: [changeId, resourceArn, kind(renameKey|changeValue|addRequired|removeKey), fromKey, toKey, fromValue, toValue]
 ImpactResult:

@@ -24,7 +24,7 @@
     { "id": "NFR8.1", "status": "OK", "target": "security-design.md 3・5: エラーの種類と操作の名前だけを出す、Internal とパニックの受け止め、偽のキーのテスト" },
     { "id": "NFR8.2", "status": "OK", "target": "security-design.md 3 と observability-design.md --debug: 4つの項目だけの1行" },
     { "id": "NFR8.3", "status": "OK", "target": "security-design.md 3: 認証情報は SDK が標準の設定から読む" },
-    { "id": "NFR8.4", "status": "OK", "target": "security-design.md 4: 読んだバイト数で 1 MiB を判定、アンカー・別名・統合キー・重複キーを構文木で拒む、知らないキーを誤りにする" },
+    { "id": "NFR8.4", "status": "OK", "target": "security-design.md 4: 読んだバイト数で 64 KiB を判定、ライブラリの前に入れ子の深さを判定、アンカー・別名・統合キー・重複キーを構文木で拒む、知らないキーを誤りにする" },
     { "id": "NFR8.5", "status": "OK", "target": "security-design.md 6: govulncheck をプルリクエストのたびと週1回に実行し、ブランチの保護で必須にする" },
     { "id": "NFR8.6", "status": "OK", "target": "security-design.md 4 表示の前の置き換え: Cc・Cf・Zl・Zp と不正な UTF-8 を置き換え、直接の書き込みをテストで禁止" },
     { "id": "NFR8.7", "status": "OK", "target": "security-design.md 6: SHA の固定、権限の最小化、版の固定、-mod=readonly と go mod verify、Dependabot、週1回の定期実行、ブランチの保護" },

@@ -58,11 +58,12 @@
 
 
 
-- **Active Unit**: u1-walking-skeleton
 
-- **Unit Stage**: code-generation
 
-- **Unit State**: in-progress
+
+
+
+- **Construction Verification Command**: "C:\Program Files\Git\bin\bash.exe" scripts/verify-u1.sh
 
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
@@ -125,7 +126,9 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-10-20T08:11:12Z
+- **Last Updated**: 2026-10-21T13:44:01Z
+
+- **Construction Autonomy Mode**: autonomous
 
 ## Session Resume Point
 - **Last Completed Stage**: delivery-planning

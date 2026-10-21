@@ -10,7 +10,7 @@ rules:
     category: policy
     applies_to: AccountContext.region
     trigger: scan と plan の開始時
-    logic: IF --region がある THEN それを使う ELSE IF 標準の設定にリージョンがある THEN それを使う ELSE 誤りとする。IF 指定したリージョンがアカウントの有効なリージョンにない THEN 誤りとする
+    logic: IF --region がある THEN それを使う ELSE IF 標準の設定にリージョンがある THEN それを使う ELSE 誤りとする。IF 指定したリージョンがアカウントの有効なリージョンにない THEN 誤りとする。指定したリージョンの STS が認証情報を拒否したときは、us-east-1 で有効なリージョンを確かめ直し、一覧になければ「そのリージョンは使えない」とする(有効にしていないオプトインのリージョンを、認証情報の誤りと取り違えないため。コードのレビュー R-02)
     violation: InvalidInput。「リージョンが決まらない」または「そのリージョンは使えない」ことと、--region か AWS_REGION で指定する方法を示し、終了コード 1
     source: [Q1, FR7.6]
   - id: BR1.7
@@ -110,7 +110,7 @@ rules:
     category: validation
     applies_to: RuleSet
     trigger: plan の開始時(ルールファイルの読み込み)
-    logic: IF ファイルがない THEN NotFound。IF 読めない THEN StorageFailed。IF 空、または YAML として壊れている THEN InvalidInput(行と直し方)。IF version が 1 でない THEN UnsupportedVersion。IF 知らないキー、または型の誤り THEN InvalidInput(行、キー、直し方)。IF values、required、remove がある THEN 警告「この版では使わない」
+    logic: IF ファイルがない THEN NotFound。IF 読めない THEN StorageFailed。IF 空、または YAML として壊れている THEN InvalidInput(行と直し方)。IF version が 1 でない THEN UnsupportedVersion。IF 知らないキー、または型の誤り THEN InvalidInput(行、キー、直し方)。IF values、required、remove がある THEN 警告「この版では使わない」。IF keys がない、または空 THEN 警告「no key rules」(コードのレビュー R-07)
     violation: 誤りは標準エラーにファイル名、行番号、キー、直し方を出し、終了コード 1
     source: [C1, C12, FR2.5 の最小版, 契約の決まり(C1 では知らないキーを誤りにする), review-01 R-07]
   - id: BR3.2
@@ -220,7 +220,7 @@ rules:
     category: policy
     applies_to: すべての出力
     trigger: 出力のたび
-    logic: 標準出力には、結果の表と「Summary」の行だけを出す。アカウントとリージョンの行、進み具合、警告、エラー、「Exit code」の行は標準エラーに出す
+    logic: 標準出力には、結果の表と「Summary」の行だけを出す。アカウントとリージョンの行、進み具合、警告、エラー、調べた範囲の「Checked:」の行(コードのレビュー R-04)、「Exit code」の行は標準エラーに出す
     violation: 起きてはならない。標準出力をファイルに保存して確かめる
     source: [FR7.5, AC3.1.8, C5, review-01 R-04]
   - id: BR6.2

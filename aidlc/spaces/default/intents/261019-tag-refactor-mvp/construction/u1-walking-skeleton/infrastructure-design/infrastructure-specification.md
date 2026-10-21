@@ -13,7 +13,7 @@ tag-refactor は利用者の端末で動く CLI で、サーバーやクラウ�
 | 保存先 | なし(U1 はファイルを書かない。ルールファイルを読むだけ) | 機能設計 |
 | 環境 | (1) CI(GitHub Actions。AWS を呼ばない)、(2) 手元の開発環境、(3) 個人の検証用 AWS アカウント(手元からだけ使う) | チームの進め方 §Testing Posture |
 | IaC | 検証用アカウントの確認用のリソースだけを CloudFormation のテンプレートで定める(`test/sandbox/u1-fixtures.yaml`)。人がデプロイし、検証の後に削除する | Q1 |
-| リージョン | 確認用のスタックは `us-east-1` に置き、U1 の検証も `--region us-east-1` で行う | 1つに固定して、手順と期待結果を一意にするため |
+| リージョン | 確認用のスタックは `ap-northeast-1` に置き、U1 の検証も `--region ap-northeast-1` で行う(U1 の検証の前に、人の指示で `us-east-1` から変えた) | 1つに固定して、手順と期待結果を一意にするため。人の作業の地域に合わせた |
 | 大きさと費用 | 費用のかからないリソースだけ(IAM のロールと管理ポリシー、空の S3 バケット、SQS のキュー)。AWS Config と Resource Explorer は U1 では使わない(U2 の E3) | Q1、少額の費用の範囲 |
 | 確認用のバイナリ | `main` に取り込むたびに、3つの OS のバイナリを GitHub Actions の成果物として7日間だけ残す。公開しない | Q3、チームの進め方 §Deployment |
 
@@ -25,7 +25,7 @@ tag-refactor は利用者の端末で動く CLI で、サーバーやクラウ�
 | GitHub のブランチの保護 | マージの関門 | `cicd-pipeline.md` の「関門」のとおり | 人が設定し、U1 のチェックポイントで確かめる |
 | Dependabot | 依存の更新 | Go の依存(gomod、`tool` で管理する道具を含む)と GitHub Actions を週1回 | NFR8.7 |
 | IAM Identity Center(SSO) | 手元から検証用アカウントへの接続 | 人の SSO のプロファイル(例 `tag-refactor-sandbox`)。一時的な認証情報だけを使う | Q2。長く使えるアクセスキーは作らない |
-| CloudFormation(検証用アカウント) | 確認用のリソースのスタック | スタック名 `tag-refactor-u1-fixtures`、`us-east-1`。スタックに目印のタグ `project=tag-refactor-fixture` を付ける | 下の表 |
+| CloudFormation(検証用アカウント) | 確認用のリソースのスタック | スタック名 `tag-refactor-u1-fixtures`、`ap-northeast-1`。スタックに目印のタグ `project=tag-refactor-fixture` を付ける | 下の表 |
 
 ### 確認用のリソース(`test/sandbox/u1-fixtures.yaml`)
 
@@ -51,15 +51,15 @@ tag-refactor は利用者の端末で動く CLI で、サーバーやクラウ�
 
 1. `aws sts get-caller-identity --profile tag-refactor-sandbox` で、検証用アカウントの ID であることを確かめる(違えば中止)。
 2. `cfn-lint test/sandbox/u1-fixtures.yaml` で検査する。
-3. デプロイ: `aws cloudformation deploy --profile tag-refactor-sandbox --region us-east-1 --stack-name tag-refactor-u1-fixtures --template-file test/sandbox/u1-fixtures.yaml --capabilities CAPABILITY_IAM --parameter-overrides SsoPermissionSetName=<権限セット名> --tags project=tag-refactor-fixture`
+3. デプロイ: `aws cloudformation deploy --profile tag-refactor-sandbox --region ap-northeast-1 --stack-name tag-refactor-u1-fixtures --template-file test/sandbox/u1-fixtures.yaml --capabilities CAPABILITY_IAM --parameter-overrides SsoPermissionSetName=<権限セット名> --tags project=tag-refactor-fixture`
 4. タグが取得の API に出るまで、最大5分待つ(検証のスクリプトは、期待したリソースが見えるまで30秒ごとに最大10回確かめる)。
-5. 検証(U1 のチェックポイント)が終わったら削除する: `aws cloudformation delete-stack --profile tag-refactor-sandbox --region us-east-1 --stack-name tag-refactor-u1-fixtures`。S3 のバケットは空のままなので、そのまま消える。
+5. 検証(U1 のチェックポイント)が終わったら削除する: `aws cloudformation delete-stack --profile tag-refactor-sandbox --region ap-northeast-1 --stack-name tag-refactor-u1-fixtures`。S3 のバケットは空のままなので、そのまま消える。
 6. 削除の後、目印のタグ `project=tag-refactor-fixture` の付いたリソースが残っていないことを確かめる。
 
 - **スタックの寿命:** U1 のスタックは、検証のたびに作って消す。後の作業単位(U2、U5〜U7)は、自分の確認用のスタックを別の名前で作り、U1 のスタックを使い回さない。
 - **R2 を使うプロファイル:** 手元の AWS の設定に、SSO のプロファイルを元にして R2 を引き受けるプロファイルを足す(例: `[profile tag-refactor-readonly]` に `role_arn = <R2 の ARN>` と `source_profile = tag-refactor-sandbox`)。検証用アカウントのテストは、環境変数 `TAG_REFACTOR_IT_PROFILE=tag-refactor-readonly` で動かす。
 
-### 期待結果(`--region us-east-1`、ルールファイル `test/sandbox/u1-rules.yaml`: `Environment` の別名 `env`、`Env`)
+### 期待結果(`--region ap-northeast-1`、ルールファイル `test/sandbox/u1-rules.yaml`: `Environment` の別名 `env`、`Env`)
 
 | コマンド | 期待する結果 |
 |---|---|
