@@ -2,10 +2,11 @@
 // only the key aliases are used; the other items of the schema are checked
 // for shape and reported as not used.
 //
-// The file is read defensively: only regular files, at most 1 MiB, and the
-// YAML syntax tree is checked before it is mapped, so anchors, aliases, merge
-// keys, tags and duplicate keys are rejected by the tool itself rather than by
-// library settings (NFR8.4).
+// The file is read defensively: only regular files, at most 64 KiB, its
+// nesting is bounded before the YAML parser reads it, and the YAML syntax tree
+// is checked before it is mapped, so anchors, aliases, merge keys, tags and
+// duplicate keys are rejected by the tool itself rather than by library
+// settings (NFR8.4).
 package rules
 
 import (
@@ -23,8 +24,10 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
-// MaxFileSize is the largest rule file that is read (1 MiB).
-const MaxFileSize = 1 << 20
+// MaxFileSize is the largest rule file that is read (64 KiB). A rule file
+// lists tag keys and needs far less; a small limit also bounds the work of the
+// YAML parser.
+const MaxFileSize = 64 << 10
 
 // SupportedVersion is the rule file version this tool reads.
 const SupportedVersion = 1
@@ -91,7 +94,7 @@ func readLimited(path string) ([]byte, error) {
 	}
 	if len(data) > MaxFileSize {
 		return nil, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRuleFile, Subject: path,
-			Detail: "the rule file is larger than 1 MiB", Hint: "a rule file only lists tag keys; reduce it below 1 MiB"}
+			Detail: "the rule file is larger than 64 KiB", Hint: "a rule file only lists tag keys; reduce it below 64 KiB"}
 	}
 	return data, nil
 }
@@ -106,6 +109,11 @@ func Parse(path string, data []byte) (*RuleSet, error) {
 	text := normalizeNewlines(string(data))
 	text = strings.TrimPrefix(text, utf8BOM)
 	l := &loader{path: path, rs: &RuleSet{SourcePath: path, KeyRules: []KeyRule{}, Warnings: []Warning{}}}
+	// The parser's cost grows with the square of the nesting depth, so deep
+	// nesting is rejected before it runs.
+	if err := l.checkNesting(text); err != nil {
+		return nil, err
+	}
 	file, err := parser.ParseBytes([]byte(text), 0, parser.AllowDuplicateMapKey())
 	if err != nil {
 		return nil, l.syntaxError(err)

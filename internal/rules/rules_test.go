@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
@@ -57,23 +58,26 @@ func TestLoadReadsAliasesFromCRLFFileWithBOM(t *testing.T) {
 	}
 }
 
-func TestLoadAcceptsOnlyReadableRegularFilesUpTo1MiB(t *testing.T) {
+func TestLoadAcceptsOnlyReadableRegularFilesUpTo64KiB(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
 	_ = requireRuleError(t, err, errkind.NotFound, 0, "")
 
 	_, err = Load(t.TempDir())
 	_ = requireRuleError(t, err, errkind.InvalidInput, 0, "")
 
+	if MaxFileSize != 64*1024 {
+		t.Fatalf("MaxFileSize = %d, want 64 KiB", MaxFileSize)
+	}
 	big := "version: 1\n" + strings.Repeat("#", MaxFileSize)
 	_, err = Load(writeFile(t, big))
 	e := requireRuleError(t, err, errkind.InvalidInput, 0, "")
-	if !strings.Contains(e.Detail, "1 MiB") {
-		t.Fatalf("detail = %q", e.Detail)
+	if !strings.Contains(e.Detail, "64 KiB") || !strings.Contains(e.Hint, "64 KiB") {
+		t.Fatalf("detail = %q, hint = %q", e.Detail, e.Hint)
 	}
 
 	exact := "version: 1\n#" + strings.Repeat("x", MaxFileSize-len("version: 1\n#"))
 	if _, err := Load(writeFile(t, exact)); err != nil {
-		t.Fatalf("a file of exactly 1 MiB must be read: %v", err)
+		t.Fatalf("a file of exactly 64 KiB must be read: %v", err)
 	}
 	if e := storageError("p", os.ErrPermission).(*errkind.Error); e.Kind != errkind.StorageFailed || e.Subject != "p" {
 		t.Fatalf("storage error = %+v", e)
@@ -107,6 +111,95 @@ func TestParseRejectsUnsafeYAMLFeatures(t *testing.T) {
 	bomb := "version: 1\na: &a [x, x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n"
 	_, err := Parse("bomb.yaml", []byte(bomb))
 	_ = requireRuleError(t, err, errkind.InvalidInput, 2, "")
+}
+
+// Deep nesting makes the YAML parser use time and memory that grow with the
+// square of the depth (200k "[" ran out of memory), so it is rejected before
+// the parser runs, quickly and with the line and a fix.
+func TestDeepNestingIsRejectedBeforeTheParserRuns(t *testing.T) {
+	var indented strings.Builder
+	indented.WriteString("version: 1\n")
+	for i := 0; i < 40; i++ {
+		indented.WriteString(strings.Repeat(" ", 2*i) + "k:\n")
+	}
+	cases := []struct {
+		name    string
+		content string
+		line    int
+		detail  string
+	}{
+		{"200k flow sequences", "version: 1\nremove: " + strings.Repeat("[", 200_000), 2, tooDeep},
+		{"flow mappings", "version: 1\nremove: " + strings.Repeat("{a: ", 200_000), 2, tooDeep},
+		{"after a document marker", "--- " + strings.Repeat("[", 200_000), 1, tooDeep},
+		{"after anchors", "version: 1\nremove: " + strings.Repeat("[&a ']', ", 100), 2, tooDeep},
+		{"compact sequences", "version: 1\nremove:\n" + strings.Repeat("- ", 100_000) + "x\n", 3, tooDeep},
+		{"indentation", indented.String(), 34, tooDeep},
+		{"brackets in one quoted value", "version: 1\nremove: ['" + strings.Repeat("[", 2000) + "']\n", 2, tooManyBrackets},
+		{"brackets in a quoted value over lines", "version: 1\nremove: [\"a\n" + strings.Repeat("[[[[[[[[[[\n", 200) + "\"]\n", 105, tooManyBrackets},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			_, err := Parse("r.yaml", []byte(tc.content))
+			elapsed := time.Since(start)
+
+			e := requireRuleError(t, err, errkind.InvalidInput, tc.line, "")
+			if e.Detail != tc.detail {
+				t.Fatalf("detail = %q, want %q", e.Detail, tc.detail)
+			}
+			if elapsed > 2*time.Second {
+				t.Fatalf("took %v; deep nesting must be rejected quickly", elapsed)
+			}
+		})
+	}
+
+	// The same through Load, with a file of brackets as large as allowed.
+	start := time.Now()
+	_, err := Load(writeFile(t, "version: 1\nremove: "+strings.Repeat("[", MaxFileSize-len("version: 1\nremove: "))))
+	e := requireRuleError(t, err, errkind.InvalidInput, 2, "")
+	if e.Detail != tooDeep || time.Since(start) > 2*time.Second {
+		t.Fatalf("detail = %q after %v", e.Detail, time.Since(start))
+	}
+}
+
+// Brackets in quoted values, comments, block scalars and plain text are not
+// nesting, and nesting within the limit reaches the parser.
+func TestNestingCheckIgnoresQuotesCommentsAndBlockScalars(t *testing.T) {
+	forty := strings.Repeat("[", 40)
+	content := "version: 1 # " + forty + "\n" +
+		"# " + forty + "\n" +
+		"keys:\n" +
+		"  Environment:\n" +
+		"    aliases: [\"" + forty + "\\\"\", '" + strings.Repeat("{", 40) + " it''s', env]  # " + forty + "\n" +
+		"required:\n" +
+		"  CostCenter:\n" +
+		"    when: []\n" +
+		"remove:\n" +
+		"  - a[b\n" +
+		"  - \"c\"\n"
+	rs, err := Parse("r.yaml", []byte(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rs.KeyRules[0].Aliases, ","); got != forty+`",`+strings.Repeat("{", 40)+" it's,env" {
+		t.Fatalf("aliases = %q", got)
+	}
+
+	// The content of a block scalar is text: the parser reads it, and the
+	// schema (which wants plain or quoted text) rejects it.
+	blockScalar := "version: 1\nrequired:\n  CostCenter:\n    default: |\n      " + forty + "\n      '\n    when: []\n"
+	_, err = Parse("r.yaml", []byte(blockScalar))
+	e, ok := errkind.As(err)
+	if !ok || e.Line != 4 || e.Detail != `"default" must be a text value` {
+		t.Fatalf("block scalar content must reach the parser: %v", err)
+	}
+
+	// 20 levels pass the check; the schema then rejects the nested lists.
+	_, err = Parse("r.yaml", []byte("version: 1\nremove: "+strings.Repeat("[", 20)+strings.Repeat("]", 20)+"\n"))
+	e, ok = errkind.As(err)
+	if !ok || e.Kind != errkind.InvalidInput || e.Detail == tooDeep || !strings.Contains(e.Detail, `"remove"`) {
+		t.Fatalf("20 levels must reach the parser and the schema check: %v", err)
+	}
 }
 
 func TestParseVersionAndStructureErrors(t *testing.T) {
