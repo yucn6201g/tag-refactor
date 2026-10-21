@@ -84,6 +84,10 @@ func TestIntegrationSandboxScanAndPlan(t *testing.T) {
 		requireMatch(t, "stdout", plan.stdout, `(?m)^  ~ rename key\s+Env -> Environment\s+`)
 		requireMatch(t, "stdout", plan.stdout, `(?m)^  arn:aws:sqs:us-east-1:\d{12}:\S+\s+env="dev"\s+Environment="prod"$`)
 		requireMatch(t, "stdout", plan.stdout, `(?m)^\s+Statement "AllowDevQueues"\s+Condition StringEquals aws:ResourceTag/env = "dev"$`)
+		// P1 is affected ("!"), not undecided ("?"): its policy line comes
+		// right before the AllowDevQueues statement.
+		requireMatch(t, "stdout", plan.stdout,
+			`(?m)^  ! IAM policy  arn:aws:iam::\d{12}:policy/\S+\n\s+Statement "AllowDevQueues"\s+Condition StringEquals aws:ResourceTag/env = "dev"\n\s+affected by: .*rename key env -> Environment`)
 		requireMatch(t, "stdout", plan.stdout, `(?m)^\s+Statement "ServiceSpecificKey"\s+Condition StringEquals ec2:ResourceTag/env = "dev"$`)
 		if !strings.Contains(plan.stdout, "PolicyVariableKey") {
 			t.Log("P2 has no policy-variable statement (IAM may have rejected it); BR5.4 is covered by the unit tests")
