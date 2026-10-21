@@ -60,6 +60,7 @@ func (a *app) runScan(ctx context.Context, profile, region string) error {
 	}
 	groups := inventory.GroupKeys(snap.Resources)
 	a.p.ScanResult(snap, groups)
+	a.p.ScanScope(snap.ScannedRegions)
 	a.result = &outcome{command: "scan", needsReview: len(inventory.Variants(groups)) > 0, resources: len(snap.Resources)}
 	return nil
 }
@@ -96,6 +97,7 @@ func (a *app) runPlan(ctx context.Context, rulesPath, profile, region string) er
 		plan.AttachImpact(result)
 	}
 	a.p.PlanResult(plan)
+	a.p.PlanScope(snap.ScannedRegions, len(plan.Changes) > 0)
 	a.result = &outcome{
 		command:     "plan",
 		incomplete:  !plan.ImpactAnalysisComplete,

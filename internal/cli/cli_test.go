@@ -224,8 +224,32 @@ func TestPlanWithoutChangesReadsNoPolicies(t *testing.T) {
 		t.Fatalf("stdout = %q", r.stdout)
 	}
 	requireContains(t, "stderr", r.stderr, "Exit code: 0 (no changes needed)")
+	requireContains(t, "stderr", r.stderr, "Checked: only the resources that the tagging API returns in us-east-1 (no IAM policies were read: nothing to change)\n")
 	if w.fake.Count("iam:ListPolicies") != 0 {
 		t.Fatal("policies were read although nothing changes (BR4.4)")
+	}
+}
+
+// Review R-04: the scope of the check is stated on standard error, and
+// standard output keeps only the results (BR6.1).
+func TestScanAndPlanStateWhatTheyChecked(t *testing.T) {
+	w := newWorld(t)
+	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"env": "dev"}})
+	w.givenAttachedPolicies(map[string]string{})
+	rules := w.givenRuleFile(aliasRules)
+
+	scan := w.run("scan", "--region", "us-east-1")
+	plan := w.run("plan", "--rules", rules, "--region", "us-east-1")
+
+	scan.requireExit(t, 0)
+	requireContains(t, "scan stderr", scan.stderr, "\nChecked: only the resources that the tagging API returns in us-east-1\nDone in ")
+	requireNotContains(t, "scan stdout", scan.stdout, "Checked")
+	plan.requireExit(t, 2)
+	requireContains(t, "plan stderr", plan.stderr, "\nChecked: only the resources that the tagging API returns in us-east-1, "+
+		"and customer managed IAM policies attached to a user, role or group\nDone in ")
+	requireNotContains(t, "plan stdout", plan.stdout, "Checked")
+	if !strings.HasSuffix(plan.stdout, "Summary: 1 to change · 0 conflicts · 0 affected · 0 undecided\n") {
+		t.Fatalf("plan stdout = %q", plan.stdout)
 	}
 }
 

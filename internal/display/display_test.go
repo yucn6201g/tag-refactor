@@ -182,6 +182,27 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 	}
 }
 
+// The scope of what was checked goes to standard error only, so standard
+// output keeps just the results (BR6.1).
+func TestScopeLinesGoToStandardError(t *testing.T) {
+	p, out, errOut := newPrinter()
+
+	p.ScanScope([]string{"us-east-1"})
+	p.PlanScope([]string{"us-east-1"}, true)
+	p.PlanScope([]string{"eu-west-1\x1b"}, false)
+
+	want := "Checked: only the resources that the tagging API returns in us-east-1\n" +
+		"Checked: only the resources that the tagging API returns in us-east-1, " +
+		"and customer managed IAM policies attached to a user, role or group\n" +
+		"Checked: only the resources that the tagging API returns in eu-west-1\\u{1B} (no IAM policies were read: nothing to change)\n"
+	if errOut.String() != want {
+		t.Fatalf("stderr:\n%s\nwant:\n%s", errOut.String(), want)
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stdout: %q", out.String())
+	}
+}
+
 func TestFormatElapsed(t *testing.T) {
 	for d, want := range map[time.Duration]string{
 		0: "00:00", 400 * time.Millisecond: "00:00", 12 * time.Second: "00:12", 61 * time.Second: "01:01",

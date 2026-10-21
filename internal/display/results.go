@@ -30,6 +30,28 @@ func (p *Printer) ScanResult(snap *inventory.Snapshot, groups []inventory.KeyVar
 		strings.Join(snap.ScannedRegions, ", "), plural(len(variants), "variant group"))
 }
 
+// ScanScope prints to standard error what scan read, so that "No issues
+// found" is read within that scope: only the resources the tagging API
+// returns in the region.
+func (p *Printer) ScanScope(regions []string) {
+	p.line(p.errOut, "Checked: only the resources that the tagging API returns in %s", strings.Join(regions, ", "))
+}
+
+// PlanScope prints to standard error what plan read, so that "0 affected" is
+// read within that scope: the resources the tagging API returns and, when
+// there were changes to analyze, the customer managed IAM policies attached
+// to a user, role or group (not inline, resource-based or organization
+// policies).
+func (p *Printer) PlanScope(regions []string, policiesRead bool) {
+	if policiesRead {
+		p.line(p.errOut, "Checked: only the resources that the tagging API returns in %s, "+
+			"and customer managed IAM policies attached to a user, role or group", strings.Join(regions, ", "))
+		return
+	}
+	p.line(p.errOut, "Checked: only the resources that the tagging API returns in %s (no IAM policies were read: nothing to change)",
+		strings.Join(regions, ", "))
+}
+
 func pluralWord(n int, word string) string {
 	if n == 1 {
 		return word
