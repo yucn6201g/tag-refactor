@@ -1,0 +1,140 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u2-scan",
+  "upstream_ids": [
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR5.4",
+    "NFR5.5",
+    "NFR5.6",
+    "NFR5.7",
+    "NFR5.8",
+    "NFR8.9",
+    "NFR8.10",
+    "NFR8.11",
+    "NFR9.3",
+    "NFR10.3",
+    "NFR11.5",
+    "NFR11.6",
+    "NFR1.4",
+    "NFR1.5"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "cicd-pipeline.md test ジョブ(大きな偽の AWS の呼び出し回数のテスト)"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "cicd-pipeline.md test ジョブ(3つの OS での処理時間のテスト)"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "cicd-pipeline.md 検証のスクリプトの手順6(L95 と見積もりの表示)、infrastructure-specification.md 期待結果の L95"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "N/A",
+      "target": "コードの定数で決まり、インフラを要しない"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "infrastructure-specification.md の索引 IX、ビュー VW・DV、期待結果の複数ページの確認"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "infrastructure-specification.md の R2 の変更と、操作の表・例のポリシー・R2 の照合のテスト"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "cicd-pipeline.md test ジョブ(偽の AWS の操作の照合)"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "infrastructure-specification.md の U2 のスタック、タグのないキュー、Config の3つの操作の直接の呼び出し"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "N/A",
+      "target": "SDK の設定で決まり、インフラを要しない(テストは test ジョブ)"
+    },
+    {
+      "id": "NFR5.5",
+      "status": "N/A",
+      "target": "SDK の設定で決まり、インフラを要しない(テストは test ジョブ)"
+    },
+    {
+      "id": "NFR5.6",
+      "status": "OK",
+      "target": "infrastructure-specification.md 期待結果の全リージョンの scan(他のリージョンが unavailable)"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "cicd-pipeline.md race ジョブ(Linux、CGO_ENABLED=1)と ci-gate への追加"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "N/A",
+      "target": "コードの取り消しの仕組みで決まり、インフラを要しない(テストは test ジョブ)"
+    },
+    {
+      "id": "NFR8.9",
+      "status": "N/A",
+      "target": "表示の置き換えのコードで決まり、インフラを要しない"
+    },
+    {
+      "id": "NFR8.10",
+      "status": "N/A",
+      "target": "エラーの変換のコードで決まり、インフラを要しない"
+    },
+    {
+      "id": "NFR8.11",
+      "status": "N/A",
+      "target": "コードの取り消しの仕組みで決まり、インフラを要しない"
+    },
+    {
+      "id": "NFR9.3",
+      "status": "OK",
+      "target": "infrastructure-specification.md 期待結果の進み具合の表示(人が Windows Terminal と Git Bash で確かめる)"
+    },
+    {
+      "id": "NFR10.3",
+      "status": "OK",
+      "target": "cicd-pipeline.md の2分以内の方針と coverage ジョブ"
+    },
+    {
+      "id": "NFR11.5",
+      "status": "OK",
+      "target": "infrastructure-specification.md 期待結果の進み具合の表示"
+    },
+    {
+      "id": "NFR11.6",
+      "status": "N/A",
+      "target": "--debug の出力のコードで決まり、インフラを要しない"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "N/A",
+      "target": "U1 の計算の手間の方針(コードで決まり、インフラを要しない)"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "N/A",
+      "target": "U1 の計算の手間の方針(コードで決まり、インフラを要しない)"
+    }
+  ]
+}

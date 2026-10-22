@@ -65,6 +65,22 @@
 
 - **Construction Verification Command**: "C:\Program Files\Git\bin\bash.exe" scripts/verify-u1.sh
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
 
@@ -126,7 +142,7 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-10-21T13:44:01Z
+- **Last Updated**: 2026-10-22T12:47:43Z
 
 - **Construction Autonomy Mode**: autonomous
 
