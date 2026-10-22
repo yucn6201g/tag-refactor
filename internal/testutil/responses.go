@@ -26,10 +26,12 @@ func xmlText(s string) string {
 }
 
 // HandleDefaults registers the answers every connected command needs: the
-// caller identity (account TestAccount) and the enabled regions.
+// caller identity (account TestAccount), the enabled regions, and an account
+// without AWS Config recording or Resource Explorer (HandleNoDiscovery).
 func (f *FakeAWS) HandleDefaults(regions ...string) {
 	f.Handle("sts:GetCallerIdentity", Static(CallerIdentity(TestAccount, TestCallerARN)))
 	f.Handle("ec2:DescribeRegions", Static(Regions(regions...)))
+	f.HandleNoDiscovery()
 }
 
 // Static returns a handler that always gives r.
