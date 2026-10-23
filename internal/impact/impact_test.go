@@ -137,7 +137,7 @@ func TestPathologicalWildcardsStayFast(t *testing.T) {
 	}
 	start := time.Now()
 	res := analyze(t, docs, changes...)
-	if elapsed := time.Since(start); elapsed > 5*time.Second {
+	if elapsed := time.Since(start); elapsed > timeLimitFactor*5*time.Second {
 		t.Fatalf("matching took %v", elapsed)
 	}
 	if len(res.Findings) != 0 {

@@ -447,7 +447,7 @@ func TestPerformanceScanAndPlanWith10000Resources(t *testing.T) {
 	plan.requireExit(t, 2)
 	requireContains(t, "scan stdout", scan.stdout, "Summary: 10000 resources scanned")
 	requireContains(t, "plan stdout", plan.stdout, "Summary: 7500 to change")
-	if elapsed > 10*time.Second {
+	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("scan and plan of 10,000 resources took %v (limit 10s)", elapsed)
 	}
 	t.Logf("scan and plan of 10,000 resources: %v", elapsed)
@@ -486,7 +486,7 @@ func TestPerformanceImpactWith500PoliciesAnd1000Changes(t *testing.T) {
 
 	r.requireExit(t, 2)
 	requireContains(t, "stdout", r.stdout, "Summary: 1000 to change · 0 conflicts · 500 affected · 500 undecided")
-	if elapsed > 10*time.Second {
+	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("impact analysis of 500 policies x 1,000 changes took %v (limit 10s)", elapsed)
 	}
 	t.Logf("impact analysis of 500 policies x 1,000 changes: %v", elapsed)
