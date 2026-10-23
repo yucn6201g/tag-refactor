@@ -40,7 +40,9 @@ type memoryExplorer struct {
 	noView    map[string]bool
 	resources map[string][]awsaccess.ExplorerResource
 	listErrs  map[string]error
-	listed    []string
+	// listErrsOnce fail only the first ListResources of their region.
+	listErrsOnce map[string]error
+	listed       []string
 }
 
 func (m *memoryExplorer) ExplorerIndexes(context.Context) ([]awsaccess.ExplorerIndex, error) {
@@ -57,7 +59,12 @@ func (m *memoryExplorer) DefaultView(_ context.Context, region string) (awsacces
 func (m *memoryExplorer) UntaggedResources(_ context.Context, region, viewARN string) ([]awsaccess.ExplorerResource, error) {
 	m.mu.Lock()
 	m.listed = append(m.listed, region)
+	once := m.listErrsOnce[region]
+	delete(m.listErrsOnce, region)
 	m.mu.Unlock()
+	if once != nil {
+		return nil, once
+	}
 	if viewARN != "view-"+region {
 		return nil, fmt.Errorf("view %s used in %s", viewARN, region)
 	}
@@ -154,6 +161,58 @@ func TestDiscoverUsesTheAggregatorIndexOnce(t *testing.T) {
 	global := snap.Resources[0]
 	if !global.Global || global.Region != "eu-west-1" || global.EverTagged {
 		t.Fatalf("global resource = %+v", global)
+	}
+}
+
+// Reliability design §3: when the aggregator index cannot be used, every
+// indexed region is searched on its own. The default view of the aggregator
+// region still returns the resources of every region: each keeps the region
+// it is in, those of regions that were not scanned are left out, and global
+// resources go to the region that returned them.
+func TestDiscoverFallsBackToRegionsAfterAnAggregatorFailure(t *testing.T) {
+	snap := snapshotOf("us-east-1", "us-west-2")
+	explorer := &memoryExplorer{
+		indexes:      []awsaccess.ExplorerIndex{{Region: "us-east-1", Aggregator: true}, {Region: "us-west-2"}},
+		listErrsOnce: map[string]error{"us-east-1": &errkind.Error{Kind: errkind.Transient, Op: awsaccess.OpListResources}},
+		resources: map[string][]awsaccess.ExplorerResource{
+			"us-east-1": {
+				{ARN: queue("us-west-2", "a"), ResourceType: "sqs:queue", Region: "us-west-2"},
+				{ARN: queue("us-east-1", "b"), ResourceType: "sqs:queue", Region: "us-east-1"},
+				{ARN: queue("sa-east-1", "not-scanned"), ResourceType: "sqs:queue", Region: "sa-east-1"},
+				{ARN: "arn:aws:cloudfront::123456789012:distribution/D", ResourceType: "cloudfront:distribution", Region: "global"},
+			},
+			"us-west-2": {{ARN: queue("us-west-2", "a"), ResourceType: "sqs:queue", Region: "us-west-2"}},
+		},
+	}
+
+	if err := Discover(context.Background(), memoryConfig{}, explorer, &recordingProgress{}, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(explorer.listed) != 3 || explorer.listed[0] != "us-east-1" {
+		t.Fatalf("ListResources was called in %v, want the aggregator, then each region", explorer.listed)
+	}
+	for _, r := range snap.Discovery.Regions {
+		if r.Methods[0] != MethodExplorer || r.Status != StatusComplete {
+			t.Fatalf("%s = %+v, want searched on its own", r.Region, r)
+		}
+	}
+	found := map[string]int{}
+	for _, r := range snap.Discovery.Regions {
+		found[r.Region] = r.Found
+	}
+	if found["us-east-1"] != 2 || found["us-west-2"] != 1 {
+		t.Fatalf("found by region = %v, want us-east-1 2 (b and the global resource), us-west-2 1", found)
+	}
+	byARN := map[string]Resource{}
+	for _, r := range snap.Resources {
+		byARN[r.ARN] = r
+	}
+	if len(snap.Resources) != 3 || byARN[queue("us-west-2", "a")].Region != "us-west-2" || byARN[queue("us-east-1", "b")].Region != "us-east-1" {
+		t.Fatalf("resources = %+v", snap.Resources)
+	}
+	if g := byARN["arn:aws:cloudfront::123456789012:distribution/D"]; !g.Global || g.Region != "us-east-1" {
+		t.Fatalf("global resource = %+v", g)
 	}
 }
 

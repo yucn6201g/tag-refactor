@@ -364,13 +364,18 @@ func failureReason(err error) string {
 
 // addDiscovered adds the never-tagged resources to the snapshot, region by
 // region in name order (NFR5.7). Resources the tagging API returned are left
-// out, as are resources with user tags and IAM's global types; when AWS
-// Config and Resource Explorer return the same ARN, AWS Config's resource is
-// kept (BR3.1).
+// out, as are resources with user tags, IAM's global types and Resource
+// Explorer results of regions that were not scanned; when AWS Config and
+// Resource Explorer return the same ARN, AWS Config's resource is kept
+// (BR3.1).
 func addDiscovered(snap *Snapshot, outcomes []regionOutcome) {
 	known := make(map[string]bool, len(snap.Resources))
 	for _, r := range snap.Resources {
 		known[r.ARN] = true
+	}
+	scanned := make(map[string]bool, len(outcomes))
+	for _, o := range outcomes {
+		scanned[o.Region] = true
 	}
 	found := map[string]int{} // key -> index in added
 	var added []Resource
@@ -398,10 +403,11 @@ func addDiscovered(snap *Snapshot, outcomes []regionOutcome) {
 			keep(key, configResource(c, o.Region), true)
 		}
 		for _, e := range o.explorer {
-			if known[e.ARN] || isIAMType(e.ResourceType) {
+			region := explorerRegion(e, o.Region)
+			if known[e.ARN] || isIAMType(e.ResourceType) || !scanned[region] {
 				continue
 			}
-			keep(e.ARN, explorerResource(e, o.Region), false)
+			keep(e.ARN, explorerResource(e, region), false)
 		}
 	}
 	counts := map[string]int{}
@@ -430,6 +436,19 @@ func configResource(c awsaccess.ConfigResource, region string) Resource {
 		r.IaCManagedBy = "cloudformation:" + stack
 	}
 	return r
+}
+
+// explorerRegion is the region a Resource Explorer result belongs to: its own
+// Region. The default view of an aggregator region returns the resources of
+// every region, also when that region is searched on its own after the
+// aggregator failed. A global resource (no region in its ARN, as in
+// searchAggregator) belongs to the region whose search returned it (BR2.2),
+// and so does a result without a usable Region.
+func explorerRegion(e awsaccess.ExplorerResource, searched string) string {
+	if arnRegion(e.ARN) == "" || e.Region == "" || e.Region == "global" {
+		return searched
+	}
+	return e.Region
 }
 
 func explorerResource(e awsaccess.ExplorerResource, region string) Resource {
