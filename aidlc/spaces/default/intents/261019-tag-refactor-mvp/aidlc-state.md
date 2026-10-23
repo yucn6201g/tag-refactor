@@ -63,7 +63,10 @@
 
 
 
-- **Construction Verification Command**: "C:\Program Files\Git\bin\bash.exe" scripts/verify-u1.sh
+- **Construction Verification Command**: "C:\Program Files\Git\bin\bash.exe" -c "TAG_REFACTOR_SANDBOX_ACCOUNT_ID=663798383745 bash scripts/verify.sh"
+
+
+
 
 
 
@@ -142,7 +145,7 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-10-22T12:47:43Z
+- **Last Updated**: 2026-10-23T14:05:16Z
 
 - **Construction Autonomy Mode**: autonomous
 
