@@ -194,14 +194,18 @@ func TestAcceptance_AC1_2_1_ScanAndPlanUseOnlyReadOperations(t *testing.T) {
 			t.Errorf("non-read operation called: %s", op)
 		}
 	}
-	want := []string{"ec2:DescribeRegions", "iam:GetPolicyVersion", "iam:ListPolicies", "sts:GetCallerIdentity", "tag:GetResources"}
+	// U2: scan also asks AWS Config and Resource Explorer whether they can
+	// find never-tagged resources (none of them can in this account).
+	want := []string{"config:DescribeConfigurationRecorders", "ec2:DescribeRegions", "iam:GetPolicyVersion", "iam:ListPolicies",
+		"resource-explorer-2:ListIndexes", "sts:GetCallerIdentity", "tag:GetResources"}
 	if got := w.fake.Ops(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("operations = %v, want %v", got, want)
 	}
 }
 
 // AC1.2.2: Given a missing read permission, When scan runs, Then the name of
-// the missing operation (API) is shown.
+// the missing operation (API) is shown. Since U2 a denied region is part of
+// the result, marked incomplete (BR4.1), instead of an error.
 func TestAcceptance_AC1_2_2_MissingPermissionNamesTheOperation(t *testing.T) {
 	w := newWorld(t)
 	w.fake.Handle("tag:GetResources", testutil.Static(testutil.JSONError(http.StatusBadRequest, "AccessDeniedException",
@@ -210,8 +214,11 @@ func TestAcceptance_AC1_2_2_MissingPermissionNamesTheOperation(t *testing.T) {
 	r := w.run("scan", "--region", "us-east-1")
 
 	r.requireExit(t, 1)
-	requireTwoLineError(t, r)
-	requireMatch(t, "stderr", r.stderr, `(?m)^Error: .*tag:GetResources`)
+	if !strings.HasPrefix(r.stdout, "! Results are incomplete\n    us-east-1: AccessDenied (tag:GetResources)\n") {
+		t.Fatalf("stdout must name the denied operation at the top:\n%s", r.stdout)
+	}
+	requireNotContains(t, "stdout", r.stdout, "not authorized")
+	requireContains(t, "stderr", r.stderr, "Exit code: 1 (results incomplete)")
 }
 
 // AC1.2.3: Given no AWS credentials, When any subcommand runs, Then what is
@@ -258,8 +265,10 @@ func TestAcceptance_AC1_2_4_ProfileSelectsCredentialsAndRegion(t *testing.T) {
 		if c.AccessKeyID != "AKIADEVPROFILE000000" {
 			t.Errorf("%s was signed with %s, want the dev profile key", c.Op, c.AccessKeyID)
 		}
-		if c.Op == "tag:GetResources" && c.Region != "ap-northeast-1" {
-			t.Errorf("tag:GetResources went to %s, want ap-northeast-1", c.Region)
+		// Since U2 scan reads every enabled region; the profile's region is
+		// where the account is identified.
+		if (c.Op == "sts:GetCallerIdentity" || c.Op == "ec2:DescribeRegions") && c.Region != "ap-northeast-1" {
+			t.Errorf("%s went to %s, want the profile's region ap-northeast-1", c.Op, c.Region)
 		}
 	}
 }
@@ -447,12 +456,14 @@ func TestAcceptance_AC6_1_4_ScanExitCodes(t *testing.T) {
 
 		r.requireExit(t, 2)
 		requireContains(t, "stderr", r.stderr, "Exit code: 2 (issues found)")
-		requireMatch(t, "stdout", r.stdout, `(?m)^  env\s+4 resources$`)
+		// Since U2 the group is headed by its canonical key, and env joins
+		// Environment through the abbreviation dictionary (BR5.1).
+		requireMatch(t, "stdout", r.stdout, `(?m)^  environment\s+4 resources$`)
 		requireMatch(t, "stdout", r.stdout, `(?m)^    env\s+3$`)
 		requireMatch(t, "stdout", r.stdout, `(?m)^    Env\s+1$`)
-		requireMatch(t, "stdout", r.stdout, `(?m)^  cost-center\s+1 resources?$`)
+		requireMatch(t, "stdout", r.stdout, `(?m)^  costcenter\s+1 resources?$`)
 		requireNotContains(t, "stdout", r.stdout, "aws:cloudformation")
-		requireContains(t, "stdout", r.stdout, "Summary: 4 resources scanned in 1 region (us-east-1) · 2 variant groups")
+		requireContains(t, "stdout", r.stdout, "Summary: 4 resources scanned in 1 of 3 regions · 2 variant groups")
 	})
 	t.Run("no variants", func(t *testing.T) {
 		w := newWorld(t)

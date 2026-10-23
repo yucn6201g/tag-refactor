@@ -590,7 +590,9 @@ func TestAcceptanceU2_NFR8_9_DiscoveredStringsAreSanitized(t *testing.T) {
 		requireNotContains(t, "stdout", r.stdout, raw)
 		requireNotContains(t, "stderr", r.stderr, raw)
 	}
-	requireContains(t, "stdout", r.stdout, `\u{9B}31m\u{202E}evil\u{A}line\x{FF}`)
+	// The invalid byte 0xFF cannot survive JSON: the answer carries U+FFFD
+	// instead, which is printable and kept. The raw byte is checked above.
+	requireContains(t, "stdout", r.stdout, `\u{9B}31m\u{202E}evil\u{A}line`+"�")
 }
 
 // The count of regions and resources in the summary of a large account, as a
