@@ -60,15 +60,16 @@ var configToARNForm = map[string]string{
 }
 
 // notTaggableTypes are the resource types (ARN form) known to have no tags
-// that the tagging API can change (BR3.3): IAM groups have no tags, and the
-// compliance and inventory records of AWS Config and Systems Manager are not
-// resources that carry tags. Only types known to be untaggable are listed: a
-// type missing from the list is treated as taggable, so a stale list can
-// count a few required tags too many, never too few (tech-stack-decisions.md).
+// that the tagging API can change (BR3.3): the compliance and inventory
+// records of AWS Config and Systems Manager are not resources that carry
+// tags. IAM types are not listed: the discovery leaves them out (isIAMType),
+// so they never reach this check. Only types known to be untaggable are
+// listed: a type missing from the list is treated as taggable, so a stale
+// list can count a few required tags too many, never too few
+// (tech-stack-decisions.md).
 var notTaggableTypes = map[string]bool{
 	"config:conformance-pack-compliance": true,
 	"config:resource-compliance":         true,
-	"iam:group":                          true,
 	"ssm:association-compliance":         true,
 	"ssm:managed-instance-inventory":     true,
 	"ssm:patch-compliance":               true,
@@ -92,7 +93,8 @@ func IsNotTaggable(resourceType string) bool {
 // isIAMType reports whether the type is one of IAM's global types, which the
 // discovery leaves out: AWS Config does not record them by default and
 // Resource Explorer does not index their tags, so an IAM role with tags
-// would look untagged (reliability design §3).
+// would look untagged (reliability design §3). That is why notTaggableTypes
+// lists no IAM type (IAM groups, which have no tags, included).
 func isIAMType(resourceType string) bool {
 	return strings.HasPrefix(resourceType, "iam:") || strings.HasPrefix(resourceType, "AWS::IAM::")
 }

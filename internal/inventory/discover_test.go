@@ -462,7 +462,7 @@ func TestMissingRequiredAndUnsupportedTypes(t *testing.T) {
 		{ARN: "c", Tags: map[string]string{}, ResourceType: "sqs"},
 		{Tags: map[string]string{}, ResourceType: "ssm:patch-compliance", NotTaggable: true},
 		{Tags: map[string]string{}, ResourceType: "ssm:patch-compliance", NotTaggable: true},
-		{ARN: "g", Tags: map[string]string{}, ResourceType: "iam:group", NotTaggable: true},
+		{ARN: "g", Tags: map[string]string{}, ResourceType: "config:resource-compliance", NotTaggable: true},
 	}}
 
 	got := MissingRequired(snap, []string{"Owner", "CostCenter"})
@@ -471,7 +471,7 @@ func TestMissingRequiredAndUnsupportedTypes(t *testing.T) {
 		strings.Join(got[0].ARNs, ",") != "b,c" || got[1].ResourceCount != 3 {
 		t.Fatalf("missing = %+v", got)
 	}
-	if fmt.Sprint(UnsupportedResourceTypes(snap.Resources)) != "[{ssm:patch-compliance 2} {iam:group 1}]" {
+	if fmt.Sprint(UnsupportedResourceTypes(snap.Resources)) != "[{ssm:patch-compliance 2} {config:resource-compliance 1}]" {
 		t.Fatalf("unsupported = %v", UnsupportedResourceTypes(snap.Resources))
 	}
 	report := NewScanReport(snap, "r.yaml", []string{"Owner"})
@@ -509,11 +509,14 @@ func TestTypeTablesHaveTheARNForm(t *testing.T) {
 		if !arnForm.MatchString(typ) || !targets[typ] {
 			t.Errorf("untaggable type %q is not an ARN-form target of the table", typ)
 		}
+		if isIAMType(typ) {
+			t.Errorf("untaggable type %q is an IAM type, which the discovery leaves out", typ)
+		}
 	}
 	if ConfigTypeToARNForm("AWS::New::Thing") != "AWS::New::Thing" || ConfigTypeToARNForm("AWS::EC2::Instance") != "ec2:instance" {
 		t.Fatal("unknown types keep the AWS Config form")
 	}
-	if !IsNotTaggable("iam:group") || IsNotTaggable("sqs") {
+	if !IsNotTaggable("ssm:patch-compliance") || IsNotTaggable("sqs") {
 		t.Fatal("IsNotTaggable does not follow the table")
 	}
 }
