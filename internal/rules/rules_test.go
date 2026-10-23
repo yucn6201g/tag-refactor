@@ -1,6 +1,7 @@
 package rules
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -393,5 +394,33 @@ func TestSuggestAndEditDistance(t *testing.T) {
 	}
 	if editDistance("kitten", "sitting") != 3 || editDistance("", "abc") != 3 || editDistance("same", "same") != 0 {
 		t.Fatal("edit distance is wrong")
+	}
+}
+
+// U2 BR5.2: the required keys are kept in file order with their lines, and
+// the warning that they are unused is marked so scan can leave it out.
+func TestRequiredKeysAreKeptWithTheirLines(t *testing.T) {
+	rs, err := Parse("r.yaml", []byte("version: 1\nrequired:\n  Owner:\n    default: x\n  aws:createdBy:\n    default: y\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(rs.RequiredTags) != "[{Owner 3} {aws:createdBy 5}]" {
+		t.Fatalf("required = %v", rs.RequiredTags)
+	}
+	marked := 0
+	for _, w := range rs.Warnings {
+		if w.Key == RequiredNotUsedKey {
+			marked++
+			if w.Line != 2 || !strings.Contains(w.Message, `"required" is not used`) {
+				t.Fatalf("warning = %+v", w)
+			}
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("warnings = %+v", rs.Warnings)
+	}
+	none, err := Parse("r.yaml", []byte("version: 1\n"))
+	if err != nil || len(none.RequiredTags) != 0 {
+		t.Fatalf("required = %v, err %v", none.RequiredTags, err)
 	}
 }

@@ -3,7 +3,9 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,21 +26,51 @@ func (m memoryTagReader) ListTaggedResources(_ context.Context, region string) (
 	return m.byRegion[region], nil
 }
 
-type recordingProgress struct{ lines []string }
-
-func (r *recordingProgress) RegionStarted(region string) {
-	r.lines = append(r.lines, "started "+region)
+// recordingProgress records the progress calls; several regions call it at
+// the same time.
+type recordingProgress struct {
+	mu    sync.Mutex
+	lines []string
 }
+
+func (r *recordingProgress) add(line string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, line)
+}
+
+func (r *recordingProgress) RegionsWaiting(regions []string) {
+	r.add("waiting " + strings.Join(regions, ","))
+}
+func (r *recordingProgress) RegionStarted(region string) { r.add("started " + region) }
 func (r *recordingProgress) RegionDone(region string, n int) {
-	r.lines = append(r.lines, fmt.Sprintf("done %s %d", region, n))
+	r.add(fmt.Sprintf("done %s %d", region, n))
 }
 func (r *recordingProgress) RegionFailed(region, reason string) {
-	r.lines = append(r.lines, "failed "+region+" "+reason)
+	r.add("failed " + region + " " + reason)
 }
-func (r *recordingProgress) Warn(message string) { r.lines = append(r.lines, "warn "+message) }
+func (r *recordingProgress) DiscoveryStarted(regions []string) {
+	r.add("discovery " + strings.Join(regions, ","))
+}
+func (r *recordingProgress) DiscoveryRegionDone(region, status string) {
+	r.add("discovered " + region + " " + status)
+}
+func (r *recordingProgress) Warn(message string) { r.add("warn " + message) }
+
+func (r *recordingProgress) sorted() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	lines := append([]string(nil), r.lines...)
+	sort.Strings(lines)
+	return strings.Join(lines, "|")
+}
 
 func resource(tags map[string]string) Resource {
 	return Resource{ARN: "arn:aws:sqs:us-east-1:123456789012:q", Tags: tags}
+}
+
+func account(regions ...string) awsaccess.AccountContext {
+	return awsaccess.AccountContext{AccountID: "123456789012", Region: "us-east-1", EnabledRegions: regions}
 }
 
 func TestCollectReadsTheRegionAndKeepsAllTags(t *testing.T) {
@@ -49,37 +81,84 @@ func TestCollectReadsTheRegionAndKeepsAllTags(t *testing.T) {
 	progress := &recordingProgress{}
 	now := time.Date(2026, 10, 20, 9, 30, 0, 0, time.FixedZone("JST", 9*3600))
 
-	snap, err := Collect(context.Background(), reader, progress, "123456789012", []string{"us-east-1"}, now)
+	snap, err := Collect(context.Background(), reader, progress, account("eu-west-1", "us-east-1"), []string{"us-east-1"}, now)
 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(progress.lines, "|") != "started us-east-1|done us-east-1 2" {
+	if strings.Join(progress.lines, "|") != "waiting us-east-1|started us-east-1|done us-east-1 2" {
 		t.Fatalf("progress = %v", progress.lines)
 	}
 	if snap.SnapshotID != "snap-20261020T003000Z" || !snap.ScannedAt.Equal(now) || snap.ScannedAt.Location() != time.UTC {
 		t.Fatalf("snapshot id/time = %q %v", snap.SnapshotID, snap.ScannedAt)
 	}
-	if snap.AccountID != "123456789012" || len(snap.FailedRegions) != 0 || len(snap.Resources) != 2 {
+	if snap.AccountID != "123456789012" || len(snap.FailedRegions) != 0 || len(snap.Resources) != 2 || len(snap.EnabledRegions) != 2 {
 		t.Fatalf("snapshot = %+v", snap)
 	}
-	first := snap.Resources[0]
-	if first.ResourceType != "ec2:instance" || first.Region != "us-east-1" || first.Tags["aws:cloudformation:stack-name"] != "s" {
-		t.Fatalf("resource = %+v", first)
+	instance, bucket := snap.Resources[0], snap.Resources[1] // sorted by ARN
+	if instance.ResourceType != "ec2:instance" || instance.Region != "us-east-1" || instance.Tags["aws:cloudformation:stack-name"] != "s" ||
+		instance.IaCManagedBy != "cloudformation:s" || !instance.EverTagged || instance.Global {
+		t.Fatalf("instance = %+v", instance)
+	}
+	if !bucket.Global || bucket.IaCManagedBy != "" {
+		t.Fatalf("bucket = %+v", bucket)
 	}
 }
 
-func TestCollectStopsAndReportsTheRegionOnAReadError(t *testing.T) {
-	denied := &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetResources}
+// BR4.1: a denied region is recorded and the other regions are still read.
+func TestCollectKeepsADeniedRegionAndReadsTheOthers(t *testing.T) {
+	denied := &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetResources, Region: "eu-west-1"}
+	reader := regionErrReader{memoryTagReader: memoryTagReader{byRegion: map[string][]awsaccess.TaggedResource{
+		"us-east-1": {{ARN: "arn:aws:sqs:us-east-1:123456789012:q", Tags: map[string]string{}}},
+	}}, errs: map[string]error{
+		"eu-west-1":      denied,
+		"ap-northeast-1": &errkind.Error{Kind: errkind.Transient, Reason: errkind.ReasonTimeout, Op: awsaccess.OpGetResources},
+		"sa-east-1":      &errkind.Error{Kind: errkind.Transient, Reason: errkind.ReasonRetriesExhausted, Op: awsaccess.OpGetResources},
+	}}
 	progress := &recordingProgress{}
 
-	_, err := Collect(context.Background(), memoryTagReader{err: denied}, progress, "1", []string{"eu-west-1"}, time.Now())
+	snap, err := Collect(context.Background(), reader, progress, account(), []string{"us-east-1", "eu-west-1", "ap-northeast-1", "sa-east-1"}, time.Now())
 
-	if err != denied {
-		t.Fatalf("err = %v", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if strings.Join(progress.lines, "|") != "started eu-west-1|failed eu-west-1 AccessDenied" {
+	if len(snap.Resources) != 1 || snap.Complete() || snap.DoneRegions() != 1 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	got := fmt.Sprint(snap.FailedRegions)
+	want := "[{ap-northeast-1 timeout Transient tag:GetResources} {eu-west-1 accessDenied AccessDenied tag:GetResources} {sa-east-1 transient Transient tag:GetResources}]"
+	if got != want {
+		t.Fatalf("failed regions = %s", got)
+	}
+	if !strings.Contains(progress.sorted(), "failed eu-west-1 AccessDenied (tag:GetResources)") {
 		t.Fatalf("progress = %v", progress.lines)
+	}
+}
+
+// regionErrReader fails the regions listed in errs.
+type regionErrReader struct {
+	memoryTagReader
+	errs map[string]error
+}
+
+func (r regionErrReader) ListTaggedResources(ctx context.Context, region string) ([]awsaccess.TaggedResource, error) {
+	if err := r.errs[region]; err != nil {
+		return nil, err
+	}
+	return r.memoryTagReader.ListTaggedResources(ctx, region)
+}
+
+// BR4.3: missing credentials and unexpected errors stop the whole run.
+func TestCollectStopsOnCredentialAndUnexpectedErrors(t *testing.T) {
+	for _, stop := range []error{
+		&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsExpired, Op: awsaccess.OpGetResources},
+		&errkind.Error{Kind: errkind.Internal, Op: awsaccess.OpGetResources},
+		fmt.Errorf("no kind"),
+	} {
+		_, err := Collect(context.Background(), memoryTagReader{err: stop}, &recordingProgress{}, account(), []string{"eu-west-1"}, time.Now())
+		if err != stop {
+			t.Fatalf("err = %v, want %v", err, stop)
+		}
 	}
 }
 
@@ -128,7 +207,8 @@ func TestGroupKeysCountsEachResourceOncePerGroup(t *testing.T) {
 		t.Fatalf("groups = %+v", groups)
 	}
 	env := groups[0]
-	if env.NormalizedKey != "env" || env.TotalResources != 3 || !env.IsVariant {
+	// U2: env is an abbreviation, so the group is headed by environment.
+	if env.NormalizedKey != "environment" || env.TotalResources != 3 || !env.IsVariant || env.AbbreviationOnly {
 		t.Fatalf("env group = %+v", env)
 	}
 	if fmt.Sprint(env.Spellings) != "[{Env 2} {env 2}]" {
@@ -137,7 +217,7 @@ func TestGroupKeysCountsEachResourceOncePerGroup(t *testing.T) {
 	if groups[1].IsVariant || groups[1].TotalResources != 1 {
 		t.Fatalf("owner group = %+v", groups[1])
 	}
-	if v := Variants(groups); len(v) != 1 || v[0].NormalizedKey != "env" {
+	if v := Variants(groups); len(v) != 1 || v[0].NormalizedKey != "environment" {
 		t.Fatalf("Variants = %+v", v)
 	}
 }
