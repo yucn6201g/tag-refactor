@@ -18,7 +18,9 @@ func (p *Printer) ScanResult(r *inventory.ScanReport) {
 		p.endProgress()
 		snap := r.Snapshot
 		p.resultsIncomplete(snap.FailedRegions)
-		if !r.IssuesFound() {
+		// "No issues found" goes with exit code 0 only (BR5.4): not when a
+		// region could not be read.
+		if !r.IssuesFound() && snap.Complete() {
 			if d := snap.Discovery; d != nil && d.Status != inventory.StatusComplete {
 				p.line(p.out, "No issues found (untagged-resource discovery: %s)", d.Status)
 			} else {
@@ -225,7 +227,11 @@ func (p *Printer) planResult(plan *planner.Plan) {
 		p.planIncomplete(plan)
 	}
 	if plan.NothingToDo() {
-		p.line(p.out, "No changes needed")
+		// "No changes needed" goes with exit code 0 only (BR5.4): not when a
+		// region could not be read.
+		if plan.InventoryComplete {
+			p.line(p.out, "No changes needed")
+		}
 		p.line(p.out, "Summary: %s scanned · 0 to change", plural(plan.ScannedResources, "resource"))
 		return
 	}

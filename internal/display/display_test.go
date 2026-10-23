@@ -173,10 +173,37 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 func TestPlanResultWithNothingToDo(t *testing.T) {
 	p, out, _ := newPrinter()
 
-	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true})
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: true})
 
 	if out.String() != "No changes needed\nSummary: 3 resources scanned · 0 to change\n" {
 		t.Fatalf("stdout: %q", out.String())
+	}
+}
+
+// BR5.4: "No changes needed" is only said with exit code 0, so not when the
+// tagging API could not read a region.
+func TestPlanResultWithNothingToDoButAnIncompleteInventory(t *testing.T) {
+	p, out, _ := newPrinter()
+
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: false})
+
+	if out.String() != "Summary: 3 resources scanned · 0 to change\n" {
+		t.Fatalf("stdout: %q", out.String())
+	}
+}
+
+// BR5.4: "No issues found" is only said with exit code 0, so not when the
+// tagging API could not read a region, whatever the discovery found.
+func TestScanResultWithNoIssuesButFailedRegions(t *testing.T) {
+	for _, d := range []*inventory.Discovery{nil, {Status: inventory.StatusComplete}, {Status: inventory.StatusPartial}} {
+		p, out, _ := newPrinter()
+		p.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1", "us-east-1"},
+			ScannedRegions: []string{"eu-west-1", "us-east-1"}, Discovery: d,
+			FailedRegions: []inventory.FailedRegion{{Region: "eu-west-1", Kind: "AccessDenied", Operation: "tag:GetResources"}}}})
+		if !strings.HasPrefix(out.String(), "! Results are incomplete\n    eu-west-1: AccessDenied (tag:GetResources)\n\nRequired tags missing:") ||
+			strings.Contains(out.String(), "No issues found") {
+			t.Fatalf("stdout: %q", out.String())
+		}
 	}
 }
 

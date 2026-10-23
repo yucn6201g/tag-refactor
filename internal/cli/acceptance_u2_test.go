@@ -299,6 +299,49 @@ func TestAcceptanceU2_AC1_1_5_ADeniedRegionMakesTheResultIncomplete(t *testing.T
 	})
 }
 
+// AC1.1.5 with BR5.4: Given one region denies reading and the regions that
+// were read have no issues, When scan or plan runs, Then the result is marked
+// incomplete (exit code 1) and does not say "No issues found" or "No changes
+// needed", which are only said with exit code 0.
+func TestAcceptanceU2_AC1_1_5_IncompleteResultsNeverSayNothingWasFound(t *testing.T) {
+	given := func(t *testing.T) *world {
+		w := newAccountWorld(t)
+		denied := testutil.JSONError(http.StatusBadRequest, "AccessDeniedException", "not authorized to perform: tag:GetResources")
+		w.fake.Handle("tag:GetResources", testutil.PerRegion(map[string]testutil.Handler{
+			"eu-west-1": testutil.Static(denied),
+			"us-east-1": testutil.TagPages([]testutil.TaggedResource{
+				{ARN: arnIn("us-east-1", "a"), Tags: map[string]string{"Owner": "a"}},
+			}),
+		}, testutil.TagPages(nil)))
+		w.givenConfigEverywhere()
+		return w
+	}
+	t.Run("scan", func(t *testing.T) {
+		w := given(t)
+
+		r := w.run("scan")
+
+		r.requireExit(t, 1)
+		requireMatch(t, "stdout", r.stdout, `(?m)^! Results are incomplete$`)
+		requireNotContains(t, "stdout", r.stdout, "No issues found")
+		requireMatch(t, "stdout", r.stdout, `(?m)^Untagged-resource discovery: complete$`)
+		requireMatch(t, "stdout", r.stdout, `(?m)^Summary: 1 resource scanned in 16 of 17 regions · 0 variant groups$`)
+		requireContains(t, "stderr", r.stderr, "Exit code: 1 (results incomplete)")
+	})
+	t.Run("plan", func(t *testing.T) {
+		w := given(t)
+		rules := w.givenRuleFile(aliasRules)
+
+		r := w.run("plan", "--rules", rules)
+
+		r.requireExit(t, 1)
+		requireMatch(t, "stdout", r.stdout, `(?m)^! Results are incomplete$`)
+		requireNotContains(t, "stdout", r.stdout, "No changes needed")
+		requireMatch(t, "stdout", r.stdout, `(?m)^Summary: 1 resource scanned · 0 to change$`)
+		requireContains(t, "stderr", r.stderr, "Exit code: 1 (results incomplete)")
+	})
+}
+
 // AC1.1.6: Given the keys env, Env and environment, When scan runs, Then the
 // three keys are one group with the count of each. A group that only the
 // abbreviation dictionary makes is marked and does not count as an issue.

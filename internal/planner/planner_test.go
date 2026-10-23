@@ -119,6 +119,17 @@ func TestNothingToDoWithoutChangesOrConflicts(t *testing.T) {
 	}
 }
 
+func TestInventoryIsIncompleteWhenARegionFailed(t *testing.T) {
+	snap := snapshot(res("arn:a", map[string]string{"Environment": "dev"}))
+	snap.FailedRegions = []inventory.FailedRegion{{Region: "eu-west-1", Kind: "AccessDenied", Operation: "tag:GetResources"}}
+
+	p := Build(snap, ruleSet(envRule), now)
+
+	if p.InventoryComplete || !p.NothingToDo() {
+		t.Fatalf("plan = %+v", p)
+	}
+}
+
 func TestImpactInputsAndAttachImpact(t *testing.T) {
 	p := Build(snapshot(res("arn:a", map[string]string{"env": "dev"}), res("arn:b", map[string]string{"Env": "x"})), ruleSet(envRule), now)
 	inputs := p.ImpactInputs()
