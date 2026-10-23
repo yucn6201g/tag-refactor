@@ -92,6 +92,24 @@ func untaggedARNs(t *testing.T, e u2Env, pageSize int) []string {
 	return arns
 }
 
+// recordsAllTypes reports whether AWS Config records every resource type in
+// ap-northeast-1, by the rule of reliability design §3.
+func recordsAllTypes(t *testing.T, e u2Env) bool {
+	t.Helper()
+	recorders, err := u2Session(t, e, 0).ConfigRecorders(context.Background(), u2Region)
+	if err != nil {
+		t.Fatalf("DescribeConfigurationRecorders and Status: %v", err)
+	}
+	for _, r := range recorders {
+		all := r.AllSupported && (r.Strategy == "" || r.Strategy == "ALL_SUPPORTED_RESOURCE_TYPES")
+		noExclusion := r.Strategy == "EXCLUSION_BY_RESOURCE_TYPES" && r.ExcludedTypes == 0
+		if r.Recording && (all || noExclusion) {
+			return true
+		}
+	}
+	return false
+}
+
 func countAfter(t *testing.T, stdout, pattern string) int {
 	t.Helper()
 	m := regexp.MustCompile(pattern).FindStringSubmatch(stdout)
@@ -112,7 +130,14 @@ func TestIntegrationU2ScanOfTheIndexedRegion(t *testing.T) {
 	requireNotContains(t, "stderr", r.stderr, "Error:")
 	requireNotContains(t, "stdout", r.stdout, "Results are incomplete")
 	requireMatch(t, "stdout", r.stdout, `(?m)^Untagged-resource discovery: complete$`)
-	requireContains(t, "stderr", r.stderr, "never-tagged resources via Resource Explorer in 1 region")
+	// The sandbox account may record every type with AWS Config; the tool then
+	// uses Config alone (reliability design §3), so the expected path follows
+	// the account.
+	if recordsAllTypes(t, e) {
+		requireContains(t, "stderr", r.stderr, "never-tagged resources via AWS Config in 1 region")
+	} else {
+		requireContains(t, "stderr", r.stderr, "never-tagged resources via Resource Explorer in 1 region")
+	}
 	if n := countAfter(t, r.stdout, `(?m)^Resources with no user tags: (\d+)$`); n < 1 {
 		t.Fatalf("no never-tagged resource was found (the queue %s should be)", e.untaggedARN)
 	}
