@@ -224,8 +224,13 @@ func TestDefaultViewAndListResourcesTellTheTwoFailuresApart(t *testing.T) {
 	s, _ := newSession(t, fake, nil)
 
 	view, err := s.DefaultView(context.Background(), "eu-west-1")
-	if err != nil || view.ARN != testutil.ViewARN("eu-west-1") || view.Filter != "service:ec2" {
+	if err != nil || view.ARN != testutil.ViewARN("eu-west-1") || view.Filter != "service:ec2" || !view.IncludesTags {
 		t.Fatalf("view %+v, err %v", view, err)
+	}
+	// A view without the tags property is reported, so tag:none is not sent.
+	fake.Handle(testutil.OpGetView, testutil.Static(testutil.ViewWithoutTags(testutil.ViewARN("eu-west-1"))))
+	if bare, err := s.DefaultView(context.Background(), "eu-west-1"); err != nil || bare.IncludesTags {
+		t.Fatalf("view without tags %+v, err %v", bare, err)
 	}
 	_, err = s.UntaggedResources(context.Background(), "eu-west-1", view.ARN)
 	e := checkKind(t, err, errkind.AccessDenied, errkind.ReasonNone)

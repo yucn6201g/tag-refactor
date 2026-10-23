@@ -191,6 +191,9 @@ type ExplorerView struct {
 	// Filter is the view's filter string; empty when the view shows every
 	// resource.
 	Filter string
+	// IncludesTags is true when the view includes the tags property; without
+	// it ListResources rejects the filter tag:none.
+	IncludesTags bool
 }
 
 // ExplorerResource is one resource found by Resource Explorer.

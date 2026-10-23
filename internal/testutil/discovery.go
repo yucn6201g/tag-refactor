@@ -248,10 +248,21 @@ func DefaultView(viewARN string) Reply {
 	return restReply(map[string]any{"ViewArn": viewARN})
 }
 
-// View is the resource-explorer-2:GetView answer with the view's filter.
+// View is the resource-explorer-2:GetView answer with the view's filter. The
+// view includes the tags property, which the filter tag:none needs.
 func View(viewARN, filter string) Reply {
+	return view(viewARN, filter, []any{map[string]string{"Name": "tags"}})
+}
+
+// ViewWithoutTags is a GetView answer for an unfiltered view that does not
+// include the tags property, so ListResources rejects tag:none.
+func ViewWithoutTags(viewARN string) Reply {
+	return view(viewARN, "", []any{})
+}
+
+func view(viewARN, filter string, properties []any) Reply {
 	view := map[string]any{"ViewArn": viewARN, "Owner": TestAccount, "Scope": "arn:aws:iam::" + TestAccount + ":root",
-		"IncludedProperties": []any{}}
+		"IncludedProperties": properties}
 	if filter != "" {
 		view["Filters"] = map[string]string{"FilterString": filter}
 	}

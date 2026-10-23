@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -38,6 +39,7 @@ type memoryExplorer struct {
 	indexErr  error
 	filters   map[string]string
 	noView    map[string]bool
+	noTags    map[string]bool // views that do not include the tags property
 	resources map[string][]awsaccess.ExplorerResource
 	listErrs  map[string]error
 	// listErrsOnce fail only the first ListResources of their region.
@@ -53,7 +55,7 @@ func (m *memoryExplorer) DefaultView(_ context.Context, region string) (awsacces
 	if m.noView[region] {
 		return awsaccess.ExplorerView{}, &errkind.Error{Kind: errkind.AccessDenied, Reason: errkind.ReasonNoDefaultView, Op: awsaccess.OpGetDefaultView}
 	}
-	return awsaccess.ExplorerView{ARN: "view-" + region, Filter: m.filters[region]}, nil
+	return awsaccess.ExplorerView{ARN: "view-" + region, Filter: m.filters[region], IncludesTags: !m.noTags[region]}, nil
 }
 
 func (m *memoryExplorer) UntaggedResources(_ context.Context, region, viewARN string) ([]awsaccess.ExplorerResource, error) {
@@ -276,6 +278,30 @@ func TestDiscoverMarksAFilteredViewAsFailed(t *testing.T) {
 	groups := snap.Discovery.NotChecked()
 	if len(groups) != 1 || groups[0].Regions[0] != "eu-west-1" {
 		t.Fatalf("not checked = %+v", groups)
+	}
+}
+
+// A default view without the tags property cannot answer tag:none, so the
+// region is unavailable with its own reason and ListResources is not called.
+func TestDiscoverTreatsAViewWithoutTagsAsUnavailable(t *testing.T) {
+	snap := snapshotOf("eu-west-1", "us-east-1")
+	explorer := &memoryExplorer{indexes: []awsaccess.ExplorerIndex{{Region: "eu-west-1"}, {Region: "us-east-1"}},
+		noTags: map[string]bool{"eu-west-1": true}}
+
+	if err := Discover(context.Background(), memoryConfig{}, explorer, &recordingProgress{}, snap); err != nil {
+		t.Fatal(err)
+	}
+
+	r := snap.Discovery.Regions[0]
+	want := reasonConfigNotRecording + ", " + reasonViewWithoutTags
+	if r.Status != StatusUnavailable || r.Reason != want {
+		t.Fatalf("eu-west-1 = %+v, want unavailable %q", r, want)
+	}
+	if snap.Discovery.Regions[1].Status != StatusComplete {
+		t.Fatalf("us-east-1 = %+v", snap.Discovery.Regions[1])
+	}
+	if slices.Contains(explorer.listed, "eu-west-1") {
+		t.Fatalf("ListResources was called in eu-west-1: %v", explorer.listed)
 	}
 }
 

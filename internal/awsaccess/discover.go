@@ -248,6 +248,13 @@ func (s *Session) DefaultView(ctx context.Context, region string) (ExplorerView,
 	if view.View != nil && view.View.Filters != nil {
 		result.Filter = aws.ToString(view.View.Filters.FilterString)
 	}
+	if view.View != nil {
+		for _, p := range view.View.IncludedProperties {
+			if aws.ToString(p.Name) == "tags" {
+				result.IncludesTags = true
+			}
+		}
+	}
 	return result, nil
 }
 

@@ -60,6 +60,7 @@ const (
 	reasonNoIndex            = "no Resource Explorer index"
 	reasonNoDefaultView      = "no default Resource Explorer view"
 	reasonViewFiltered       = "the default Resource Explorer view has a filter"
+	reasonViewWithoutTags    = "the default Resource Explorer view does not include tags"
 )
 
 // configMode is what AWS Config records in a region.
@@ -315,6 +316,10 @@ func (d *discoverer) explorerSearch(ctx context.Context, region string) (awsacce
 	if err != nil {
 		d.stop(ctx, err)
 		return view, nil, err
+	}
+	// ListResources rejects tag:none when the view does not include tags.
+	if !view.IncludesTags {
+		return view, nil, &explorerUnavailable{reason: reasonViewWithoutTags}
 	}
 	found, err := d.explorer.UntaggedResources(ctx, region, view.ARN)
 	if err != nil {

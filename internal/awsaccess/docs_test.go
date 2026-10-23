@@ -225,6 +225,17 @@ func TestSandboxU2TemplateHasALocalIndexAndAnUnfilteredDefaultView(t *testing.T)
 		if _, filtered := v.Properties["Filters"]; filtered {
 			t.Errorf("%s must not have a filter: a filtered default view fails the discovery", name)
 		}
+		// tag:none is rejected unless the view includes the tags property.
+		includesTags := false
+		props, _ := v.Properties["IncludedProperties"].([]any)
+		for _, p := range props {
+			if m, ok := p.(map[string]any); ok && m["Name"] == "tags" {
+				includesTags = true
+			}
+		}
+		if !includesTags {
+			t.Errorf("%s must include the tags property: %v", name, v.Properties["IncludedProperties"])
+		}
 	}
 	if dv := template.Resources["DV"]; dv.Type != "AWS::ResourceExplorer2::DefaultViewAssociation" {
 		t.Errorf("DV = %+v", dv)

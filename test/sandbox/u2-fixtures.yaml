@@ -55,12 +55,17 @@ Resources:
     DependsOn: IX
     Properties:
       ViewName: tag-refactor-u2-default
+      # tag:none needs the tags property in the view.
+      IncludedProperties:
+        - Name: tags
 
   VWOnly:
     Type: AWS::ResourceExplorer2::View
     Condition: MakeViewOnly
     Properties:
       ViewName: tag-refactor-u2-default
+      IncludedProperties:
+        - Name: tags
 
   # DV: makes the view the default view of the region (GetDefaultView).
   DV:
