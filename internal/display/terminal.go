@@ -17,8 +17,9 @@ var (
 		return ok && term.IsTerminal(int(f.Fd()))
 	}
 	// enableVirtualTerminal turns on the handling of the cursor sequences
-	// on w and reports whether it worked. Only Windows needs to do anything
-	// (NFR9.3).
+	// on w and reports whether it worked, with a function that puts the
+	// previous setting back (nil when nothing was changed). Only Windows
+	// needs to do anything (NFR9.3).
 	enableVirtualTerminal = enableVT
 	// getenv reads the environment.
 	getenv = os.Getenv
@@ -27,13 +28,14 @@ var (
 // canRedraw reports whether progress on w may be redrawn in place: w is a
 // terminal, TERM is not "dumb", and on Windows the console accepted virtual
 // terminal processing. In every other case, including a terminal that cannot
-// be recognized (Git Bash's mintty), lines are appended, the safe side.
-func canRedraw(w io.Writer) bool {
+// be recognized (Git Bash's mintty), lines are appended, the safe side. The
+// function it returns, when not nil, puts the terminal setting back.
+func canRedraw(w io.Writer) (bool, func()) {
 	if getenv("TERM") == "dumb" {
-		return false
+		return false, nil
 	}
 	if !isTerminal(w) {
-		return false
+		return false, nil
 	}
 	return enableVirtualTerminal(w)
 }

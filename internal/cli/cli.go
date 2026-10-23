@@ -88,6 +88,10 @@ type app struct {
 	result  *outcome
 }
 
+// closeDisplay closes the display, which puts the terminal back as it was
+// (NFR9.3). It is a variable so that tests can see every exit of Run use it.
+var closeDisplay = (*display.Printer).Close
+
 // Run executes the command line with args (without the program name) and
 // returns the process exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps) int {
@@ -95,6 +99,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps
 		deps.Now = time.Now
 	}
 	a := &app{deps: deps, p: display.New(stdout, stderr)}
+	defer closeDisplay(a.p)
 	root := a.rootCommand()
 	root.SetArgs(args)
 	root.SetOut(a.p.Stdout())

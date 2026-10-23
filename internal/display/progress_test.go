@@ -18,7 +18,7 @@ func standInTerminal(t *testing.T, term io.Writer, termEnv string, vt bool) {
 	oldIs, oldVT, oldEnv := isTerminal, enableVirtualTerminal, getenv
 	t.Cleanup(func() { isTerminal, enableVirtualTerminal, getenv = oldIs, oldVT, oldEnv })
 	isTerminal = func(w io.Writer) bool { return w == term }
-	enableVirtualTerminal = func(io.Writer) bool { return vt }
+	enableVirtualTerminal = func(io.Writer) (bool, func()) { return vt, nil }
 	getenv = func(name string) string {
 		if name == "TERM" {
 			return termEnv
@@ -68,8 +68,36 @@ func TestRedrawIsChosenFromStandardErrorOnly(t *testing.T) {
 		})
 	}
 	// Without the stand-in, a buffer is never a terminal.
-	if canRedraw(&bytes.Buffer{}) {
+	if ok, restore := canRedraw(&bytes.Buffer{}); ok || restore != nil {
 		t.Fatal("a buffer must not be taken for a terminal")
+	}
+}
+
+// NFR9.3: the console setting New changed is put back by Close, once, and
+// progress is no longer redrawn after it. Without a change, Close does
+// nothing.
+func TestCloseRestoresTheConsoleSetting(t *testing.T) {
+	var out, errOut bytes.Buffer
+	standInTerminal(t, &errOut, "xterm", true)
+	restored := 0
+	enableVirtualTerminal = func(io.Writer) (bool, func()) { return true, func() { restored++ } }
+
+	p := New(&out, &errOut)
+	p.RegionsWaiting([]string{"us-east-1"})
+	p.Close()
+	p.Close()
+
+	if restored != 1 {
+		t.Fatalf("console setting restored %d times, want 1", restored)
+	}
+	if p.redraw || p.progress != nil {
+		t.Fatalf("after Close: redraw %v, progress %+v", p.redraw, p.progress)
+	}
+
+	enableVirtualTerminal = func(io.Writer) (bool, func()) { return true, nil }
+	New(&out, &errOut).Close() // nothing to restore
+	if !strings.Contains(errOut.String(), "us-east-1") || out.Len() != 0 {
+		t.Fatalf("stdout %q, stderr %q", out.String(), errOut.String())
 	}
 }
 

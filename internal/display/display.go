@@ -35,6 +35,9 @@ type Printer struct {
 	// redraw is true when progress is redrawn in place on errOut.
 	redraw   bool
 	progress *progress
+	// restore puts the terminal setting of errOut back; nil when New
+	// changed nothing.
+	restore func()
 	// account is the account ID shown above the progress table.
 	account string
 }
@@ -46,9 +49,26 @@ var (
 
 // New returns a printer for the given standard output and standard error.
 // Progress is redrawn in place only when standard error is a terminal that
-// accepts it; standard output plays no part in that choice.
+// accepts it; standard output plays no part in that choice. Close puts back
+// what New changed in the terminal.
 func New(stdout, stderr io.Writer) *Printer {
-	return &Printer{out: stdout, errOut: stderr, now: time.Now, redraw: canRedraw(stderr)}
+	redraw, restore := canRedraw(stderr)
+	return &Printer{out: stdout, errOut: stderr, now: time.Now, redraw: redraw, restore: restore}
+}
+
+// Close ends the progress and puts the terminal setting of standard error
+// back as it was before New: on Windows, the virtual terminal processing New
+// turned on (NFR9.3). Progress is no longer redrawn after it. Calling it again
+// does nothing.
+func (p *Printer) Close() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.endProgress()
+	p.redraw = false
+	if p.restore != nil {
+		p.restore()
+		p.restore = nil
+	}
 }
 
 // SetDebug turns the --debug lines on or off.
