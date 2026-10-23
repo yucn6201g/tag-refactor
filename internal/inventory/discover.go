@@ -457,7 +457,9 @@ func explorerResource(e awsaccess.ExplorerResource, region string) Resource {
 }
 
 // overallStatus is complete when every region is complete, unavailable when
-// none could be searched at all, partial otherwise (BR3.2).
+// none could be searched at all, partial otherwise (BR3.2). A failed region
+// counts toward partial, even when every region failed: AWS Config or a
+// filtered view did search part of it.
 func overallStatus(regions []DiscoveryRegion) string {
 	complete, unavailable := 0, 0
 	for _, r := range regions {

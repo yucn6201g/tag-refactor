@@ -216,6 +216,44 @@ func TestDiscoverFallsBackToRegionsAfterAnAggregatorFailure(t *testing.T) {
 	}
 }
 
+// BR3.2: a failed region was searched in part, so it makes the discovery
+// partial, even when every region failed.
+func TestOverallStatusCountsFailedRegionsTowardPartial(t *testing.T) {
+	region := func(status string) DiscoveryRegion { return DiscoveryRegion{Status: status} }
+	cases := map[string]struct {
+		regions []DiscoveryRegion
+		want    string
+	}{
+		"all complete":             {[]DiscoveryRegion{region(StatusComplete), region(StatusComplete)}, StatusComplete},
+		"all unavailable":          {[]DiscoveryRegion{region(StatusUnavailable), region(StatusUnavailable)}, StatusUnavailable},
+		"all failed":               {[]DiscoveryRegion{region(StatusFailed), region(StatusFailed)}, StatusPartial},
+		"failed and unavailable":   {[]DiscoveryRegion{region(StatusFailed), region(StatusUnavailable)}, StatusPartial},
+		"complete and unavailable": {[]DiscoveryRegion{region(StatusComplete), region(StatusUnavailable)}, StatusPartial},
+	}
+	for name, tc := range cases {
+		if got := overallStatus(tc.regions); got != tc.want {
+			t.Errorf("%s: overallStatus = %s, want %s", name, got, tc.want)
+		}
+	}
+
+	// Through Discover: AWS Config records only some types everywhere and
+	// Resource Explorer has no index.
+	snap := snapshotOf("eu-west-1", "us-east-1")
+	some := recording(false, "INCLUSION_BY_RESOURCE_TYPES", 0)
+	config := memoryConfig{recorders: map[string][]awsaccess.ConfigRecorder{"eu-west-1": some, "us-east-1": some}}
+	if err := Discover(context.Background(), config, &memoryExplorer{}, &recordingProgress{}, snap); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range snap.Discovery.Regions {
+		if r.Status != StatusFailed || r.Reason != reasonConfigSomeTypes+", "+reasonNoIndex {
+			t.Fatalf("%s = %+v", r.Region, r)
+		}
+	}
+	if snap.Discovery.Status != StatusPartial {
+		t.Fatalf("status = %s, want partial", snap.Discovery.Status)
+	}
+}
+
 // A filtered default view still gives results, but the region is failed and
 // the whole discovery partial.
 func TestDiscoverMarksAFilteredViewAsFailed(t *testing.T) {
