@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -22,11 +23,21 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
-// Default time limits (NFR5.1, security design §3).
+// Default time limits (NFR5.1, NFR5.5, security design §3). A call of five
+// minutes leaves room for the ten attempts of the retryer.
 const (
 	DefaultAttemptTimeout    = 30 * time.Second
-	DefaultCallTimeout       = 120 * time.Second
+	DefaultCallTimeout       = 5 * time.Minute
 	DefaultCredentialTimeout = 30 * time.Second
+)
+
+// Retry settings of every AWS call (NFR5.4, reliability design §1).
+const (
+	// MaxAttempts is the number of attempts of one call, the first included.
+	MaxAttempts = 10
+	// MaxBackoff is the longest wait between two attempts. The SDK's jitter
+	// keeps each wait at or below it.
+	MaxBackoff = 20 * time.Second
 )
 
 // Options configures a Session. The zero value of every field except Profile
@@ -44,12 +55,16 @@ type Options struct {
 	Now func() time.Time
 	// AttemptTimeout bounds one HTTP attempt (default 30s).
 	AttemptTimeout time.Duration
-	// CallTimeout bounds one API call including retries (default 120s).
+	// CallTimeout bounds one API call including retries (default 5 minutes).
 	CallTimeout time.Duration
 	// CredentialTimeout bounds credential resolution (default 30s).
 	CredentialTimeout time.Duration
 	// RetryDelay replaces the SDK back-off between attempts (tests only).
 	RetryDelay func(attempt int) time.Duration
+	// ExplorerPageSize replaces the MaxResults of Resource Explorer's
+	// ListResources (tests only, to read several pages of few resources).
+	// Zero, and any value from 1000 up, mean DefaultExplorerPageSize.
+	ExplorerPageSize int
 }
 
 func (o Options) withDefaults() Options {
@@ -65,11 +80,15 @@ func (o Options) withDefaults() Options {
 	if o.CredentialTimeout <= 0 {
 		o.CredentialTimeout = DefaultCredentialTimeout
 	}
+	if o.ExplorerPageSize <= 0 || o.ExplorerPageSize >= 1000 {
+		o.ExplorerPageSize = DefaultExplorerPageSize
+	}
 	return o
 }
 
 // Session holds one SDK configuration shared by every client. It implements
-// AccountResolver, TagReader and PolicyReader, and nothing that writes.
+// AccountResolver, TagReader, PolicyReader, ConfigReader and ExplorerReader,
+// and nothing that writes. Its methods may be called from several goroutines.
 type Session struct {
 	opts    Options
 	cfg     aws.Config
@@ -84,6 +103,12 @@ type Session struct {
 // regionPattern matches AWS region names such as us-east-1 or us-gov-west-1.
 // Checking the form first keeps arbitrary text out of endpoint host names.
 var regionPattern = regexp.MustCompile(`^[a-z]{2,4}(-[a-z0-9]+)+-[0-9]+$`)
+
+// IsRegionName reports whether name has the form of an AWS region name. It
+// does not say whether the region is enabled.
+func IsRegionName(name string) bool {
+	return regionPattern.MatchString(name)
+}
 
 // NewSession loads the SDK configuration for the profile and decides the
 // region (BR1.1, BR1.2). It does not call AWS.
@@ -108,16 +133,57 @@ func NewSession(ctx context.Context, opts Options) (*Session, error) {
 	}
 	s := &Session{opts: opts, cfg: cfg, region: cfg.Region, profile: opts.Profile}
 	s.inspectSharedConfig()
+	if cfg.Credentials != nil {
+		// Mark failures to obtain credentials during a call, so they are
+		// reported as expired credentials rather than as unexpected errors.
+		s.cfg.Credentials = &credentialsMarker{inner: cfg.Credentials, sso: s.usesSSO}
+	}
 	if s.region == "" {
 		return nil, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionNotSet, Subject: s.profile}
 	}
 	if !regionPattern.MatchString(s.region) {
 		return nil, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionInvalid, Region: s.region}
 	}
-	s.sts = sts.NewFromConfig(cfg)
-	s.ec2 = ec2.NewFromConfig(cfg)
-	s.iam = iam.NewFromConfig(cfg)
+	s.sts = sts.NewFromConfig(s.cfg)
+	s.ec2 = ec2.NewFromConfig(s.cfg)
+	s.iam = iam.NewFromConfig(s.cfg)
 	return s, nil
+}
+
+// credentialsMarker wraps the credential provider of the session. The SDK
+// asks it again during a call when the cached credentials expire (an SSO
+// session that ended, a role session past its duration); a failure then
+// carries a credentialsError, which classify reports as CredentialsMissing
+// (NFR8.11) instead of an unexpected error.
+type credentialsMarker struct {
+	inner aws.CredentialsProvider
+	sso   bool
+}
+
+func (m *credentialsMarker) Retrieve(ctx context.Context) (aws.Credentials, error) {
+	creds, err := m.inner.Retrieve(ctx)
+	if err != nil {
+		return creds, &credentialsError{err: err, sso: m.sso}
+	}
+	return creds, nil
+}
+
+// credentialsError is a failure to obtain credentials.
+type credentialsError struct {
+	err error
+	sso bool
+}
+
+func (e *credentialsError) Error() string { return "credentials could not be obtained" }
+func (e *credentialsError) Unwrap() error { return e.err }
+
+// reason is the credential reason of the failure.
+func (e *credentialsError) reason() errkind.Reason {
+	var invalidToken *ssocreds.InvalidTokenError
+	if e.sso || errors.As(e.err, &invalidToken) {
+		return errkind.ReasonSSOSessionExpired
+	}
+	return errkind.ReasonCredentialsExpired
 }
 
 // Region returns the region the session reads.
@@ -149,10 +215,16 @@ func newHTTPClient(opts Options) aws.HTTPClient {
 	return awshttp.NewBuildableClient().WithTimeout(opts.AttemptTimeout)
 }
 
-// newRetryer returns the SDK's standard retryer with its default number of
-// attempts (BR1.8). delay replaces the back-off only in tests.
+// newRetryer returns the SDK's standard retryer with ten attempts and waits of
+// at most 20 seconds (NFR5.4). The retry budget of the SDK (a token bucket
+// that stops retrying once used up) is turned off with ratelimit.None, so a
+// long run of rate limit answers is retried ten times rather than given up
+// early. delay replaces the back-off only in tests.
 func newRetryer(delay func(attempt int) time.Duration) aws.Retryer {
 	return retry.NewStandard(func(o *retry.StandardOptions) {
+		o.MaxAttempts = MaxAttempts
+		o.MaxBackoff = MaxBackoff
+		o.RateLimiter = ratelimit.None
 		if delay != nil {
 			o.Backoff = retry.BackoffDelayerFunc(func(attempt int, _ error) (time.Duration, error) {
 				return delay(attempt), nil
@@ -186,14 +258,16 @@ func (s *Session) Resolve(ctx context.Context) (AccountContext, error) {
 	if err != nil {
 		return AccountContext{}, s.recheckRejectedRegion(ctx, err)
 	}
-	if err := s.checkRegionEnabled(ctx); err != nil {
+	enabled, err := s.checkRegionEnabled(ctx)
+	if err != nil {
 		return AccountContext{}, err
 	}
 	return AccountContext{
-		AccountID: aws.ToString(out.Account),
-		CallerARN: aws.ToString(out.Arn),
-		Profile:   s.profile,
-		Region:    s.region,
+		AccountID:      aws.ToString(out.Account),
+		CallerARN:      aws.ToString(out.Arn),
+		Profile:        s.profile,
+		Region:         s.region,
+		EnabledRegions: enabled,
 	}, nil
 }
 
@@ -220,17 +294,19 @@ func (s *Session) checkCredentials(ctx context.Context) error {
 	return &errkind.Error{Kind: errkind.CredentialsMissing, Reason: reason, Subject: s.profile, Cause: err}
 }
 
-// checkRegionEnabled fails with InvalidInput when the region is not one of
-// the regions enabled for the account (BR1.1).
-func (s *Session) checkRegionEnabled(ctx context.Context) error {
+// checkRegionEnabled returns the regions enabled for the account, sorted, and
+// fails with InvalidInput when the session's region is not one of them
+// (BR1.1).
+func (s *Session) checkRegionEnabled(ctx context.Context) ([]string, error) {
 	names, err := s.enabledRegions(ctx, s.region)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !slices.Contains(names, s.region) {
-		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionUnavailable, Region: s.region}
+		return nil, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionUnavailable, Region: s.region}
 	}
-	return nil
+	slices.Sort(names)
+	return names, nil
 }
 
 // enabledRegions lists the regions enabled for the account, asking the EC2

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -21,12 +22,21 @@ import (
 )
 
 // Printer writes results to out and everything else to errOut. It implements
-// inventory.ProgressSink and awsaccess.DebugSink.
+// inventory.ProgressSink and awsaccess.DebugSink. It is the only writer of
+// both streams; one lock keeps the lines of the goroutines that read regions
+// from mixing (observability design §1).
 type Printer struct {
+	mu     sync.Mutex
 	out    io.Writer
 	errOut io.Writer
 	debug  bool
 	werr   error
+	now    func() time.Time
+	// redraw is true when progress is redrawn in place on errOut.
+	redraw   bool
+	progress *progress
+	// account is the account ID shown above the progress table.
+	account string
 }
 
 var (
@@ -35,12 +45,25 @@ var (
 )
 
 // New returns a printer for the given standard output and standard error.
+// Progress is redrawn in place only when standard error is a terminal that
+// accepts it; standard output plays no part in that choice.
 func New(stdout, stderr io.Writer) *Printer {
-	return &Printer{out: stdout, errOut: stderr}
+	return &Printer{out: stdout, errOut: stderr, now: time.Now, redraw: canRedraw(stderr)}
 }
 
 // SetDebug turns the --debug lines on or off.
-func (p *Printer) SetDebug(on bool) { p.debug = on }
+func (p *Printer) SetDebug(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.debug = on
+}
+
+// SetClock replaces the clock of the elapsed times (tests).
+func (p *Printer) SetClock(now func() time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.now = now
+}
 
 // Stdout returns the result writer, for the help text of the command parser.
 // Write errors through it are kept like those of the printer itself.
@@ -56,6 +79,8 @@ type recordingWriter struct {
 }
 
 func (r recordingWriter) Write(b []byte) (int, error) {
+	r.p.mu.Lock()
+	defer r.p.mu.Unlock()
 	n, err := r.w.Write(b)
 	if err != nil && r.p.werr == nil {
 		r.p.werr = err
@@ -64,19 +89,41 @@ func (r recordingWriter) Write(b []byte) (int, error) {
 }
 
 // WriteErr returns the first error met while writing, if any.
-func (p *Printer) WriteErr() error { return p.werr }
+func (p *Printer) WriteErr() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.werr
+}
 
 // line writes one line. String arguments are sanitized; the format itself is
-// a constant written by the tool.
+// a constant written by the tool. The caller holds the lock. A line for
+// standard error while the progress table is on the screen is written in its
+// place, and the table is drawn again below it.
 func (p *Printer) line(w io.Writer, format string, args ...any) {
 	for i, a := range args {
 		if s, ok := a.(string); ok {
 			args[i] = Sanitize(s)
 		}
 	}
-	if _, err := fmt.Fprintf(w, format+"\n", args...); err != nil && p.werr == nil {
+	text := fmt.Sprintf(format+"\n", args...)
+	if w == p.errOut && p.redraw && p.progress != nil && p.progress.drawn > 0 {
+		var b strings.Builder
+		p.eraseTable(&b)
+		b.WriteString(text)
+		p.writeRaw(b.String())
+		p.drawTable(true)
+		return
+	}
+	if _, err := io.WriteString(w, text); err != nil && p.werr == nil {
 		p.werr = err
 	}
+}
+
+// locked runs f with the lock held.
+func (p *Printer) locked(f func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	f()
 }
 
 func (p *Printer) blank(w io.Writer) { p.line(w, "") }
@@ -123,35 +170,23 @@ func plural(n int, word string) string {
 	return fmt.Sprintf("%d %ss", n, word)
 }
 
-// RegionStarted implements inventory.ProgressSink.
-func (p *Printer) RegionStarted(region string) {
-	p.line(p.errOut, "scan: %s started", region)
-}
-
-// RegionDone implements inventory.ProgressSink.
-func (p *Printer) RegionDone(region string, count int) {
-	p.line(p.errOut, "scan: %s done (%s)", region, plural(count, "resource"))
-}
-
-// RegionFailed implements inventory.ProgressSink.
-func (p *Printer) RegionFailed(region, reason string) {
-	p.line(p.errOut, "scan: %s failed (%s)", region, reason)
-}
-
 // Warn implements inventory.ProgressSink.
 func (p *Printer) Warn(message string) {
-	p.line(p.errOut, "warning: %s", message)
+	p.locked(func() { p.line(p.errOut, "warning: %s", message) })
 }
 
 // FileWarning prints a warning about a line of a file.
 func (p *Printer) FileWarning(path string, line int, message string) {
-	p.line(p.errOut, "warning: %s line %d: %s", path, line, message)
+	p.locked(func() { p.line(p.errOut, "warning: %s line %d: %s", path, line, message) })
 }
 
 // APICall implements awsaccess.DebugSink. It prints one line per call when
-// --debug is on, with the operation, region, duration and retries only
-// (NFR8.2, NFR11.3).
+// --debug is on, with the operation (the API name), region, duration and
+// retries only (NFR8.2, NFR11.3, NFR11.6). Calls of several regions arrive at
+// the same time; the lock keeps their lines whole.
 func (p *Printer) APICall(rec awsaccess.CallRecord) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if !p.debug {
 		return
 	}
@@ -169,30 +204,42 @@ func (p *Printer) APICall(rec awsaccess.CallRecord) {
 	p.line(p.errOut, "debug: %s %s %dms retries=%s%s", rec.Op, rec.Region, rec.Duration.Milliseconds(), retries, suffix)
 }
 
-// Account prints the account and region line.
+// Account prints the account and the region of the session.
 func (p *Printer) Account(acc awsaccess.AccountContext) {
-	p.line(p.errOut, "Account %s · region %s", acc.AccountID, acc.Region)
+	p.locked(func() {
+		p.account = acc.AccountID
+		p.line(p.errOut, "Account %s · region %s", acc.AccountID, acc.Region)
+	})
 }
 
 // Error prints the two-line error message (NFR11.4).
 func (p *Printer) Error(what, fix string) {
-	p.line(p.errOut, "Error: %s", what)
-	p.line(p.errOut, "  Fix: %s", fix)
+	p.locked(func() {
+		p.endProgress()
+		p.line(p.errOut, "Error: %s", what)
+		p.line(p.errOut, "  Fix: %s", fix)
+	})
 }
 
 // Fatal prints a one-line message for failures that have no fix to suggest.
 func (p *Printer) Fatal(message string) {
-	p.line(p.errOut, "Error: %s", message)
+	p.locked(func() {
+		p.endProgress()
+		p.line(p.errOut, "Error: %s", message)
+	})
 }
 
 // Done prints the elapsed time and the number of scanned resources (NFR1.1).
 func (p *Printer) Done(elapsed time.Duration, resources int) {
-	p.line(p.errOut, "Done in %s · %s", FormatElapsed(elapsed), plural(resources, "resource"))
+	p.locked(func() {
+		p.endProgress()
+		p.line(p.errOut, "Done in %s · %s", FormatElapsed(elapsed), plural(resources, "resource"))
+	})
 }
 
 // ExitCode prints the exit code line.
 func (p *Printer) ExitCode(code int, meaning string) {
-	p.line(p.errOut, "Exit code: %d (%s)", code, meaning)
+	p.locked(func() { p.line(p.errOut, "Exit code: %d (%s)", code, meaning) })
 }
 
 // FormatElapsed renders a duration as mm:ss, or h:mm:ss from one hour.

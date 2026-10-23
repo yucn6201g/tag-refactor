@@ -51,13 +51,28 @@ type Warning struct {
 	Message string
 }
 
+// RequiredTag is a key listed under "required" (C8 requiredTagRules). Only
+// its name is used so far: scan counts the resources without it (U2 BR5.2);
+// its default and when are read for shape only.
+type RequiredTag struct {
+	Key string
+	// Line is the line of the key in the rule file.
+	Line int
+}
+
 // RuleSet is a loaded rule file.
 type RuleSet struct {
 	SourcePath string
 	Version    int
 	KeyRules   []KeyRule
-	Warnings   []Warning
+	// RequiredTags are in file order.
+	RequiredTags []RequiredTag
+	Warnings     []Warning
 }
+
+// RequiredNotUsedKey is the Warning.Key of the warning that "required" is not
+// used. plan shows it; scan, which counts the required keys, leaves it out.
+const RequiredNotUsedKey = "required"
 
 // Load reads and validates the rule file at path (BR3.1 to BR3.3).
 func Load(path string) (*RuleSet, error) {

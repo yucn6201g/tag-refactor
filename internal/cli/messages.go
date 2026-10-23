@@ -3,13 +3,14 @@ package cli
 import (
 	"fmt"
 
+	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
 const (
 	helpHint        = `run "tag-refactor --help" to see the commands and options`
 	permissionsHint = "docs/iam/readonly-policy.json lists the permissions tag-refactor needs"
-	supportedHint   = "this version has scan (--profile, --region) and plan (--rules, --profile, --region), plus --debug"
+	supportedHint   = "this version has scan (--rules, --profile, --region) and plan (--rules, --profile, --region), plus --debug"
 )
 
 // describe turns an error into the two lines shown to the user: what
@@ -24,8 +25,11 @@ func describe(e *errkind.Error) (what, fix string) {
 	case errkind.CredentialsMissing:
 		return describeCredentials(e)
 	case errkind.AccessDenied:
-		return fmt.Sprintf("access denied for %s%s", e.Op, inRegion(e.Region)),
-			fmt.Sprintf("allow %s for the identity you use; %s", e.Op, permissionsHint)
+		// The IAM action is what the user has to allow; it differs from the
+		// API name for Resource Explorer's ListResources (security design §3).
+		action := awsaccess.IAMAction(e.Op)
+		return fmt.Sprintf("access denied for %s%s", action, inRegion(e.Region)),
+			fmt.Sprintf("allow %s for the identity you use; %s", action, permissionsHint)
 	case errkind.Transient:
 		if e.Reason == errkind.ReasonTimeout {
 			return fmt.Sprintf("AWS did not answer %s in time%s", e.Op, inRegion(e.Region)),
