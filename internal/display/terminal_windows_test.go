@@ -21,7 +21,7 @@ func TestEnableVTRestoresTheConsoleMode(t *testing.T) {
 	if err != nil {
 		t.Skipf("no console: %v", err)
 	}
-	defer console.Close()
+	defer func() { _ = console.Close() }()
 	handle := windows.Handle(console.Fd())
 	var original uint32
 	if err := windows.GetConsoleMode(handle, &original); err != nil {
