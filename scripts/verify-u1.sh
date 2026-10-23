@@ -54,7 +54,7 @@ run_go_test -mod=readonly -count=1 ./...
 echo "verify-u1: running scan and plan against the sandbox account (profile $profile)"
 LAST_OUTPUT=""
 export TAG_REFACTOR_IT_PROFILE="$profile"
-if ! run_go_test -mod=readonly -count=1 -tags integration -run 'TestIntegration' -v ./internal/cli/...; then
+if ! run_go_test -mod=readonly -count=1 -tags integration -run '^TestIntegrationSandboxScanAndPlan$' -v ./internal/cli/...; then
   echo "verify-u1: the sandbox test failed" >&2
   exit 1
 fi

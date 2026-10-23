@@ -1,0 +1,188 @@
+{
+  "stage": "nfr-design",
+  "unit": "u2-scan",
+  "upstream_ids": [
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR1.10",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR5.4",
+    "NFR5.5",
+    "NFR5.6",
+    "NFR5.7",
+    "NFR5.8",
+    "NFR8.9",
+    "NFR8.10",
+    "NFR8.11",
+    "NFR9.3",
+    "NFR10.3",
+    "NFR11.5",
+    "NFR11.6",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR5.1",
+    "NFR8.1",
+    "NFR8.8",
+    "NFR9.1",
+    "NFR9.2",
+    "NFR10.1",
+    "NFR10.2",
+    "NFR11.3"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "performance-design.md §3 呼び出し回数の上限の式と、17リージョンの偽の AWS のテスト"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "performance-design.md §5 件数に比例する処理と、遅れのない偽の AWS"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "performance-design.md §4 最も多いリージョンの項を足した見積もりの式、仮の L95、チェックポイントでの測り直し"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "performance-design.md §1 同時に読む数8(固定の定数)と根拠"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "performance-design.md §2 MaxResults 500 で NextToken がなくなるまで読む。reliability-design.md §6 実機での複数ページの確認"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "security-design.md §1 API と IAM の2つの名前を持つ操作の表、例のポリシーと R2 の照合、名前で許す2つ"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "security-design.md §1 偽の AWS の操作の名前の取り出し(X-Amz-Target、Action、URL のパス)と、API の Search の禁止"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "security-design.md §2 確認用のテンプレートの索引と既定のビュー、記録のない Config の3つの操作の確認"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "OK",
+      "target": "reliability-design.md §1 最大10回、待ち時間の上限20秒、再試行の予算なし"
+    },
+    {
+      "id": "NFR5.5",
+      "status": "OK",
+      "target": "reliability-design.md §1 1回の試行30秒、1回の呼び出し5分、U1 のテストの修正"
+    },
+    {
+      "id": "NFR5.6",
+      "status": "OK",
+      "target": "reliability-design.md §2 リージョンの失敗を結果に集める、§3 検出の分かれ道と 401"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "reliability-design.md §5 決まった並び、Config を残す、乱数の遅れのテスト、Linux だけの -race"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "OK",
+      "target": "reliability-design.md §4 共有の取り消し、Wait のあとに返す、ゴルーチンが残らないことのテスト"
+    },
+    {
+      "id": "NFR8.9",
+      "status": "OK",
+      "target": "security-design.md §3 Config と Resource Explorer の文字列を display の置き換えに通す"
+    },
+    {
+      "id": "NFR8.10",
+      "status": "OK",
+      "target": "security-design.md §3 種類と操作の名前だけを出し、AccessDenied では IAM の名前を出す"
+    },
+    {
+      "id": "NFR8.11",
+      "status": "OK",
+      "target": "security-design.md §4 期限切れのエラーの名前の表、401 を共通の表に入れない"
+    },
+    {
+      "id": "NFR9.3",
+      "status": "OK",
+      "target": "observability-design.md §2 Windows の仮想端末の処理と、判定できないときの追記"
+    },
+    {
+      "id": "NFR10.3",
+      "status": "OK",
+      "target": "performance-design.md §5 大きな偽の AWS のテストを2分以内に収める"
+    },
+    {
+      "id": "NFR11.5",
+      "status": "OK",
+      "target": "observability-design.md §1 書き換えと追記、標準エラーだけでの判定、差し込み口でのテスト"
+    },
+    {
+      "id": "NFR11.6",
+      "status": "OK",
+      "target": "observability-design.md §3 --debug の行に Config と Resource Explorer を含める"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "U1 の security-design.md §1(読み取りのインターフェースだけを渡す)のまま。U2 の新しい読み取りも同じ"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "U1 の security-design.md §2 を、U2 の security-design.md §1 で広げる"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "U1 の 1回の試行30秒のまま。呼び出しの上限は reliability-design.md §1 で5分に変える"
+    },
+    {
+      "id": "NFR8.1",
+      "status": "OK",
+      "target": "U1 の security-design.md §3、§5 のまま。新しい操作も classify を通す(security-design.md §3)"
+    },
+    {
+      "id": "NFR8.8",
+      "status": "OK",
+      "target": "U1 の security-design.md §3、§7 のまま。足す依存は通信の先を変えない(security-design.md §6)"
+    },
+    {
+      "id": "NFR9.1",
+      "status": "OK",
+      "target": "U1 の reliability-design.md(3つの OS)のまま"
+    },
+    {
+      "id": "NFR9.2",
+      "status": "OK",
+      "target": "U1 の reliability-design.md(3つの OS)のまま"
+    },
+    {
+      "id": "NFR10.1",
+      "status": "OK",
+      "target": "U1 の reliability-design.md(テストの組み立て)のまま"
+    },
+    {
+      "id": "NFR10.2",
+      "status": "OK",
+      "target": "U1 の reliability-design.md(テストの組み立て)のまま"
+    },
+    {
+      "id": "NFR11.3",
+      "status": "OK",
+      "target": "U1 の observability-design.md の --debug の形のまま(observability-design.md §3)"
+    }
+  ]
+}

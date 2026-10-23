@@ -88,7 +88,9 @@ func TestSessionUsesStandardRetriesAndNoSDKLogging(t *testing.T) {
 	if s.Region() != "us-east-1" {
 		t.Fatalf("Region() = %q", s.Region())
 	}
-	want := []string{OpDescribeRegions, OpGetResources, OpListPolicies, OpGetPolicyVersion}
+	want := []string{OpDescribeRegions, OpGetResources, OpListPolicies, OpGetPolicyVersion,
+		OpDescribeConfigurationRecorders, OpDescribeConfigurationRecorderStatus, OpSelectResourceConfig,
+		OpListIndexes, OpGetDefaultView, OpGetView, "resource-explorer-2:Search"}
 	if got := RequiredPermissions(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("RequiredPermissions() = %v", got)
 	}
@@ -210,13 +212,14 @@ func TestEachAttemptHasATimeLimitAndExhaustedAttemptsAreTransient(t *testing.T) 
 	_, err := s.ListTaggedResources(context.Background(), "us-east-1")
 
 	requireKind(t, err, errkind.Transient, errkind.ReasonRetriesExhausted)
-	if fake.Count("tag:GetResources") != 3 {
-		t.Fatalf("%d attempts, want the standard 3", fake.Count("tag:GetResources"))
+	// NFR5.4: ten attempts since U2 (U1 used the SDK default of three).
+	if fake.Count("tag:GetResources") != MaxAttempts {
+		t.Fatalf("%d attempts, want %d", fake.Count("tag:GetResources"), MaxAttempts)
 	}
 	if time.Since(start) > 5*time.Second {
 		t.Fatalf("the attempt limit did not stop the calls: %v", time.Since(start))
 	}
-	if rec := sink.last(t); rec.ErrorKind != "Transient" || rec.Retries != 2 {
+	if rec := sink.last(t); rec.ErrorKind != "Transient" || rec.Retries != MaxAttempts-1 {
 		t.Fatalf("debug record = %+v", rec)
 	}
 }

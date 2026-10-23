@@ -228,9 +228,11 @@ func (l *loader) loadRequired(e *ast.MappingValueNode) error {
 		return err
 	}
 	for _, re := range entries {
-		if _, err := l.keyName(re, "a required tag key"); err != nil {
+		key, err := l.keyName(re, "a required tag key")
+		if err != nil {
 			return err
 		}
+		l.rs.RequiredTags = append(l.rs.RequiredTags, RequiredTag{Key: key, Line: lineOf(re.Key)})
 		body, err := l.mapping(re.Value, "a required tag", "write \"default:\" or \"when:\" under the key")
 		if err != nil {
 			return err
@@ -250,7 +252,7 @@ func (l *loader) loadRequired(e *ast.MappingValueNode) error {
 			}
 		}
 	}
-	l.warn(lineOf(e.Key), "required", `"required" is not used in this version`)
+	l.warn(lineOf(e.Key), RequiredNotUsedKey, `"required" is not used in this version`)
 	return nil
 }
 

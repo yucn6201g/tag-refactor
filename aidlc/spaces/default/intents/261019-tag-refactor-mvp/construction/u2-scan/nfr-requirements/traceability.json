@@ -1,0 +1,19 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u2-scan",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10", "NFR11", "NFR12"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10" },
+    { "id": "NFR2", "status": "N/A", "target": "影響分析の検出率は U5 が受け持つ。U2 は収集だけ" },
+    { "id": "NFR3", "status": "OK", "target": "NFR3.3, NFR3.4, NFR3.5" },
+    { "id": "NFR4", "status": "N/A", "target": "U2 は書き換えも取り消しも行わない(U6・U7)" },
+    { "id": "NFR5", "status": "OK", "target": "NFR5.4, NFR5.5, NFR5.6, NFR5.7, NFR5.8" },
+    { "id": "NFR6", "status": "N/A", "target": "U2 は書き換えの記録を作らない(U6)" },
+    { "id": "NFR7", "status": "N/A", "target": "U2 は読み取りだけで、apply と rollback の同時実行がない(U6・U7)" },
+    { "id": "NFR8", "status": "OK", "target": "NFR8.9, NFR8.10, NFR8.11" },
+    { "id": "NFR9", "status": "OK", "target": "NFR9.3" },
+    { "id": "NFR10", "status": "OK", "target": "NFR10.3" },
+    { "id": "NFR11", "status": "OK", "target": "NFR11.5, NFR11.6" },
+    { "id": "NFR12", "status": "N/A", "target": "配布の仕組みは作業単位に含めず、別の作業(作業計画の外部の準備 E6)で行う" }
+  ]
+}

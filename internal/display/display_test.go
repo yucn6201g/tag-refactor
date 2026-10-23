@@ -40,24 +40,49 @@ func TestSanitizeMakesControlCharactersVisible(t *testing.T) {
 
 func TestScanResultListsVariantsOrNoIssues(t *testing.T) {
 	p, out, errOut := newPrinter()
-	snap := &inventory.Snapshot{ScannedRegions: []string{"us-east-1"}, Resources: make([]inventory.Resource, 412)}
-	groups := []inventory.KeyVariantGroup{
-		{NormalizedKey: "env", TotalResources: 208, IsVariant: true, Spellings: []inventory.Spelling{{Key: "env", ResourceCount: 150}, {Key: "Env", ResourceCount: 58}}},
-		{NormalizedKey: "owner", TotalResources: 3, Spellings: []inventory.Spelling{{Key: "Owner", ResourceCount: 3}}},
-		{NormalizedKey: "x", TotalResources: 1, IsVariant: true, Spellings: []inventory.Spelling{{Key: "x\x1b", ResourceCount: 1}, {Key: "X", ResourceCount: 1}}},
+	snap := &inventory.Snapshot{EnabledRegions: make([]string, 17), ScannedRegions: make([]string, 17),
+		FailedRegions: []inventory.FailedRegion{{Region: "me-south-1", Kind: "AccessDenied", Operation: "tag:GetResources"}},
+		Resources:     make([]inventory.Resource, 412),
+		Discovery: &inventory.Discovery{Status: inventory.StatusPartial, Regions: []inventory.DiscoveryRegion{
+			{Region: "a-1", Status: inventory.StatusComplete},
+			{Region: "me-south-1", Status: inventory.StatusUnavailable, Reason: "AccessDenied resource-explorer-2:Search"},
+			{Region: "z-1\x1b", Status: inventory.StatusFailed, Reason: "AccessDenied resource-explorer-2:Search"},
+		}}}
+	report := &inventory.ScanReport{Snapshot: snap, RulesPath: "tagrules.yaml", NeverTagged: 3,
+		Groups: []inventory.KeyVariantGroup{
+			{NormalizedKey: "environment", TotalResources: 208, IsVariant: true, Spellings: []inventory.Spelling{{Key: "env", ResourceCount: 150}, {Key: "Env", ResourceCount: 58}}},
+			{NormalizedKey: "owner", TotalResources: 3, Spellings: []inventory.Spelling{{Key: "Owner", ResourceCount: 3}}},
+			{NormalizedKey: "production", TotalResources: 1, AbbreviationOnly: true, Spellings: []inventory.Spelling{{Key: "prod\x1b", ResourceCount: 1}}},
+		},
+		Missing: []inventory.MissingRequiredTag{
+			{Key: "Owner", ResourceCount: 409, NotTaggableCount: 2},
+			{Key: "Team", ResourceCount: 0},
+		},
+		Unsupported: []inventory.TypeCount{{ResourceType: "ssm:patch-compliance", Count: 2}},
 	}
 
-	p.ScanResult(snap, groups)
+	p.ScanResult(report)
 
-	want := "Tag key variants (same key except for case and separators)\n" +
-		"  env                   208 resources\n" +
+	want := "! Results are incomplete\n" +
+		"    me-south-1: AccessDenied (tag:GetResources)\n" +
+		"\n" +
+		"Tag key variants (candidates; confirm them in your rule file)\n" +
+		"  environment           208 resources\n" +
 		"    env                   150\n" +
 		"    Env                    58\n" +
-		"  x\\u{1B}" + strings.Repeat(" ", 17) + "1 resource\n" +
-		"    x\\u{1B}" + strings.Repeat(" ", 17) + "1\n" +
-		"    X                       1\n" +
+		"  production              1 resource  (abbreviation match)\n" +
+		"    prod\\u{1B}" + strings.Repeat(" ", 14) + "1\n" +
 		"\n" +
-		"Summary: 412 resources scanned in 1 region (us-east-1) · 2 variant groups\n"
+		"Required tags missing (from tagrules.yaml)\n" +
+		"  Owner         409 resources  (2 more on resource types that cannot be tagged)\n" +
+		"\n" +
+		"Resources with no user tags: 3\n" +
+		"Untagged-resource discovery: partial (not checked in me-south-1, z-1\\u{1B}: AccessDenied resource-explorer-2:Search)\n" +
+		"  Required tag counts are a lower bound.\n" +
+		"Resource types not supported for tag changes: 1 type, 2 resources\n" +
+		"  ssm:patch-compliance    2\n" +
+		"\n" +
+		"Summary: 412 resources scanned in 16 of 17 regions · 1 variant group · 1 required tag missing\n"
 	if out.String() != want {
 		t.Fatalf("stdout:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -66,9 +91,27 @@ func TestScanResultListsVariantsOrNoIssues(t *testing.T) {
 	}
 
 	p2, out2, _ := newPrinter()
-	p2.ScanResult(&inventory.Snapshot{ScannedRegions: []string{"eu-west-1"}, Resources: make([]inventory.Resource, 1)}, groups[1:2])
-	if out2.String() != "No issues found\nSummary: 1 resource scanned in 1 region (eu-west-1) · 0 variant groups\n" {
-		t.Fatalf("stdout: %q", out2.String())
+	p2.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1"}, ScannedRegions: []string{"eu-west-1"},
+		Resources: make([]inventory.Resource, 1), Discovery: &inventory.Discovery{Status: inventory.StatusUnavailable,
+			Regions: []inventory.DiscoveryRegion{{Region: "eu-west-1", Status: inventory.StatusUnavailable, Reason: "no Resource Explorer index"}}}},
+		Groups: report.Groups[1:2], Missing: []inventory.MissingRequiredTag{}, RulesPath: "r.yaml"})
+	want2 := "No issues found (untagged-resource discovery: unavailable)\n" +
+		"Required tags missing (from r.yaml): none\n" +
+		"\n" +
+		"Resources with no user tags: 0\n" +
+		"Untagged-resource discovery: unavailable (eu-west-1: no Resource Explorer index)\n" +
+		"  Required tag counts are a lower bound.\n" +
+		"\n" +
+		"Summary: 1 resource scanned in 1 of 1 regions · 0 variant groups · 0 required tags missing\n"
+	if out2.String() != want2 {
+		t.Fatalf("stdout:\n%s\nwant:\n%s", out2.String(), want2)
+	}
+	p3, out3, _ := newPrinter()
+	p3.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1"}, ScannedRegions: []string{"eu-west-1"},
+		Discovery: &inventory.Discovery{Status: inventory.StatusComplete}}})
+	if !strings.HasPrefix(out3.String(), "No issues found\nRequired tags missing: not checked (no rule file)\n") ||
+		!strings.Contains(out3.String(), "Untagged-resource discovery: complete\n\nSummary: 0 resources scanned in 1 of 1 regions · 0 variant groups\n") {
+		t.Fatalf("stdout: %q", out3.String())
 	}
 }
 
@@ -130,10 +173,37 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 func TestPlanResultWithNothingToDo(t *testing.T) {
 	p, out, _ := newPrinter()
 
-	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true})
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: true})
 
 	if out.String() != "No changes needed\nSummary: 3 resources scanned · 0 to change\n" {
 		t.Fatalf("stdout: %q", out.String())
+	}
+}
+
+// BR5.4: "No changes needed" is only said with exit code 0, so not when the
+// tagging API could not read a region.
+func TestPlanResultWithNothingToDoButAnIncompleteInventory(t *testing.T) {
+	p, out, _ := newPrinter()
+
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: false})
+
+	if out.String() != "Summary: 3 resources scanned · 0 to change\n" {
+		t.Fatalf("stdout: %q", out.String())
+	}
+}
+
+// BR5.4: "No issues found" is only said with exit code 0, so not when the
+// tagging API could not read a region, whatever the discovery found.
+func TestScanResultWithNoIssuesButFailedRegions(t *testing.T) {
+	for _, d := range []*inventory.Discovery{nil, {Status: inventory.StatusComplete}, {Status: inventory.StatusPartial}} {
+		p, out, _ := newPrinter()
+		p.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1", "us-east-1"},
+			ScannedRegions: []string{"eu-west-1", "us-east-1"}, Discovery: d,
+			FailedRegions: []inventory.FailedRegion{{Region: "eu-west-1", Kind: "AccessDenied", Operation: "tag:GetResources"}}}})
+		if !strings.HasPrefix(out.String(), "! Results are incomplete\n    eu-west-1: AccessDenied (tag:GetResources)\n\nRequired tags missing:") ||
+			strings.Contains(out.String(), "No issues found") {
+			t.Fatalf("stdout: %q", out.String())
+		}
 	}
 }
 
@@ -143,9 +213,12 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 	p.SetDebug(true)
 
 	p.Account(awsaccess.AccountContext{AccountID: "123456789012", Region: "us-east-1"})
+	p.RegionsWaiting([]string{"eu-west-1", "us-east-1"})
 	p.RegionStarted("us-east-1")
 	p.RegionDone("us-east-1", 1)
-	p.RegionFailed("us-east-1", "AccessDenied")
+	p.RegionFailed("eu-west-1", "AccessDenied (tag:GetResources)")
+	p.DiscoveryStarted([]string{"eu-west-1", "us-east-1"})
+	p.DiscoveryRegionDone("us-east-1\x1b", "complete")
 	p.Warn("careful\x1b")
 	p.FileWarning("rules.yaml", 8, `"required" is not used in this version`)
 	p.APICall(awsaccess.CallRecord{Op: "tag:GetResources", Region: "us-east-1", Duration: 132 * time.Millisecond, Retries: 0})
@@ -156,9 +229,12 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 	p.ExitCode(2, "issues found")
 
 	want := "Account 123456789012 · region us-east-1\n" +
+		"scan: waiting: eu-west-1, us-east-1\n" +
 		"scan: us-east-1 started\n" +
-		"scan: us-east-1 done (1 resource)\n" +
-		"scan: us-east-1 failed (AccessDenied)\n" +
+		"scan: us-east-1 done (1 resource, elapsed 00:00)\n" +
+		"scan: eu-west-1 failed (AccessDenied (tag:GetResources), elapsed 00:00)\n" +
+		"scan: discovering never-tagged resources\n" +
+		"scan: us-east-1\\u{1B} never-tagged resources: complete\n" +
 		"warning: careful\\u{1B}\n" +
 		"warning: rules.yaml line 8: \"required\" is not used in this version\n" +
 		"debug: tag:GetResources us-east-1 132ms retries=0\n" +
@@ -187,14 +263,23 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 func TestScopeLinesGoToStandardError(t *testing.T) {
 	p, out, errOut := newPrinter()
 
-	p.ScanScope([]string{"us-east-1"})
-	p.PlanScope([]string{"us-east-1"}, true)
-	p.PlanScope([]string{"eu-west-1\x1b"}, false)
+	snap := &inventory.Snapshot{EnabledRegions: make([]string, 17), ScannedRegions: make([]string, 3),
+		FailedRegions: []inventory.FailedRegion{{Region: "eu-west-1"}}, Discovery: &inventory.Discovery{Regions: []inventory.DiscoveryRegion{
+			{Region: "a-1", Status: inventory.StatusComplete, Methods: []string{inventory.MethodConfig, inventory.MethodExplorer}},
+			{Region: "b-1", Status: inventory.StatusComplete, Methods: []string{inventory.MethodAggregator}},
+			{Region: "c-1", Status: inventory.StatusUnavailable},
+		}}}
+	p.ScanScope(snap)
+	p.PlanScope(snap, true)
+	p.PlanScope(snap, false)
+	snap.Discovery = nil
+	p.ScanScope(snap)
 
-	want := "Checked: only the resources that the tagging API returns in us-east-1\n" +
-		"Checked: only the resources that the tagging API returns in us-east-1, " +
-		"and customer managed IAM policies attached to a user, role or group\n" +
-		"Checked: only the resources that the tagging API returns in eu-west-1\\u{1B} (no IAM policies were read: nothing to change)\n"
+	want := "Checked: tagged resources in 2 of 17 regions (tagging API); never-tagged resources via AWS Config in 1 region " +
+		"(without the global IAM types), Resource Explorer in 1 region, the Resource Explorer aggregator index for 1 region; not checked in 1 region\n" +
+		"Checked: tagged resources in 2 of 17 regions (tagging API), and customer managed IAM policies attached to a user, role or group\n" +
+		"Checked: tagged resources in 2 of 17 regions (tagging API); no IAM policies were read: nothing to change\n" +
+		"Checked: tagged resources in 2 of 17 regions (tagging API); never-tagged resources were not looked for\n"
 	if errOut.String() != want {
 		t.Fatalf("stderr:\n%s\nwant:\n%s", errOut.String(), want)
 	}

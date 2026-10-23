@@ -84,3 +84,18 @@ func TestCauseTypeNamesTheInnermostError(t *testing.T) {
 		t.Fatalf("CauseType(nil) = %q", got)
 	}
 }
+
+// U2: a region without a default Resource Explorer view is an AccessDenied
+// with its own reason, so the message can tell it from a missing permission.
+func TestNoDefaultViewIsAnAccessDeniedReason(t *testing.T) {
+	e := &Error{Kind: AccessDenied, Reason: ReasonNoDefaultView, Op: "resource-explorer-2:GetDefaultView", Region: "eu-west-1"}
+	if ReasonNoDefaultView != "no-default-view" {
+		t.Fatalf("reason = %q, want the contract value no-default-view", ReasonNoDefaultView)
+	}
+	if KindOf(fmt.Errorf("wrapped: %w", e)) != AccessDenied {
+		t.Fatal("the kind is lost when the error is wrapped")
+	}
+	if got, ok := As(fmt.Errorf("wrapped: %w", e)); !ok || got.Reason != ReasonNoDefaultView {
+		t.Fatalf("As() = %+v, %v", got, ok)
+	}
+}

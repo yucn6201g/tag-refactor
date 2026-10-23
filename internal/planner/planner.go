@@ -57,7 +57,8 @@ type Plan struct {
 	Conflicts        []KeyConflict
 	ImpactFindings   []ImpactFinding
 	UnreadPolicies   []UnreadPolicy
-	// InventoryComplete is always true in U1: a failed read stops the command.
+	// InventoryComplete is false when the tagging API could not read a
+	// region (BR4.1, BR5.6).
 	InventoryComplete      bool
 	ImpactAnalysisComplete bool
 }
@@ -76,7 +77,7 @@ func Build(snap *inventory.Snapshot, rs *rules.RuleSet, now time.Time) *Plan {
 		Conflicts:              []KeyConflict{},
 		ImpactFindings:         []ImpactFinding{},
 		UnreadPolicies:         []UnreadPolicy{},
-		InventoryComplete:      true,
+		InventoryComplete:      snap.Complete(),
 		ImpactAnalysisComplete: true,
 	}
 	keyRules := append([]rules.KeyRule(nil), rs.KeyRules...)

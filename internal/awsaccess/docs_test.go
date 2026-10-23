@@ -44,7 +44,34 @@ func readPolicyExample(t *testing.T) (policyDocument, map[string]any) {
 	return doc, generic
 }
 
-// NFR3.2: the example policy only reads, and never uses wildcards in actions.
+// readActionsByName are the two IAM actions that read without starting with
+// Get, List or Describe (NFR3.3). resource-explorer-2:Search is the IAM
+// action of ListResources; the API Search itself is never called.
+var readActionsByName = map[string]bool{
+	"config:SelectResourceConfig": true,
+	"resource-explorer-2:Search":  true,
+}
+
+// checkReadOnlyAction returns why action is not allowed in the example
+// policy, or "" when it is a read without wildcards.
+func checkReadOnlyAction(action string) string {
+	if strings.Contains(action, "*") {
+		return "contains *"
+	}
+	if readActionsByName[action] {
+		return ""
+	}
+	name := action[strings.Index(action, ":")+1:]
+	for _, prefix := range []string{"Get", "List", "Describe"} {
+		if strings.HasPrefix(name, prefix) {
+			return ""
+		}
+	}
+	return "is not a read (Get, List, Describe, or one of the two allowed by name)"
+}
+
+// NFR3.2, NFR3.3: the example policy only reads, and never uses wildcards in
+// actions.
 func TestReadOnlyPolicyExampleAllowsOnlyReads(t *testing.T) {
 	doc, _ := readPolicyExample(t)
 	if doc.Version != "2012-10-17" || len(doc.Statement) == 0 {
@@ -55,13 +82,23 @@ func TestReadOnlyPolicyExampleAllowsOnlyReads(t *testing.T) {
 			t.Errorf("unexpected effect %q", st.Effect)
 		}
 		for _, action := range st.Action {
-			name := action[strings.Index(action, ":")+1:]
-			if strings.Contains(action, "*") {
-				t.Errorf("action %q contains *", action)
+			if why := checkReadOnlyAction(action); why != "" {
+				t.Errorf("action %q %s", action, why)
 			}
-			if !strings.HasPrefix(name, "Get") && !strings.HasPrefix(name, "List") && !strings.HasPrefix(name, "Describe") {
-				t.Errorf("action %q is not a read (Get, List, Describe)", action)
-			}
+		}
+	}
+}
+
+// NFR3.3: only the two actions named in readActionsByName pass by name;
+// other Select or Search actions are rejected.
+func TestReadOnlyCheckAllowsOnlyTheTwoNamedExceptions(t *testing.T) {
+	for action, ok := range map[string]bool{
+		"config:SelectResourceConfig": true, "resource-explorer-2:Search": true, "resource-explorer-2:GetView": true,
+		"config:SelectAggregateResourceConfig": false, "resource-explorer-2:SearchViews": false,
+		"config:StartConfigurationRecorder": false, "resource-explorer-2:CreateIndex": false, "config:Describe*": false,
+	} {
+		if got := checkReadOnlyAction(action) == ""; got != ok {
+			t.Errorf("%s accepted = %v, want %v", action, got, ok)
 		}
 	}
 }
@@ -149,6 +186,64 @@ func TestSandboxReadOnlyRoleMatchesThePolicyExample(t *testing.T) {
 	}
 	if _, attached := template.Resources["P3"].Properties["Roles"]; attached {
 		t.Fatal("P3 must not be attached")
+	}
+}
+
+// The U2 template gives ap-northeast-1 a local index and a default view
+// without a filter (infrastructure-specification.md IX, VW, DV), each behind
+// its parameter so an existing index or view can be kept.
+func TestSandboxU2TemplateHasALocalIndexAndAnUnfilteredDefaultView(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "test", "sandbox", "u2-fixtures.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var template struct {
+		Parameters map[string]any `yaml:"Parameters"`
+		Resources  map[string]struct {
+			Type       string         `yaml:"Type"`
+			Condition  string         `yaml:"Condition"`
+			Properties map[string]any `yaml:"Properties"`
+		} `yaml:"Resources"`
+	}
+	if err := yaml.Unmarshal(raw, &template); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"CreateIndex", "CreateDefaultView"} {
+		if _, ok := template.Parameters[p]; !ok {
+			t.Errorf("parameter %s is missing", p)
+		}
+	}
+	ix := template.Resources["IX"]
+	if ix.Type != "AWS::ResourceExplorer2::Index" || ix.Properties["Type"] != "LOCAL" || ix.Condition == "" {
+		t.Errorf("IX = %+v", ix)
+	}
+	for _, name := range []string{"VW", "VWOnly"} {
+		v := template.Resources[name]
+		if v.Type != "AWS::ResourceExplorer2::View" || v.Condition == "" {
+			t.Errorf("%s = %+v", name, v)
+		}
+		if _, filtered := v.Properties["Filters"]; filtered {
+			t.Errorf("%s must not have a filter: a filtered default view fails the discovery", name)
+		}
+		// tag:none is rejected unless the view includes the tags property.
+		includesTags := false
+		props, _ := v.Properties["IncludedProperties"].([]any)
+		for _, p := range props {
+			if m, ok := p.(map[string]any); ok && m["Name"] == "tags" {
+				includesTags = true
+			}
+		}
+		if !includesTags {
+			t.Errorf("%s must include the tags property: %v", name, v.Properties["IncludedProperties"])
+		}
+	}
+	if dv := template.Resources["DV"]; dv.Type != "AWS::ResourceExplorer2::DefaultViewAssociation" {
+		t.Errorf("DV = %+v", dv)
+	}
+	for name, r := range template.Resources {
+		if !strings.HasPrefix(r.Type, "AWS::ResourceExplorer2::") {
+			t.Errorf("%s (%s): the U2 stack holds only Resource Explorer resources", name, r.Type)
+		}
 	}
 }
 

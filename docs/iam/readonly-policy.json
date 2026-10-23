@@ -7,7 +7,14 @@
       "Action": [
         "ec2:DescribeRegions",
         "tag:GetResources",
-        "iam:ListPolicies"
+        "iam:ListPolicies",
+        "config:DescribeConfigurationRecorders",
+        "config:DescribeConfigurationRecorderStatus",
+        "config:SelectResourceConfig",
+        "resource-explorer-2:ListIndexes",
+        "resource-explorer-2:GetDefaultView",
+        "resource-explorer-2:GetView",
+        "resource-explorer-2:Search"
       ],
       "Resource": "*"
     },

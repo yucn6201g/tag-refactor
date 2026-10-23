@@ -32,6 +32,9 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 		{&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsRejected, Op: "sts:GetCallerIdentity"}, "AWS rejected the credentials", "access key"},
 		{&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsTimeout}, "could not be obtained in time", "network"},
 		{&errkind.Error{Kind: errkind.AccessDenied, Op: "iam:ListPolicies", Cause: secret}, "access denied for iam:ListPolicies", "docs/iam/readonly-policy.json"},
+		// ListResources needs the IAM action resource-explorer-2:Search.
+		{&errkind.Error{Kind: errkind.AccessDenied, Op: "resource-explorer-2:ListResources", Region: "eu-west-1"},
+			"access denied for resource-explorer-2:Search (region eu-west-1)", "allow resource-explorer-2:Search"},
 		{&errkind.Error{Kind: errkind.Transient, Reason: errkind.ReasonTimeout, Op: "tag:GetResources", Region: "us-east-1"}, "did not answer tag:GetResources in time (region us-east-1)", "--debug"},
 		{&errkind.Error{Kind: errkind.Transient, Op: "tag:GetResources"}, "kept failing on tag:GetResources after retries", "--debug"},
 		{&errkind.Error{Kind: errkind.Internal, Cause: secret}, "an unexpected error occurred in tag-refactor", "--debug"},
@@ -58,6 +61,9 @@ func TestExitCodeFollowsBR6_3(t *testing.T) {
 		mean string
 	}{
 		{outcome{command: "plan", incomplete: true, needsReview: true}, 1, "impact analysis incomplete"},
+		// U2 BR5.3, BR5.6: a region the tagging API could not read is 1.
+		{outcome{command: "scan", regionsMissing: true, needsReview: true}, 1, "results incomplete"},
+		{outcome{command: "plan", regionsMissing: true, incomplete: true}, 1, "results incomplete"},
 		{outcome{command: "scan", needsReview: true}, 2, "issues found"},
 		{outcome{command: "plan", needsReview: true}, 2, "review needed"},
 		{outcome{command: "scan"}, 0, "no issues"},

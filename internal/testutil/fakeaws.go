@@ -11,12 +11,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -35,9 +37,12 @@ type Call struct {
 	AccessKeyID string
 	// Host is the request host.
 	Host string
+	// Path is the URL path of the request.
+	Path string
 	// Form holds the parameters of query-protocol requests (STS, IAM, EC2).
 	Form url.Values
-	// JSON holds the body of JSON-protocol requests (tagging API).
+	// JSON holds the body of JSON-protocol requests (tagging API, AWS Config)
+	// and of REST-JSON requests (Resource Explorer).
 	JSON map[string]any
 	// N counts the calls of the same Op so far, starting at 1.
 	N int
@@ -63,13 +68,16 @@ type Handler func(c Call) Reply
 
 // FakeAWS is an http.RoundTripper that answers AWS API calls from registered
 // handlers and records every call. Calls to operations that are not reads
-// (Get, List, Describe) or that have no handler fail the test.
+// (Get, List, Describe, or config:SelectResourceConfig) or that have no
+// handler fail the test.
 type FakeAWS struct {
 	t        testing.TB
 	mu       sync.Mutex
 	handlers map[string]Handler
 	calls    []Call
 	counts   map[string]int
+	delay    func(Call) time.Duration
+	inFlight atomic.Int64
 }
 
 // NewFakeAWS returns a fake AWS that reports unexpected calls to t.
@@ -110,9 +118,43 @@ func (f *FakeAWS) Count(op string) int {
 	return f.counts[op]
 }
 
-// IsReadOperation reports whether the action of op is a read (it starts with
-// Get, List or Describe).
+// InFlight returns the number of requests that have arrived and not yet been
+// answered. A command that has returned must leave none behind (NFR5.8).
+func (f *FakeAWS) InFlight() int {
+	return int(f.inFlight.Load())
+}
+
+// SetDelay makes the fake wait for delay(call) before answering every call,
+// in addition to the handler's own delay. Tests use it to shuffle the order
+// in which regions finish (NFR5.7).
+func (f *FakeAWS) SetDelay(delay func(Call) time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delay = delay
+}
+
+// RegionDelays returns a delay function that gives each region a fixed
+// pseudo-random delay below max, chosen by seed. The same seed always gives
+// the same delays; different seeds give different finishing orders.
+func RegionDelays(seed int64, max time.Duration) func(Call) time.Duration {
+	return func(c Call) time.Duration {
+		h := fnv.New64a()
+		_, _ = fmt.Fprintf(h, "%d/%s", seed, c.Region)
+		return time.Duration(h.Sum64() % uint64(max))
+	}
+}
+
+// readOperationsByName are the operations that read but do not start with
+// Get, List or Describe (security design §1).
+var readOperationsByName = map[string]bool{"config:SelectResourceConfig": true}
+
+// IsReadOperation reports whether the action of op is a read: it starts with
+// Get, List or Describe, or it is config:SelectResourceConfig. The API
+// resource-explorer-2:Search is not one of them; tag-refactor never calls it.
 func IsReadOperation(op string) bool {
+	if readOperationsByName[op] {
+		return true
+	}
 	action := op[strings.Index(op, ":")+1:]
 	for _, prefix := range []string{"Get", "List", "Describe"} {
 		if strings.HasPrefix(action, prefix) {
@@ -124,6 +166,8 @@ func IsReadOperation(op string) bool {
 
 // RoundTrip implements http.RoundTripper.
 func (f *FakeAWS) RoundTrip(req *http.Request) (*http.Response, error) {
+	f.inFlight.Add(1)
+	defer f.inFlight.Add(-1)
 	call, err := parseCall(req)
 	if err != nil {
 		f.t.Errorf("fake AWS: cannot parse request to %s: %v", req.URL.Host, err)
@@ -134,6 +178,7 @@ func (f *FakeAWS) RoundTrip(req *http.Request) (*http.Response, error) {
 	call.N = f.counts[call.Op]
 	f.calls = append(f.calls, call)
 	h, ok := f.handlers[call.Op]
+	delay := f.delay
 	f.mu.Unlock()
 
 	if !IsReadOperation(call.Op) {
@@ -145,6 +190,9 @@ func (f *FakeAWS) RoundTrip(req *http.Request) (*http.Response, error) {
 		return newResponse(req, QueryError(http.StatusBadRequest, "FakeAWSNoHandler", "no handler")), nil
 	}
 	reply := h(call)
+	if delay != nil {
+		reply.Delay += delay(call)
+	}
 	if reply.Delay > 0 {
 		timer := time.NewTimer(reply.Delay)
 		defer timer.Stop()
@@ -204,16 +252,24 @@ func parseCall(req *http.Request) (Call, error) {
 	if p, ok := signingServiceToIAMPrefix[service]; ok {
 		service = p
 	}
-	c := Call{Service: service, Region: region, AccessKeyID: accessKey, Host: req.URL.Host}
-	if target := req.Header.Get("X-Amz-Target"); target != "" {
+	c := Call{Service: service, Region: region, AccessKeyID: accessKey, Host: req.URL.Host, Path: req.URL.Path}
+	switch {
+	case req.Header.Get("X-Amz-Target") != "":
+		// JSON 1.1 (tagging API, AWS Config): the operation is in the header.
+		target := req.Header.Get("X-Amz-Target")
 		c.Action = target[strings.LastIndex(target, ".")+1:]
-		c.JSON = map[string]any{}
-		if len(bytes.TrimSpace(body)) > 0 {
-			if err := json.Unmarshal(body, &c.JSON); err != nil {
-				return Call{}, fmt.Errorf("JSON body: %w", err)
-			}
+		if c.JSON, err = parseJSONBody(body); err != nil {
+			return Call{}, err
 		}
-	} else {
+	case isRESTJSON(req):
+		// REST-JSON (Resource Explorer): the operation is the last part of
+		// the URL path, for example POST /ListResources.
+		c.Action = req.URL.Path[strings.LastIndex(req.URL.Path, "/")+1:]
+		if c.JSON, err = parseJSONBody(body); err != nil {
+			return Call{}, err
+		}
+	default:
+		// Query protocol (STS, IAM, EC2): the operation is the Action parameter.
 		form, err := url.ParseQuery(string(body))
 		if err != nil {
 			return Call{}, fmt.Errorf("form body: %w", err)
@@ -226,6 +282,23 @@ func parseCall(req *http.Request) (Call, error) {
 	}
 	c.Op = c.Service + ":" + c.Action
 	return c, nil
+}
+
+// isRESTJSON reports whether a request without X-Amz-Target uses REST-JSON:
+// such requests name the operation in the path, while the query protocol
+// always posts to "/".
+func isRESTJSON(req *http.Request) bool {
+	return strings.Trim(req.URL.Path, "/") != ""
+}
+
+func parseJSONBody(body []byte) (map[string]any, error) {
+	m := map[string]any{}
+	if len(bytes.TrimSpace(body)) > 0 {
+		if err := json.Unmarshal(body, &m); err != nil {
+			return nil, fmt.Errorf("JSON body: %w", err)
+		}
+	}
+	return m, nil
 }
 
 // parseCredentialScope reads "Credential=AKID/date/region/service/aws4_request"

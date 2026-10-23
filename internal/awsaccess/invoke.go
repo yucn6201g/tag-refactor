@@ -75,8 +75,20 @@ type kindReason struct {
 	reason errkind.Reason
 }
 
-// errorCodes maps AWS error codes to error kinds.
+// errorCodes maps AWS error codes to error kinds. The names are shared by the
+// tagging API, IAM, EC2, STS, AWS Config and Resource Explorer: the common
+// errors of the query, JSON and REST-JSON protocols plus each service's own
+// names for the same conditions (security design §4).
 var errorCodes = map[string]kindReason{}
+
+// opErrorCodes maps error codes that mean something else for one operation.
+// Resource Explorer's ListResources answers 401 UnauthorizedException when
+// the default view cannot be used; that is not a credential problem, and a
+// region without a usable view must not stop the whole run (security design
+// §4).
+var opErrorCodes = map[string]map[string]kindReason{
+	OpListResources: {"UnauthorizedException": {errkind.AccessDenied, errkind.ReasonNone}},
+}
 
 func init() {
 	add := func(kr kindReason, codes ...string) {
@@ -85,20 +97,37 @@ func init() {
 		}
 	}
 	add(kindReason{errkind.AccessDenied, errkind.ReasonNone},
-		"AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "UnauthorizedAccess", "AuthorizationError")
+		"AccessDenied", "AccessDeniedException", "UnauthorizedOperation", "UnauthorizedAccess", "AuthorizationError",
+		"NotAuthorized")
 	add(kindReason{errkind.CredentialsMissing, errkind.ReasonCredentialsExpired},
 		"ExpiredToken", "ExpiredTokenException", "RequestExpired", "TokenRefreshRequired")
 	add(kindReason{errkind.CredentialsMissing, errkind.ReasonCredentialsRejected},
 		"InvalidClientTokenId", "UnrecognizedClientException", "SignatureDoesNotMatch", "AuthFailure",
-		"InvalidAccessKeyId", "MissingAuthenticationToken", "IncompleteSignature", "InvalidToken")
+		"InvalidAccessKeyId", "MissingAuthenticationToken", "MissingAuthenticationTokenException", "IncompleteSignature",
+		"IncompleteSignatureException", "InvalidSignatureException", "InvalidToken")
 	add(kindReason{errkind.Transient, errkind.ReasonRetriesExhausted},
 		"Throttling", "ThrottlingException", "ThrottledException", "RequestThrottled", "RequestThrottledException",
 		"RequestLimitExceeded", "TooManyRequestsException", "SlowDown", "EC2ThrottledException",
 		"ServiceUnavailable", "ServiceUnavailableException", "Unavailable", "InternalError", "InternalFailure",
-		"InternalServiceError", "InternalServerError", "InternalException", "RequestTimeout", "RequestTimeoutException",
-		"PriorRequestNotComplete")
+		"InternalServiceError", "InternalServerError", "InternalServerException", "InternalException",
+		"RequestTimeout", "RequestTimeoutException", "PriorRequestNotComplete")
 	add(kindReason{errkind.InvalidInput, errkind.ReasonRegionUnavailable},
 		"RegionDisabledException", "OptInRequired")
+}
+
+// codeKind returns the kind of an AWS error code for op, and whether the code
+// is known.
+func codeKind(op, code string) (kindReason, bool) {
+	if kr, ok := opErrorCodes[op][code]; ok {
+		return kr, true
+	}
+	kr, ok := errorCodes[code]
+	return kr, ok
+}
+
+func isKnownCode(op, code string) bool {
+	_, ok := codeKind(op, code)
+	return ok
 }
 
 // classify converts an SDK error into an error kind. The SDK error is kept
@@ -113,11 +142,19 @@ func classify(callCtx context.Context, op, region string, err error) *errkind.Er
 	var maxAttempts *retry.MaxAttemptsError
 	var quota ratelimit.QuotaExceededError
 	var dnsErr *net.DNSError
+	var credErr *credentialsError
 	switch {
 	case errors.Is(callCtx.Err(), context.DeadlineExceeded):
 		e.Kind, e.Reason = errkind.Transient, errkind.ReasonTimeout
-	case errors.As(err, &apiErr) && errorCodes[apiErr.ErrorCode()].kind != errkind.Internal:
-		kr := errorCodes[apiErr.ErrorCode()]
+	case errors.Is(callCtx.Err(), context.Canceled):
+		// The run was stopped, for example by expired credentials in another
+		// region; the caller reports that error, not this one.
+		e.Detail = "the call was cancelled"
+	case errors.As(err, &credErr):
+		// The SDK could not obtain credentials again during the call.
+		e.Kind, e.Reason = errkind.CredentialsMissing, credErr.reason()
+	case errors.As(err, &apiErr) && isKnownCode(op, apiErr.ErrorCode()):
+		kr, _ := codeKind(op, apiErr.ErrorCode())
 		e.Kind, e.Reason = kr.kind, kr.reason
 	case errors.As(err, &respErr) && respErr.HTTPStatusCode() >= 500:
 		e.Kind, e.Reason = errkind.Transient, errkind.ReasonRetriesExhausted

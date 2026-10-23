@@ -39,7 +39,8 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		"later command":            {[]string{"apply", "--plan", "p.json"}, "apply is not available in this version"},
 		"rules suggest":            {[]string{"rules", "suggest"}, "rules is not available in this version"},
 		"format on scan":           {[]string{"scan", "--format", "json"}, "--format is not available in this version"},
-		"rules on scan":            {[]string{"scan", "--rules", "r.yaml"}, "--rules is not available in this version"},
+		"comma-separated regions":  {[]string{"scan", "--region", "us-east-1,eu-west-1"}, `"us-east-1,eu-west-1" is not an AWS region name`},
+		"broken rule file on scan": {[]string{"scan", "--rules", "missing-rules.yaml"}, "missing-rules.yaml: the rule file does not exist"},
 		"out on plan":              {[]string{"plan", "--rules", "r.yaml", "--out", "p.json"}, "--out is not available in this version"},
 		"lang on plan":             {[]string{"plan", "--lang", "ja"}, "--lang is not available in this version"},
 		"plan without a rule file": {[]string{"plan"}, "plan needs a rule file"},
@@ -224,7 +225,7 @@ func TestPlanWithoutChangesReadsNoPolicies(t *testing.T) {
 		t.Fatalf("stdout = %q", r.stdout)
 	}
 	requireContains(t, "stderr", r.stderr, "Exit code: 0 (no changes needed)")
-	requireContains(t, "stderr", r.stderr, "Checked: only the resources that the tagging API returns in us-east-1 (no IAM policies were read: nothing to change)\n")
+	requireContains(t, "stderr", r.stderr, "Checked: tagged resources in 1 of 3 regions (tagging API); no IAM policies were read: nothing to change\n")
 	if w.fake.Count("iam:ListPolicies") != 0 {
 		t.Fatal("policies were read although nothing changes (BR4.4)")
 	}
@@ -258,10 +259,12 @@ func TestScanAndPlanStateWhatTheyChecked(t *testing.T) {
 	plan := w.run("plan", "--rules", rules, "--region", "us-east-1")
 
 	scan.requireExit(t, 0)
-	requireContains(t, "scan stderr", scan.stderr, "\nChecked: only the resources that the tagging API returns in us-east-1\nDone in ")
+	// The U2 wording (BR5.7): regions read out of the enabled ones, and how
+	// never-tagged resources were looked for.
+	requireContains(t, "scan stderr", scan.stderr, "\nChecked: tagged resources in 1 of 3 regions (tagging API); never-tagged resources not checked\nDone in ")
 	requireNotContains(t, "scan stdout", scan.stdout, "Checked")
 	plan.requireExit(t, 2)
-	requireContains(t, "plan stderr", plan.stderr, "\nChecked: only the resources that the tagging API returns in us-east-1, "+
+	requireContains(t, "plan stderr", plan.stderr, "\nChecked: tagged resources in 1 of 3 regions (tagging API), "+
 		"and customer managed IAM policies attached to a user, role or group\nDone in ")
 	requireNotContains(t, "plan stdout", plan.stdout, "Checked")
 	if !strings.HasSuffix(plan.stdout, "Summary: 1 to change · 0 conflicts · 0 affected · 0 undecided\n") {
@@ -283,25 +286,31 @@ func TestPlanWithOnlyConflictsNeedsReviewWithoutImpactAnalysis(t *testing.T) {
 	}
 }
 
+// Failures of the calls that every command needs (the account, or an answer
+// that cannot be understood) stop the command with a two-line message. Since
+// U2, a region whose tagging API keeps failing is part of the result instead
+// (see TestARegionThatKeepsFailingIsReportedInTheResult).
 func TestAWSFailuresHaveTwoLineMessages(t *testing.T) {
 	cases := map[string]struct {
+		op     string
 		reply  testutil.Reply
 		change func(d *cli.Deps)
 		what   string
 	}{
-		"call time limit": {testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.CallTimeout = 50 * time.Millisecond },
-			"AWS did not answer tag:GetResources in time (region us-east-1)"},
-		"attempt time limit": {testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.AttemptTimeout = 20 * time.Millisecond },
-			"AWS kept failing on tag:GetResources after retries (region us-east-1)"},
-		"throttling": {testutil.JSONError(400, "ThrottlingException", "slow down"), func(*cli.Deps) {},
-			"AWS kept failing on tag:GetResources after retries (region us-east-1)"},
-		"unexpected answer": {testutil.Reply{Body: "<<<", ContentType: "application/x-amz-json-1.1"}, func(*cli.Deps) {},
+		"call time limit": {"sts:GetCallerIdentity", testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.CallTimeout = 50 * time.Millisecond },
+			"AWS did not answer sts:GetCallerIdentity in time (region us-east-1)"},
+		"attempt time limit": {"sts:GetCallerIdentity", testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.AttemptTimeout = 20 * time.Millisecond },
+			"AWS kept failing on sts:GetCallerIdentity after retries (region us-east-1)"},
+		"throttling": {"sts:GetCallerIdentity", testutil.QueryError(400, "Throttling", "slow down"), func(*cli.Deps) {},
+			"AWS kept failing on sts:GetCallerIdentity after retries (region us-east-1)"},
+		"unexpected answer": {"tag:GetResources", testutil.Reply{Body: "<<<", ContentType: "application/x-amz-json-1.1"}, func(*cli.Deps) {},
 			"an unexpected error occurred in tag:GetResources (region us-east-1)"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			w := newWorld(t)
-			w.fake.Handle("tag:GetResources", testutil.Static(tc.reply))
+			w.givenResources()
+			w.fake.Handle(tc.op, testutil.Static(tc.reply))
 
 			r := w.runWith(tc.change, "scan", "--region", "us-east-1")
 
@@ -310,6 +319,80 @@ func TestAWSFailuresHaveTwoLineMessages(t *testing.T) {
 			requireContains(t, "stderr", r.stderr, "Error: "+tc.what)
 			requireContains(t, "stderr", r.stderr, "--debug")
 		})
+	}
+}
+
+// BR4.1, NFR5.5: a region whose tagging API keeps failing (throttling after
+// ten attempts, or the time limits) is listed at the top of the result with
+// the kind of failure; the other regions are still read.
+func TestARegionThatKeepsFailingIsReportedInTheResult(t *testing.T) {
+	cases := map[string]struct {
+		reply  testutil.Reply
+		change func(d *cli.Deps)
+	}{
+		"call time limit":    {testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.CallTimeout = 50 * time.Millisecond }},
+		"attempt time limit": {testutil.Reply{Delay: time.Hour}, func(d *cli.Deps) { d.AttemptTimeout = 20 * time.Millisecond }},
+		"throttling":         {testutil.JSONError(400, "ThrottlingException", "slow down"), func(*cli.Deps) {}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			w.fake.Handle("tag:GetResources", testutil.PerRegion(map[string]testutil.Handler{
+				"eu-west-1": testutil.Static(tc.reply),
+			}, testutil.TagPages([]testutil.TaggedResource{{ARN: arnQA, Tags: map[string]string{"Owner": "a"}}})))
+
+			r := w.runWith(tc.change, "scan", "--region", "us-east-1", "--region", "eu-west-1")
+
+			r.requireExit(t, 1)
+			if !strings.HasPrefix(r.stdout, "! Results are incomplete\n    eu-west-1: Transient (tag:GetResources)\n") {
+				t.Fatalf("stdout must start with the failed region:\n%s", r.stdout)
+			}
+			requireContains(t, "stdout", r.stdout, "Summary: 1 resource scanned in 1 of 3 regions")
+		})
+	}
+	w := newWorld(t)
+	w.fake.Handle("tag:GetResources", testutil.Static(testutil.JSONError(400, "ThrottlingException", "slow down")))
+	w.runWith(func(*cli.Deps) {}, "scan", "--region", "us-east-1")
+	if n := w.fake.Count("tag:GetResources"); n != 10 {
+		t.Fatalf("%d attempts, want 10 (NFR5.4)", n)
+	}
+}
+
+// BR5.2: scan counts the required keys, so it does not say they are unused;
+// plan does not use them yet and keeps the U1 warning.
+func TestScanUsesRequiredKeysWhilePlanWarnsAboutThem(t *testing.T) {
+	w := newWorld(t)
+	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"Environment": "dev"}})
+	w.givenAttachedPolicies(map[string]string{})
+	rules := w.givenRuleFile(aliasRules + "required:\n  Owner:\n    default: x\n")
+
+	scan := w.run("scan", "--region", "us-east-1", "--rules", rules)
+	plan := w.run("plan", "--region", "us-east-1", "--rules", rules)
+
+	scan.requireExit(t, 2)
+	requireMatch(t, "scan stdout", scan.stdout, `(?m)^  Owner\s+1 resource$`)
+	requireNotContains(t, "scan stderr", scan.stderr, `"required" is not used`)
+	plan.requireExit(t, 0)
+	requireContains(t, "plan stderr", plan.stderr, `"required" is not used in this version`)
+}
+
+// BR1.1: the first --region is where the account is identified; every
+// --region is read.
+func TestTheFirstRegionIsTheSessionRegion(t *testing.T) {
+	w := newWorld(t)
+	w.givenResources()
+
+	r := w.run("scan", "--region", "eu-west-1", "--region", "ap-northeast-1")
+
+	r.requireExit(t, 0)
+	requireContains(t, "stderr", r.stderr, "Account 123456789012 · region eu-west-1")
+	for _, c := range w.fake.Calls() {
+		if c.Op == "sts:GetCallerIdentity" && c.Region != "eu-west-1" {
+			t.Fatalf("the account was identified in %s", c.Region)
+		}
+	}
+	if got := regionsCalled(w.fake, "tag:GetResources"); strings.Join(got, ",") != "ap-northeast-1,eu-west-1" {
+		t.Fatalf("regions read = %v", got)
 	}
 }
 
@@ -364,7 +447,7 @@ func TestPerformanceScanAndPlanWith10000Resources(t *testing.T) {
 	plan.requireExit(t, 2)
 	requireContains(t, "scan stdout", scan.stdout, "Summary: 10000 resources scanned")
 	requireContains(t, "plan stdout", plan.stdout, "Summary: 7500 to change")
-	if elapsed > 10*time.Second {
+	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("scan and plan of 10,000 resources took %v (limit 10s)", elapsed)
 	}
 	t.Logf("scan and plan of 10,000 resources: %v", elapsed)
@@ -403,7 +486,7 @@ func TestPerformanceImpactWith500PoliciesAnd1000Changes(t *testing.T) {
 
 	r.requireExit(t, 2)
 	requireContains(t, "stdout", r.stdout, "Summary: 1000 to change · 0 conflicts · 500 affected · 500 undecided")
-	if elapsed > 10*time.Second {
+	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("impact analysis of 500 policies x 1,000 changes took %v (limit 10s)", elapsed)
 	}
 	t.Logf("impact analysis of 500 policies x 1,000 changes: %v", elapsed)

@@ -1,0 +1,25 @@
+{
+  "stage": "code-generation",
+  "unit": "u2-scan",
+  "version": 1,
+  "writes": [
+    { "path": ".github/workflows/ci.yml" },
+    { "path": "README.md" },
+    { "path": "go.mod" },
+    { "path": "go.sum" },
+    { "path": "docs/iam/readonly-policy.json" },
+    { "path": "internal/awsaccess/" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/errkind/" },
+    { "path": "internal/inventory/" },
+    { "path": "internal/planner/" },
+    { "path": "internal/rules/" },
+    { "path": "internal/testutil/" },
+    { "path": "scripts/verify-u1.sh" },
+    { "path": "scripts/verify.sh" },
+    { "path": "test/sandbox/u1-fixtures.yaml" },
+    { "path": "test/sandbox/u2-fixtures.yaml" },
+    { "path": "test/sandbox/u2-rules.yaml" }
+  ]
+}

@@ -28,13 +28,17 @@ type Deps struct {
 	Now func() time.Time
 	// AttemptTimeout bounds one HTTP attempt of an AWS call. Zero means 30s.
 	AttemptTimeout time.Duration
-	// CallTimeout bounds one AWS API call including its retries. Zero means 120s.
+	// CallTimeout bounds one AWS API call including its retries. Zero means
+	// five minutes.
 	CallTimeout time.Duration
 	// CredentialTimeout bounds resolving the AWS credentials. Zero means 30s.
 	CredentialTimeout time.Duration
 	// RetryDelay, when set, replaces the SDK's back-off delay between retry
 	// attempts. Tests use it to avoid real waiting. Nil keeps the SDK default.
 	RetryDelay func(attempt int) time.Duration
+	// ExplorerPageSize, when set, replaces the page size of Resource
+	// Explorer's ListResources (tests only). Zero keeps 500.
+	ExplorerPageSize int
 }
 
 // Exit codes (contract C5, BR6.3).
@@ -46,16 +50,23 @@ const (
 
 // outcome is the conclusion of one command (CommandOutcome).
 type outcome struct {
-	command     string
+	command string
+	// regionsMissing is true when the tagging API could not read a region
+	// (BR4.1, BR5.6).
+	regionsMissing bool
+	// incomplete is true when the impact analysis is incomplete (plan).
 	incomplete  bool
 	needsReview bool
 	resources   int
 }
 
-// exitCode applies BR6.3: error or incomplete is 1, otherwise anything to
-// review is 2, otherwise 0. An error is handled before an outcome exists.
+// exitCode applies BR6.3 and BR5.3: error or incomplete is 1, otherwise
+// anything to review is 2, otherwise 0. An error is handled before an outcome
+// exists. Never-tagged resources that could not be looked for change nothing.
 func (o outcome) exitCode() (int, string) {
 	switch {
+	case o.regionsMissing:
+		return ExitError, "results incomplete"
 	case o.incomplete:
 		return ExitError, "impact analysis incomplete"
 	case o.needsReview && o.command == "scan":
@@ -77,6 +88,10 @@ type app struct {
 	result  *outcome
 }
 
+// closeDisplay closes the display, which puts the terminal back as it was
+// (NFR9.3). It is a variable so that tests can see every exit of Run use it.
+var closeDisplay = (*display.Printer).Close
+
 // Run executes the command line with args (without the program name) and
 // returns the process exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps) int {
@@ -84,6 +99,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps
 		deps.Now = time.Now
 	}
 	a := &app{deps: deps, p: display.New(stdout, stderr)}
+	defer closeDisplay(a.p)
 	root := a.rootCommand()
 	root.SetArgs(args)
 	root.SetOut(a.p.Stdout())
@@ -121,9 +137,9 @@ func (a *app) rootCommand() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "tag-refactor",
 		Short: "Find AWS tag keys that are written in different ways and plan how to unify them",
-		Long: "tag-refactor reads the tags of one AWS region, groups tag keys that differ only in case and\n" +
-			"separators, and plans key renames from a rule file, showing which IAM policies use the tags.\n" +
-			"It only reads from AWS.",
+		Long: "tag-refactor reads the tags of every enabled AWS region, groups tag keys that are written in\n" +
+			"different ways, counts missing required tags, and plans key renames from a rule file, showing\n" +
+			"which IAM policies use the tags. It only reads from AWS.",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -143,10 +159,10 @@ func (a *app) rootCommand() *cobra.Command {
 	return root
 }
 
-// unavailableOptions are the options of contract C5 that U1 does not support
-// yet; they are accepted by the parser only to say so (BR1.7).
+// unavailableOptions are the options of contract C5 that this version does
+// not support yet; they are accepted by the parser only to say so (BR1.7).
 var unavailableOptions = map[string][]string{
-	"scan": {"rules", "format", "lang"},
+	"scan": {"format", "lang"},
 	"plan": {"format", "out", "lang"},
 }
 
@@ -177,27 +193,33 @@ func unavailableCommand(name string) *cobra.Command {
 	}
 }
 
+// regionFlagHelp is the help of --region for scan and plan (BR1.1).
+const regionFlagHelp = "AWS region to read; repeat it to read several (default: every region enabled for the account)"
+
 func (a *app) scanCommand() *cobra.Command {
-	var profile, region string
+	var rulesPath, profile string
+	var regions []string
 	cmd := &cobra.Command{
 		Use:   "scan",
-		Short: "Group tag keys that differ only in case and separators (one region)",
+		Short: "List tag key variants, missing required tags and never-tagged resources (every region)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := rejectUnavailableFlags(cmd); err != nil {
 				return err
 			}
-			return ensureKind(a.runScan(cmd.Context(), profile, region))
+			return ensureKind(a.runScan(cmd.Context(), rulesPath, profile, regions))
 		},
 	}
+	cmd.Flags().StringVar(&rulesPath, "rules", "", "rule file (YAML); its required keys are counted as missing tags (optional)")
 	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile to use (default: the standard AWS settings)")
-	cmd.Flags().StringVar(&region, "region", "", "AWS region to read (default: the profile's region or AWS_REGION)")
+	cmd.Flags().StringArrayVar(&regions, "region", nil, regionFlagHelp)
 	addUnavailableFlags(cmd)
 	return cmd
 }
 
 func (a *app) planCommand() *cobra.Command {
-	var rulesPath, profile, region string
+	var rulesPath, profile string
+	var regions []string
 	cmd := &cobra.Command{
 		Use:   "plan",
 		Short: "Plan tag key renames from a rule file and show the IAM policies they affect",
@@ -206,12 +228,12 @@ func (a *app) planCommand() *cobra.Command {
 			if err := rejectUnavailableFlags(cmd); err != nil {
 				return err
 			}
-			return ensureKind(a.runPlan(cmd.Context(), rulesPath, profile, region))
+			return ensureKind(a.runPlan(cmd.Context(), rulesPath, profile, regions))
 		},
 	}
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "rule file (YAML) with the canonical keys and their aliases (required)")
 	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile to use (default: the standard AWS settings)")
-	cmd.Flags().StringVar(&region, "region", "", "AWS region to read (default: the profile's region or AWS_REGION)")
+	cmd.Flags().StringArrayVar(&regions, "region", nil, regionFlagHelp)
 	addUnavailableFlags(cmd)
 	return cmd
 }
