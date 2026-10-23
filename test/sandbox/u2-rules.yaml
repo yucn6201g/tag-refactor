@@ -1,0 +1,10 @@
+# Rule file for the U2 checkpoint in the sandbox account
+# (infrastructure-specification.md, expected results): the U1 rules plus a
+# required Owner key, whose missing count scan reports.
+version: 1
+keys:
+  Environment:
+    aliases: [env, Env]
+required:
+  Owner:
+    default: platform
