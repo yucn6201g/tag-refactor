@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +45,56 @@ func TestWriteDraftFileWritesOnceAndLeavesNoTemporaryFile(t *testing.T) {
 	if e, ok := errkind.As(err); !ok || e.Kind != errkind.StorageFailed || e.Hint == "" {
 		t.Fatalf("err = %v", err)
 	}
+}
+
+func TestWriteDraftFileWithoutHardLinks(t *testing.T) {
+	draft := []byte("version: 1\nkeys: {}\n")
+	noLink := func(string, string) error { return &os.LinkError{Op: "link", Err: errors.ErrUnsupported} }
+
+	t.Run("renames when the name is free", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "tagrules.yaml")
+		if err := writeDraftFileWith(path, draft, noLink, os.Rename); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(path); err != nil || string(got) != string(draft) {
+			t.Fatalf("draft = %q, err = %v", got, err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+			t.Fatalf("entries = %v", entries)
+		}
+	})
+
+	t.Run("refuses an existing file", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "tagrules.yaml")
+		if err := os.WriteFile(path, []byte("mine"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		err := writeDraftFileWith(path, draft, noLink, os.Rename)
+		if e, ok := errkind.As(err); !ok || e.Kind != errkind.InvalidInput || !strings.Contains(e.Detail, "already exists") {
+			t.Fatalf("err = %v", err)
+		}
+		if got, _ := os.ReadFile(path); string(got) != "mine" {
+			t.Fatal("the existing file was overwritten")
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+			t.Fatalf("entries = %v", entries)
+		}
+	})
+
+	t.Run("leaves nothing when the name cannot be given", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "tagrules.yaml")
+		failed := func(string, string) error { return &os.LinkError{Op: "rename", Err: fs.ErrPermission} }
+		err := writeDraftFileWith(path, draft, noLink, failed)
+		if e, ok := errkind.As(err); !ok || e.Kind != errkind.StorageFailed {
+			t.Fatalf("err = %v", err)
+		}
+		if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+			t.Fatalf("entries = %v, want an empty folder", entries)
+		}
+	})
 }
 
 func TestCheckOutputPath(t *testing.T) {

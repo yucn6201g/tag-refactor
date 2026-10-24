@@ -184,6 +184,12 @@ func outputFailed(path string, err error) error {
 // overwritten either; a file system without hard links gets a rename after
 // one more check. The temporary file is always removed.
 func writeDraftFile(path string, data []byte) error {
+	return writeDraftFileWith(path, data, os.Link, os.Rename)
+}
+
+// writeDraftFileWith is writeDraftFile with the link and the rename passed
+// in, so the tests can reach the rename and the failure paths.
+func writeDraftFileWith(path string, data []byte, link, rename func(oldname, newname string) error) error {
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".tag-refactor-draft-*.tmp")
 	if err != nil {
 		return outputFailed(path, err)
@@ -201,7 +207,7 @@ func writeDraftFile(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return outputFailed(path, err)
 	}
-	err = os.Link(tmpName, path)
+	err = link(tmpName, path)
 	switch {
 	case err == nil:
 		return nil
@@ -211,7 +217,7 @@ func writeDraftFile(path string, data []byte) error {
 	if _, statErr := os.Lstat(path); statErr == nil {
 		return outputExists(path)
 	}
-	if err := os.Rename(tmpName, path); err != nil {
+	if err := rename(tmpName, path); err != nil {
 		return outputFailed(path, err)
 	}
 	return nil

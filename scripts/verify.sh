@@ -116,6 +116,7 @@ run_tool() {
     fi
     echo "verify: Application Control blocked tag-refactor; retrying ($attempt of 3)" >&2
   done
+  fail "Application Control blocked tag-refactor 3 times; run the verification again"
 }
 
 # 1. The U1 verification: every test and the U1 sandbox test.
@@ -161,7 +162,8 @@ fi
 
 echo "verify: reading the draft back with scan --rules"
 run_tool scan --profile "$readonly_profile" --region "$region" --rules "$draft"
-if grep -q '^Error:' "$u3_dir/stderr"; then
+# 0 (no issues) and 2 (issues to review) both mean the draft was read.
+if [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ] || grep -q '^Error:' "$u3_dir/stderr"; then
   sed 's/^/  /' "$u3_dir/stderr" >&2
   fail "scan could not read the draft of rules suggest"
 fi
