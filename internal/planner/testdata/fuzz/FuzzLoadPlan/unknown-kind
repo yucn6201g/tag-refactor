@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"version\":1,\"toolVersion\":\"v\",\"planId\":\"p\",\"accountId\":\"a\",\"createdAt\":\"2026-10-19T12:04:00Z\",\"regions\":[],\"inventoryComplete\":true,\"impactAnalysisComplete\":true,\"resources\":[{\"arn\":\"arn:a\",\"region\":\"r\",\"global\":false,\"resourceType\":\"sqs\",\"beforeTags\":{},\"changes\":[{\"changeId\":\"c-000001\",\"kind\":\"moveKey\",\"fromKey\":\"a\"}]}]}")
