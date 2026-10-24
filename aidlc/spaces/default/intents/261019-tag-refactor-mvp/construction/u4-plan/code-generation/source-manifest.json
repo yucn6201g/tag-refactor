@@ -1,0 +1,17 @@
+{
+  "stage": "code-generation",
+  "unit": "u4-plan",
+  "version": 1,
+  "writes": [
+    { "path": "README.md" },
+    { "path": "scripts/verify.sh" },
+    { "path": "cmd/tag-refactor/" },
+    { "path": "internal/errkind/errkind.go" },
+    { "path": "internal/rules/suggest.go" },
+    { "path": "internal/rules/suggest_test.go" },
+    { "path": "internal/planner/" },
+    { "path": "internal/display/" },
+    { "path": "internal/fileout/" },
+    { "path": "internal/cli/" }
+  ]
+}

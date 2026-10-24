@@ -1,0 +1,19 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u4-plan",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10", "NFR11", "NFR12"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "NFR1.13, NFR1.14, NFR1.15" },
+    { "id": "NFR2", "status": "N/A", "target": "影響分析の検出率は U5 が受け持つ。U4 は影響分析の結果を変更案に付けるだけ" },
+    { "id": "NFR3", "status": "OK", "target": "NFR3.8" },
+    { "id": "NFR4", "status": "N/A", "target": "U4 は書き換えも取り消しも行わない(U6・U7)" },
+    { "id": "NFR5", "status": "N/A", "target": "U4 は AWS の呼び出しを増やさず、時間の上限と再試行は U1・U2 のまま" },
+    { "id": "NFR6", "status": "N/A", "target": "U4 は書き換えの記録を作らない(U6)。変更案の保存の壊れにくさは NFR8.17 で扱う" },
+    { "id": "NFR7", "status": "N/A", "target": "U4 は apply と rollback を行わない(U6・U7)" },
+    { "id": "NFR8", "status": "OK", "target": "NFR8.15, NFR8.16, NFR8.17, NFR8.18, NFR8.19" },
+    { "id": "NFR9", "status": "OK", "target": "NFR9.6, NFR9.7" },
+    { "id": "NFR10", "status": "OK", "target": "NFR10.6, NFR10.7, NFR10.8" },
+    { "id": "NFR11", "status": "OK", "target": "NFR11.7" },
+    { "id": "NFR12", "status": "N/A", "target": "配布の仕組みは作業単位に含めず、別の作業(外部の準備 E6)で行う" }
+  ]
+}
