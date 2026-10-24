@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -29,6 +30,22 @@ func TestSuggestExitCodes(t *testing.T) {
 		if meaning := display.T(display.English, id); code != tc.code || meaning != tc.meaning {
 			t.Errorf("%+v: got %d %q, want %d %q", tc.o, code, meaning, tc.code, tc.meaning)
 		}
+	}
+}
+
+// The English comments of the display catalog are the rules package's own,
+// so the English draft is the same whichever gives them; Japanese runs get
+// the catalog's Japanese and English runs nothing (the default).
+func TestDraftCommentsFollowTheLanguage(t *testing.T) {
+	if got := catalogComments(display.English); !reflect.DeepEqual(got, rules.EnglishComments()) {
+		t.Fatalf("catalog %+v\nrules %+v", got, rules.EnglishComments())
+	}
+	if draftComments(display.English) != nil {
+		t.Fatal("English keeps the default comments")
+	}
+	ja := draftComments(display.Japanese)
+	if ja == nil || ja.Review[0] == rules.EnglishComments().Review[0] || !strings.Contains(ja.Generated, "%s") {
+		t.Fatalf("Japanese comments = %+v", ja)
 	}
 }
 

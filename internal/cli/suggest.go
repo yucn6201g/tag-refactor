@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/fileout"
 	"github.com/yucn6201g/tag-refactor/internal/inventory"
@@ -69,7 +70,7 @@ func (a *app) runSuggest(ctx context.Context, profile, output string, regions []
 	if err != nil {
 		return err
 	}
-	draft := rules.Suggest(suggestInput(snap, a.deps.Now()))
+	draft := rules.Suggest(suggestInput(snap, a.deps.Now(), a.p.Lang()))
 	if output != "" {
 		if err := a.saveFile(ctx, output, draftPrefix, draftFileLimit, func(w io.Writer) error {
 			_, err := w.Write(draft.Text)
@@ -96,9 +97,34 @@ func (a *app) runSuggest(ctx context.Context, profile, output string, regions []
 	return nil
 }
 
+// catalogComments are the comments of the draft from the display catalog,
+// in lang.
+func catalogComments(lang display.Lang) rules.DraftComments {
+	t := func(id string) string { return display.T(lang, id) }
+	return rules.DraftComments{
+		Generated:     t("draft.generated"),
+		Account:       t("draft.account"),
+		Incomplete:    t("draft.incomplete"),
+		Review:        []string{t("draft.review1"), t("draft.review2")},
+		TooManyValues: t("draft.tooManyValues"),
+		SizeLimit:     t("draft.sizeLimit"),
+	}
+}
+
+// draftComments are the comments of the draft for lang (U4 BR3.9): nil, the
+// English draft as it was, unless the language is Japanese.
+func draftComments(lang display.Lang) *rules.DraftComments {
+	if lang != display.Japanese {
+		return nil
+	}
+	c := catalogComments(lang)
+	return &c
+}
+
 // suggestInput turns the collection into the input of rules.Suggest, with
-// the grouping of scan (inventory.CanonicalKey and its dictionary).
-func suggestInput(snap *inventory.Snapshot, now time.Time) rules.SuggestInput {
+// the grouping of scan (inventory.CanonicalKey and its dictionary) and the
+// comments of the language of the run.
+func suggestInput(snap *inventory.Snapshot, now time.Time, lang display.Lang) rules.SuggestInput {
 	resources := make([]rules.TaggedResource, 0, len(snap.Resources))
 	for _, r := range snap.Resources {
 		resources = append(resources, rules.TaggedResource{ARN: r.ARN, Tags: r.Tags})
@@ -117,6 +143,7 @@ func suggestInput(snap *inventory.Snapshot, now time.Time) rules.SuggestInput {
 		RegionsEnabled: len(snap.EnabledRegions),
 		FailedRegions:  failed,
 		GeneratedAt:    now,
+		Comments:       draftComments(lang),
 	}
 }
 
