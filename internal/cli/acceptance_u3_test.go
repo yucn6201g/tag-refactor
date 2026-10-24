@@ -208,8 +208,12 @@ func TestAcceptanceU3_AC2_1_2_DraftAliasesBecomeKeyRenames(t *testing.T) {
 	r.requireExit(t, 2)
 	requireMatch(t, "stdout", r.stdout, `(?m)^  ~ rename key\s+Env -> env\s+2 resources$`)
 	requireMatch(t, "stdout", r.stdout, `(?m)^  ~ rename key\s+environment -> env\s+1 resource$`)
-	requireContains(t, "stdout", r.stdout, "Summary: 3 to change")
-	requireContains(t, "stderr", r.stderr, "values / required / remove are read but not applied to the plan yet")
+	// Since U4 plan also applies the value candidates of the draft (BR1.3):
+	// Prod and production become prod, so b and c change too.
+	requireMatch(t, "stdout", r.stdout, `(?m)^  ~ value\s+env: Prod -> prod\s+1 resource$`)
+	requireMatch(t, "stdout", r.stdout, `(?m)^  ~ value\s+env: production -> prod\s+1 resource$`)
+	requireContains(t, "stdout", r.stdout, "Summary: 5 to change")
+	requireNotContains(t, "stderr", r.stderr, "not applied to the plan yet")
 }
 
 // AC2.1.5: Given a rule file with a mistake, When plan runs, Then the line,

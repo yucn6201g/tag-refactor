@@ -79,6 +79,19 @@ const (
 	// ReasonNoDefaultView is an AccessDenied of Resource Explorer: the region
 	// has no default view, so ListResources cannot be used (U2, C12).
 	ReasonNoDefaultView Reason = "no-default-view"
+
+	// Reasons of the files tag-refactor writes (U4: plan --out and rules
+	// suggest --output). Subject is the path; Key is the option, filled in
+	// by the command line.
+	ReasonOutputExists        Reason = "output-exists"
+	ReasonOutputFolderMissing Reason = "output-folder-missing"
+	ReasonOutputFailed        Reason = "output-failed"
+	ReasonOutputTooLarge      Reason = "output-too-large"
+	// ReasonPlanFile is an error in a saved plan that is read back (U4
+	// BR4.4). Subject is the path; Detail names the field and the problem.
+	ReasonPlanFile Reason = "plan-file"
+	// ReasonInterrupted is a command stopped by Ctrl+C (U4 NFR design §3).
+	ReasonInterrupted Reason = "interrupted"
 )
 
 // Error is an error with a kind. Only the tool-authored fields are safe to

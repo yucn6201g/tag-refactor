@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -39,6 +40,11 @@ type Deps struct {
 	// ExplorerPageSize, when set, replaces the page size of Resource
 	// Explorer's ListResources (tests only). Zero keeps 500.
 	ExplorerPageSize int
+
+	// savingHook, when set, is called once the temporary file of plan --out
+	// or rules suggest --output exists, before anything is written to it.
+	// The tests of this package use it to interrupt a run while it saves.
+	savingHook func()
 }
 
 // Exit codes (contract C5, BR6.3).
@@ -61,31 +67,36 @@ type outcome struct {
 	draftTooLarge bool
 	needsReview   bool
 	resources     int
+	// saveHint is the rule file of a plan that was not saved: the last line
+	// says how to save it (screen 4).
+	saveHint string
 }
 
-// exitCode applies BR6.3 and BR5.3: error or incomplete is 1, otherwise
-// anything to review is 2, otherwise 0. An error is handled before an outcome
-// exists. Never-tagged resources that could not be looked for change nothing.
-// rules suggest finds nothing to review: its draft gives 0 even with
-// variants, and 1 when it is incomplete or too large (U3 BR6.6, BR6.7).
+// exitCode applies BR6.3, BR5.3 and U4 BR2.6: error or incomplete is 1,
+// otherwise anything to review is 2, otherwise 0. An error is handled before
+// an outcome exists. Never-tagged resources that could not be looked for
+// change nothing, and neither do remove candidates (U4 Q4). rules suggest
+// finds nothing to review: its draft gives 0 even with variants, and 1 when
+// it is incomplete or too large (U3 BR6.6, BR6.7). The meaning is a
+// display.ExitMeaning identifier.
 func (o outcome) exitCode() (int, string) {
 	switch {
 	case o.regionsMissing:
-		return ExitError, "results incomplete"
+		return ExitError, display.ExitMeaningResultsIncomplete
 	case o.incomplete:
-		return ExitError, "impact analysis incomplete"
+		return ExitError, display.ExitMeaningImpactIncomplete
 	case o.draftTooLarge:
-		return ExitError, "draft larger than 64 KiB"
+		return ExitError, display.ExitMeaningDraftTooLarge
 	case o.command == suggestCommandName:
-		return ExitOK, "draft ready"
+		return ExitOK, display.ExitMeaningDraftReady
 	case o.needsReview && o.command == "scan":
-		return ExitNeedsReview, "issues found"
+		return ExitNeedsReview, display.ExitMeaningIssuesFound
 	case o.needsReview:
-		return ExitNeedsReview, "review needed"
+		return ExitNeedsReview, display.ExitMeaningReviewNeeded
 	case o.command == "scan":
-		return ExitOK, "no issues"
+		return ExitOK, display.ExitMeaningNoIssues
 	default:
-		return ExitOK, "no changes needed"
+		return ExitOK, display.ExitMeaningNoChangesNeeded
 	}
 }
 
@@ -93,6 +104,7 @@ type app struct {
 	deps    Deps
 	p       *display.Printer
 	debug   bool
+	lang    string
 	started time.Time
 	result  *outcome
 }
@@ -101,27 +113,41 @@ type app struct {
 // (NFR9.3). It is a variable so that tests can see every exit of Run use it.
 var closeDisplay = (*display.Printer).Close
 
+// getenv reads the environment for the language (BR3.8); a variable for the
+// tests of this package.
+var getenv = os.Getenv
+
 // Run executes the command line with args (without the program name) and
-// returns the process exit code.
+// returns the process exit code. When ctx is cancelled (Ctrl+C) and the
+// command stops with an error, whatever its kind, Run says the command was
+// interrupted and returns 1 (U4 NFR design §3). A cancellation of the
+// command's own (inner) context, such as the stop on missing credentials,
+// leaves ctx as it is and is reported as its error.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps) int {
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
 	a := &app{deps: deps, p: display.New(stdout, stderr)}
 	defer closeDisplay(a.p)
+	a.p.SetLang(display.ResolveLang(getenv))
 	root := a.rootCommand()
 	root.SetArgs(args)
 	root.SetOut(a.p.Stdout())
 	root.SetErr(a.p.Stderr())
 	if err := root.ExecuteContext(ctx); err != nil {
+		if ctx.Err() != nil {
+			a.p.Interrupted()
+			a.p.ExitCode(ExitError, display.ExitMeaningInterrupted)
+			return ExitError
+		}
 		e, ok := errkind.As(err)
 		if !ok {
 			// Errors that are not classified come from parsing the command line.
 			e = &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 		}
-		what, fix := describe(e)
+		what, fix := describe(e, a.p.Lang())
 		a.p.Error(what, fix)
-		a.p.ExitCode(ExitError, "error")
+		a.p.ExitCode(ExitError, display.ExitMeaningError)
 		return ExitError
 	}
 	if a.result == nil {
@@ -131,6 +157,9 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps
 	code, meaning := a.result.exitCode()
 	a.p.Done(a.deps.Now().Sub(a.started), a.result.resources)
 	a.p.ExitCode(code, meaning)
+	if a.result.saveHint != "" {
+		a.p.SavePlanHint(a.result.saveHint)
+	}
 	return writeResult(a.p, code)
 }
 
@@ -148,16 +177,20 @@ func (a *app) rootCommand() *cobra.Command {
 		Short: "Find AWS tag keys that are written in different ways and plan how to unify them",
 		Long: "tag-refactor reads the tags of every enabled AWS region, groups tag keys that are written in\n" +
 			"different ways, counts missing required tags, drafts a rule file from the tags in use, and plans\n" +
-			"key renames from a rule file, showing which IAM policies use the tags. It only reads from AWS.",
+			"key renames, value changes, required tags and removals from a rule file, showing which IAM\n" +
+			"policies use the tags. It only reads from AWS.",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
-		PersistentPreRun: func(*cobra.Command, []string) {
+		PersistentPreRunE: func(*cobra.Command, []string) error {
 			a.p.SetDebug(a.debug)
+			return a.applyLang()
 		},
 	}
 	root.PersistentFlags().BoolVar(&a.debug, "debug", false,
 		"print one line per AWS API call (operation, region, time, retries) to standard error")
+	root.PersistentFlags().StringVar(&a.lang, "lang", "",
+		"language of the output: en or ja (default: LC_ALL, LC_MESSAGES or LANG, then on Windows the display language)")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
@@ -168,28 +201,32 @@ func (a *app) rootCommand() *cobra.Command {
 	return root
 }
 
-// unavailableOptions are the options of contract C5 that this version does
-// not support yet; they are accepted by the parser only to say so (BR1.7).
-var unavailableOptions = map[string][]string{
-	"scan":    {"format", "lang"},
-	"plan":    {"format", "out", "lang"},
-	"suggest": {"lang"},
-}
-
-func addUnavailableFlags(cmd *cobra.Command) {
-	for _, name := range unavailableOptions[cmd.Name()] {
-		cmd.Flags().String(name, "", "not available in this version")
-		_ = cmd.Flags().MarkHidden(name)
+// applyLang sets the language of --lang, which wins over the environment
+// (BR3.8). An unknown value is a usage error before anything else.
+func (a *app) applyLang() error {
+	if a.lang == "" {
+		return nil
 	}
-}
-
-func rejectUnavailableFlags(cmd *cobra.Command) error {
-	for _, name := range unavailableOptions[cmd.Name()] {
-		if cmd.Flags().Changed(name) {
-			return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOptionNotAvailable, Subject: "--" + name}
-		}
+	lang, ok := display.ParseLang(a.lang)
+	if !ok {
+		l := a.p.Lang()
+		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--lang",
+			Detail: display.T(l, "err.badLang", a.lang), Hint: display.T(l, "err.badLangFix")}
 	}
+	a.p.SetLang(lang)
 	return nil
+}
+
+// parseFormat checks a --format value before anything else (BR3.1).
+func (a *app) parseFormat(value string, allowed []display.Format) (display.Format, error) {
+	f, ok := display.ParseFormat(value, allowed)
+	if !ok {
+		l := a.p.Lang()
+		list := display.FormatList(allowed)
+		return "", &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--format",
+			Detail: display.T(l, "err.badFormat", value, list), Hint: display.T(l, "err.badFormatFix", list)}
+	}
+	return f, nil
 }
 
 func unavailableCommand(name string) *cobra.Command {
@@ -207,44 +244,54 @@ func unavailableCommand(name string) *cobra.Command {
 const regionFlagHelp = "AWS region to read; repeat it to read several (default: every region enabled for the account)"
 
 func (a *app) scanCommand() *cobra.Command {
-	var rulesPath, profile string
+	var rulesPath, profile, format string
 	var regions []string
 	cmd := &cobra.Command{
 		Use:   "scan",
 		Short: "List tag key variants, missing required tags and never-tagged resources (every region)",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := rejectUnavailableFlags(cmd); err != nil {
+			f, err := a.parseFormat(format, display.ScanFormats)
+			if err != nil {
 				return err
 			}
-			return ensureKind(a.runScan(cmd.Context(), rulesPath, profile, regions))
+			return ensureKind(a.runScan(cmd.Context(), rulesPath, profile, regions, f))
 		},
 	}
 	cmd.Flags().StringVar(&rulesPath, "rules", "", "rule file (YAML); its required keys are counted as missing tags (optional)")
 	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile to use (default: the standard AWS settings)")
 	cmd.Flags().StringArrayVar(&regions, "region", nil, regionFlagHelp)
-	addUnavailableFlags(cmd)
+	cmd.Flags().StringVar(&format, "format", string(display.FormatTable),
+		"format of the result on standard output: "+display.FormatList(display.ScanFormats))
 	return cmd
 }
 
 func (a *app) planCommand() *cobra.Command {
-	var rulesPath, profile string
+	var rulesPath, profile, format, out string
 	var regions []string
 	cmd := &cobra.Command{
 		Use:   "plan",
-		Short: "Plan tag key renames from a rule file and show the IAM policies they affect",
-		Args:  cobra.NoArgs,
+		Short: "Plan tag changes from a rule file and show the IAM policies they affect",
+		Long: "plan reads the tagged resources of every enabled region (or the --region values) and plans, from\n" +
+			"the rule file, key renames, value changes, required tags to add and keys to remove, with the IAM\n" +
+			"policies that use the tags. It changes nothing. Save the plan with --out (UTF-8 JSON); on Windows\n" +
+			"PowerShell 5.1 a redirection writes UTF-16, so use --out.",
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := rejectUnavailableFlags(cmd); err != nil {
+			f, err := a.parseFormat(format, display.PlanFormats)
+			if err != nil {
 				return err
 			}
-			return ensureKind(a.runPlan(cmd.Context(), rulesPath, profile, regions))
+			return ensureKind(a.runPlan(cmd.Context(), planArgs{rules: rulesPath, profile: profile, regions: regions, format: f, out: out}))
 		},
 	}
-	cmd.Flags().StringVar(&rulesPath, "rules", "", "rule file (YAML) with the canonical keys and their aliases (required)")
+	cmd.Flags().StringVar(&rulesPath, "rules", "", "rule file (YAML) with the canonical keys, values, required tags and removed keys (required)")
 	cmd.Flags().StringVar(&profile, "profile", "", "AWS profile to use (default: the standard AWS settings)")
 	cmd.Flags().StringArrayVar(&regions, "region", nil, regionFlagHelp)
-	addUnavailableFlags(cmd)
+	cmd.Flags().StringVar(&format, "format", string(display.FormatTable),
+		"format of the result on standard output: "+display.FormatList(display.PlanFormats))
+	cmd.Flags().StringVar(&out, "out", "",
+		"save the plan to this file (JSON) for apply; an existing file is never overwritten")
 	return cmd
 }
 

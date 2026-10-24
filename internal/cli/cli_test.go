@@ -38,14 +38,17 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		"unknown command":          {[]string{"nope"}, `unknown command "nope"`},
 		"later command":            {[]string{"apply", "--plan", "p.json"}, "apply is not available in this version"},
 		"rules suggest with rules": {[]string{"rules", "suggest", "--rules", "r.yaml"}, "unknown flag: --rules"},
-		"lang on rules suggest":    {[]string{"rules", "suggest", "--lang", "ja"}, "--lang is not available in this version"},
 		"unknown rules command":    {[]string{"rules", "check"}, `unknown command "check"`},
-		"format on scan":           {[]string{"scan", "--format", "json"}, "--format is not available in this version"},
 		"comma-separated regions":  {[]string{"scan", "--region", "us-east-1,eu-west-1"}, `"us-east-1,eu-west-1" is not an AWS region name`},
 		"broken rule file on scan": {[]string{"scan", "--rules", "missing-rules.yaml"}, "missing-rules.yaml: the rule file does not exist"},
-		"out on plan":              {[]string{"plan", "--rules", "r.yaml", "--out", "p.json"}, "--out is not available in this version"},
-		"lang on plan":             {[]string{"plan", "--lang", "ja"}, "--lang is not available in this version"},
 		"plan without a rule file": {[]string{"plan"}, "plan needs a rule file"},
+		// U4 made --format, --out and --lang available (contract C5); their
+		// wrong values are the usage errors now, still before any AWS call.
+		"diff on scan":            {[]string{"scan", "--format", "diff"}, `--format "diff" is not one of table|json|markdown`},
+		"unknown format on plan":  {[]string{"plan", "--rules", "r.yaml", "--format", "yaml"}, `--format "yaml" is not one of table|diff|json|markdown`},
+		"unknown lang on suggest": {[]string{"rules", "suggest", "--lang", "fr"}, `--lang "fr" is not en or ja`},
+		"unknown lang on plan":    {[]string{"plan", "--lang", "EN"}, `--lang "EN" is not en or ja`},
+		"out in a missing folder": {[]string{"plan", "--rules", "r.yaml", "--out", "no-such-folder/p.json"}, "the folder of no-such-folder"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -75,10 +78,10 @@ func TestHelpAndNoArgumentsExitZero(t *testing.T) {
 		requireNotContains(t, "stderr", r.stderr, "Exit code")
 	}
 	r := newWorld(t).run("scan", "--help")
-	for _, option := range []string{"--profile", "--region", "--debug"} {
+	// U4 lists --format and --lang, which earlier versions hid.
+	for _, option := range []string{"--profile", "--region", "--debug", "--format", "--lang"} {
 		requireContains(t, "scan help", r.stdout, option)
 	}
-	requireNotContains(t, "scan help", r.stdout, "--format")
 }
 
 func TestRuleFileErrorsNameTheFileLineKeyAndFix(t *testing.T) {
@@ -243,7 +246,10 @@ func TestPlanWarnsAboutARuleFileWithoutKeyRules(t *testing.T) {
 	r := w.run("plan", "--rules", rules, "--region", "us-east-1")
 
 	r.requireExit(t, 0)
-	if r.stdout != "No changes needed\nSummary: 1 resource scanned · 0 to change\n" {
+	// Since U4 a key no rule names is a remove candidate (BR2.3), listed under
+	// "No changes needed" without changing the exit code (Q4).
+	if r.stdout != "No changes needed\n\nRemove candidates (keys not in your rules; not changed): 1 key\n  env (1)\n\n"+
+		"Summary: 1 resource scanned · 0 to change · 1 remove candidates\n" {
 		t.Fatalf("stdout = %q", r.stdout)
 	}
 	requireContains(t, "stderr", r.stderr, "warning: "+display.Sanitize(rules)+` line 1: no key rules: "keys" is missing or empty, so no tag key is renamed`)
@@ -269,7 +275,9 @@ func TestScanAndPlanStateWhatTheyChecked(t *testing.T) {
 	requireContains(t, "plan stderr", plan.stderr, "\nChecked: tagged resources in 1 of 3 regions (tagging API), "+
 		"and customer managed IAM policies attached to a user, role or group\nDone in ")
 	requireNotContains(t, "plan stdout", plan.stdout, "Checked")
-	if !strings.HasSuffix(plan.stdout, "Summary: 1 to change · 0 conflicts · 0 affected · 0 undecided\n") {
+	// U4 adds the required values not set, the remove candidates and the
+	// IaC-managed resources to the summary (BR3.2).
+	if !strings.HasSuffix(plan.stdout, "Summary: 1 to change · 0 conflicts · 0 affected · 0 undecided · 0 value not set · 0 remove candidates · 0 IaC-managed\n") {
 		t.Fatalf("plan stdout = %q", plan.stdout)
 	}
 }
@@ -360,8 +368,9 @@ func TestARegionThatKeepsFailingIsReportedInTheResult(t *testing.T) {
 	}
 }
 
-// BR5.2: scan counts the required keys, so it does not say they are unused;
-// plan does not use them yet and says so in one line (U3; U4 removes it).
+// BR5.2: scan counts the required keys, so it does not say they are unused.
+// U3 plan read them without applying them and said so; since U4 plan adds
+// them (BR1.4), so the line is gone and the plan has a change to review.
 func TestScanUsesRequiredKeysWhilePlanWarnsAboutThem(t *testing.T) {
 	w := newWorld(t)
 	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"Environment": "dev"}})
@@ -375,8 +384,9 @@ func TestScanUsesRequiredKeysWhilePlanWarnsAboutThem(t *testing.T) {
 	requireMatch(t, "scan stdout", scan.stdout, `(?m)^  Owner\s+1 resource$`)
 	requireNotContains(t, "scan stderr", scan.stderr, `"required" is not used`)
 	requireNotContains(t, "scan stderr", scan.stderr, "not applied to the plan yet")
-	plan.requireExit(t, 0)
-	requireContains(t, "plan stderr", plan.stderr, "warning: values / required / remove are read but not applied to the plan yet")
+	plan.requireExit(t, 2)
+	requireMatch(t, "plan stdout", plan.stdout, `(?m)^  \+ add\s+Owner = x\s+1 resource$`)
+	requireNotContains(t, "plan stderr", plan.stderr, "not applied to the plan yet")
 }
 
 // BR1.1: the first --region is where the account is identified; every
@@ -448,8 +458,9 @@ func TestPerformanceScanAndPlanWith10000Resources(t *testing.T) {
 
 	scan.requireExit(t, 2)
 	plan.requireExit(t, 2)
-	requireContains(t, "scan stdout", scan.stdout, "Summary: 10000 resources scanned")
-	requireContains(t, "plan stdout", plan.stdout, "Summary: 7500 to change")
+	// U4 BR3.6: counts have a comma every three digits.
+	requireContains(t, "scan stdout", scan.stdout, "Summary: 10,000 resources scanned")
+	requireContains(t, "plan stdout", plan.stdout, "Summary: 7,500 to change")
 	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("scan and plan of 10,000 resources took %v (limit 10s)", elapsed)
 	}
@@ -488,7 +499,8 @@ func TestPerformanceImpactWith500PoliciesAnd1000Changes(t *testing.T) {
 	elapsed := time.Since(start)
 
 	r.requireExit(t, 2)
-	requireContains(t, "stdout", r.stdout, "Summary: 1000 to change · 0 conflicts · 500 affected · 500 undecided")
+	// U4 BR3.6: counts have a comma every three digits.
+	requireContains(t, "stdout", r.stdout, "Summary: 1,000 to change · 0 conflicts · 500 affected · 500 undecided")
 	if elapsed > timeLimitFactor*10*time.Second {
 		t.Fatalf("impact analysis of 500 policies x 1,000 changes took %v (limit 10s)", elapsed)
 	}

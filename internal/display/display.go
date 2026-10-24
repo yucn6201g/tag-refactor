@@ -1,14 +1,18 @@
 // Package display writes everything tag-refactor prints. Results go to
 // standard output; progress, warnings, errors and debug lines go to standard
-// error (BR6.1). Output is a plain English list with symbols and no colors
-// (BR6.2). Every string built at run time is sanitized before it reaches the
-// terminal (NFR8.6).
+// error (BR3.10). Results come in four formats (table, diff, JSON and
+// Markdown, U4 BR3.1 to BR3.5), in English or Japanese (BR3.8, BR3.9), with
+// colors on a terminal that accepts them (BR3.7, NFR11.7); the meaning is
+// always written with symbols and words too. Every string built at run time
+// is sanitized before it reaches the terminal (NFR8.6); JSON goes through
+// planner.SafeJSONWriter and Markdown through mdCode (NFR8.15, NFR8.16).
 //
 // Together with cmd/tag-refactor, this is the only package allowed to write
 // to the process output; a test checks the sources for that.
 package display
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"strings"
@@ -32,12 +36,14 @@ type Printer struct {
 	debug  bool
 	werr   error
 	now    func() time.Time
+	lang   Lang
+	// colorOut and colorErr say whether each stream gets colors (NFR11.7).
+	colorOut, colorErr bool
 	// redraw is true when progress is redrawn in place on errOut.
 	redraw   bool
 	progress *progress
-	// restore puts the terminal setting of errOut back; nil when New
-	// changed nothing.
-	restore func()
+	// restores put the terminal settings New changed back, in reverse order.
+	restores []func()
 	// account is the account ID shown above the progress table.
 	account string
 }
@@ -47,28 +53,58 @@ var (
 	_ awsaccess.DebugSink    = (*Printer)(nil)
 )
 
-// New returns a printer for the given standard output and standard error.
-// Progress is redrawn in place only when standard error is a terminal that
-// accepts it; standard output plays no part in that choice. Close puts back
-// what New changed in the terminal.
+// New returns a printer for the given standard output and standard error, in
+// English until SetLang. Progress is redrawn in place only when standard
+// error is a terminal that accepts it; standard output plays no part in that
+// choice. Colors are decided for each stream on its own (NFR11.7). Close puts
+// back what New changed in the terminal.
 func New(stdout, stderr io.Writer) *Printer {
-	redraw, restore := canRedraw(stderr)
-	return &Printer{out: stdout, errOut: stderr, now: time.Now, redraw: redraw, restore: restore}
+	p := &Printer{out: stdout, errOut: stderr, now: time.Now, lang: English}
+	// Standard error is asked once: the same console setting serves the
+	// redrawn progress and the colors.
+	var restore func()
+	p.redraw, restore = canRedraw(stderr)
+	p.keep(restore)
+	p.colorErr = p.redraw && getenv("NO_COLOR") == ""
+	p.colorOut, restore = canColor(stdout)
+	p.keep(restore)
+	return p
 }
 
-// Close ends the progress and puts the terminal setting of standard error
-// back as it was before New: on Windows, the virtual terminal processing New
-// turned on (NFR9.3). Progress is no longer redrawn after it. Calling it again
-// does nothing.
+func (p *Printer) keep(restore func()) {
+	if restore != nil {
+		p.restores = append(p.restores, restore)
+	}
+}
+
+// Close ends the progress and puts the terminal settings back as they were
+// before New: on Windows, the virtual terminal processing New turned on for
+// standard error and standard output (NFR9.3, NFR11.7). Progress and colors
+// stop after it. Calling it again does nothing.
 func (p *Printer) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.endProgress()
 	p.redraw = false
-	if p.restore != nil {
-		p.restore()
-		p.restore = nil
+	p.colorOut, p.colorErr = false, false
+	for i := len(p.restores) - 1; i >= 0; i-- {
+		p.restores[i]()
 	}
+	p.restores = nil
+}
+
+// SetLang sets the language of everything printed from now on (BR3.8).
+func (p *Printer) SetLang(l Lang) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.lang = l
+}
+
+// Lang returns the language of the printer.
+func (p *Printer) Lang() Lang {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lang
 }
 
 // SetDebug turns the --debug lines on or off.
@@ -115,18 +151,35 @@ func (p *Printer) WriteErr() error {
 	return p.werr
 }
 
-// line writes one line. String arguments are sanitized; the format itself is
-// a constant written by the tool. The caller holds the lock. A line for
-// standard error while the progress table is on the screen is written in its
-// place, and the table is drawn again below it.
-func (p *Printer) line(w io.Writer, format string, args ...any) {
+// tr returns the message id in the printer's language.
+func (p *Printer) tr(id string, args ...any) string { return T(p.lang, id, args...) }
+
+// count returns n with its unit in the printer's language.
+func (p *Printer) count(unit string, n int) string { return Count(p.lang, unit, n) }
+
+// sanitizeArgs sanitizes the string arguments of a line; a rawString was
+// sanitized piece by piece already.
+func sanitizeArgs(args []any) []any {
 	for i, a := range args {
 		if s, ok := a.(string); ok {
 			args[i] = Sanitize(s)
 		}
 	}
-	text := fmt.Sprintf(format+"\n", args...)
-	if w == p.errOut && p.redraw && p.progress != nil && p.progress.drawn > 0 {
+	return args
+}
+
+// say writes one line of standard error with the message id. String
+// arguments are sanitized; the message itself is a constant of the tool. A
+// line written while the progress table is on the screen goes in its place,
+// and the table is drawn again below it. The caller holds the lock.
+func (p *Printer) say(st style, id string, args ...any) {
+	p.sayText(st, fmt.Sprintf(p.tr(id), sanitizeArgs(args)...))
+}
+
+// sayText writes a line of standard error built from sanitized parts.
+func (p *Printer) sayText(st style, text string) {
+	text = paint(p.colorErr, st, text) + "\n"
+	if p.redraw && p.progress != nil && p.progress.drawn > 0 {
 		var b strings.Builder
 		p.eraseTable(&b)
 		b.WriteString(text)
@@ -134,9 +187,7 @@ func (p *Printer) line(w io.Writer, format string, args ...any) {
 		p.drawTable(true)
 		return
 	}
-	if _, err := io.WriteString(w, text); err != nil && p.werr == nil {
-		p.werr = err
-	}
+	p.writeRaw(text)
 }
 
 // locked runs f with the lock held.
@@ -145,8 +196,6 @@ func (p *Printer) locked(f func()) {
 	defer p.mu.Unlock()
 	f()
 }
-
-func (p *Printer) blank(w io.Writer) { p.line(w, "") }
 
 // Sanitize makes a string safe to print on a terminal (NFR8.6): control
 // characters (Cc), format characters such as bidirectional overrides (Cf),
@@ -182,28 +231,26 @@ func Sanitize(s string) string {
 	return b.String()
 }
 
-// plural returns "1 resource" or "n resources".
-func plural(n int, word string) string {
-	if n == 1 {
-		return fmt.Sprintf("%d %s", n, word)
-	}
-	return fmt.Sprintf("%d %ss", n, word)
-}
-
 // Warn implements inventory.ProgressSink.
 func (p *Printer) Warn(message string) {
-	p.locked(func() { p.line(p.errOut, "warning: %s", message) })
+	p.locked(func() { p.say(styleChange, "stderr.warning", message) })
+}
+
+// WarnText prints a warning of the tool from the catalog.
+func (p *Printer) WarnText(id string) {
+	p.locked(func() { p.say(styleChange, "stderr.warning", rawString(p.tr(id))) })
 }
 
 // FileWarning prints a warning about a line of a file.
 func (p *Printer) FileWarning(path string, line int, message string) {
-	p.locked(func() { p.line(p.errOut, "warning: %s line %d: %s", path, line, message) })
+	p.locked(func() { p.say(styleChange, "stderr.fileWarning", path, line, message) })
 }
 
 // APICall implements awsaccess.DebugSink. It prints one line per call when
 // --debug is on, with the operation (the API name), region, duration and
 // retries only (NFR8.2, NFR11.3, NFR11.6). Calls of several regions arrive at
-// the same time; the lock keeps their lines whole.
+// the same time; the lock keeps their lines whole. The line is for
+// developers and has one form in every language.
 func (p *Printer) APICall(rec awsaccess.CallRecord) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -221,14 +268,15 @@ func (p *Printer) APICall(rec awsaccess.CallRecord) {
 			suffix += " cause=" + rec.CauseType
 		}
 	}
-	p.line(p.errOut, "debug: %s %s %dms retries=%s%s", rec.Op, rec.Region, rec.Duration.Milliseconds(), retries, suffix)
+	p.sayText(styleNone, fmt.Sprintf("debug: %s %s %dms retries=%s%s", Sanitize(rec.Op), Sanitize(rec.Region),
+		rec.Duration.Milliseconds(), retries, Sanitize(suffix)))
 }
 
 // Account prints the account and the region of the session.
 func (p *Printer) Account(acc awsaccess.AccountContext) {
 	p.locked(func() {
 		p.account = acc.AccountID
-		p.line(p.errOut, "Account %s · region %s", acc.AccountID, acc.Region)
+		p.say(styleNone, "stderr.account", acc.AccountID, acc.Region)
 	})
 }
 
@@ -236,8 +284,8 @@ func (p *Printer) Account(acc awsaccess.AccountContext) {
 func (p *Printer) Error(what, fix string) {
 	p.locked(func() {
 		p.endProgress()
-		p.line(p.errOut, "Error: %s", what)
-		p.line(p.errOut, "  Fix: %s", fix)
+		p.say(styleImpact, "stderr.error", what)
+		p.say(styleNone, "stderr.fix", fix)
 	})
 }
 
@@ -245,7 +293,16 @@ func (p *Printer) Error(what, fix string) {
 func (p *Printer) Fatal(message string) {
 	p.locked(func() {
 		p.endProgress()
-		p.line(p.errOut, "Error: %s", message)
+		p.say(styleImpact, "stderr.error", message)
+	})
+}
+
+// Interrupted says that Ctrl+C stopped the command and nothing was saved
+// (U4 NFR design §3).
+func (p *Printer) Interrupted() {
+	p.locked(func() {
+		p.endProgress()
+		p.say(styleImpact, "stderr.interrupted")
 	})
 }
 
@@ -253,13 +310,28 @@ func (p *Printer) Fatal(message string) {
 func (p *Printer) Done(elapsed time.Duration, resources int) {
 	p.locked(func() {
 		p.endProgress()
-		p.line(p.errOut, "Done in %s · %s", FormatElapsed(elapsed), plural(resources, "resource"))
+		p.say(styleNone, "stderr.done", FormatElapsed(elapsed), rawString(p.count("unit.resource", resources)))
 	})
 }
 
-// ExitCode prints the exit code line.
+// The meanings of the exit code line; cli chooses one of them.
+const (
+	ExitMeaningError             = "exit.error"
+	ExitMeaningInterrupted       = "exit.interrupted"
+	ExitMeaningResultsIncomplete = "exit.resultsIncomplete"
+	ExitMeaningImpactIncomplete  = "exit.impactIncomplete"
+	ExitMeaningDraftTooLarge     = "exit.draftTooLarge"
+	ExitMeaningDraftReady        = "exit.draftReady"
+	ExitMeaningIssuesFound       = "exit.issuesFound"
+	ExitMeaningReviewNeeded      = "exit.reviewNeeded"
+	ExitMeaningNoIssues          = "exit.noIssues"
+	ExitMeaningNoChangesNeeded   = "exit.noChangesNeeded"
+)
+
+// ExitCode prints the exit code line with its meaning, one of the
+// ExitMeaning identifiers.
 func (p *Printer) ExitCode(code int, meaning string) {
-	p.locked(func() { p.line(p.errOut, "Exit code: %d (%s)", code, meaning) })
+	p.locked(func() { p.say(styleNone, "stderr.exitCode", code, rawString(p.tr(meaning))) })
 }
 
 // FormatElapsed renders a duration as mm:ss, or h:mm:ss from one hour.
@@ -274,3 +346,47 @@ func FormatElapsed(d time.Duration) string {
 	}
 	return fmt.Sprintf("%02d:%02d", m, s)
 }
+
+// rawString marks a string that has already been sanitized piece by piece,
+// so it is not sanitized again (which would double the backslashes).
+type rawString string
+
+func (r rawString) String() string { return string(r) }
+
+// results is the writer of one result on standard output: it collects the
+// lines in a buffer and writes them at once (U4 NFR design, performance).
+type results struct {
+	w     *bufio.Writer
+	lang  Lang
+	color bool
+}
+
+// newResults starts a result on standard output. The caller holds the lock
+// and ends it with flush.
+func (p *Printer) newResults() *results {
+	return &results{w: bufio.NewWriterSize(p.out, 64<<10), lang: p.lang, color: p.colorOut}
+}
+
+// flush writes the result and keeps the first write error.
+func (p *Printer) flush(r *results) {
+	if err := r.w.Flush(); err != nil && p.werr == nil {
+		p.werr = err
+	}
+}
+
+func (r *results) tr(id string, args ...any) string { return T(r.lang, id, args...) }
+func (r *results) count(unit string, n int) string  { return Count(r.lang, unit, n) }
+
+// line writes one line from a message of the catalog, with its string
+// arguments sanitized.
+func (r *results) line(st style, id string, args ...any) {
+	r.text(st, fmt.Sprintf(r.tr(id), sanitizeArgs(args)...))
+}
+
+// text writes a line built from sanitized parts.
+func (r *results) text(st style, s string) {
+	_, _ = r.w.WriteString(paint(r.color, st, s))
+	_ = r.w.WriteByte('\n')
+}
+
+func (r *results) blank() { _ = r.w.WriteByte('\n') }

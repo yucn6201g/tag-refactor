@@ -61,7 +61,7 @@ func TestScanResultListsVariantsOrNoIssues(t *testing.T) {
 		Unsupported: []inventory.TypeCount{{ResourceType: "ssm:patch-compliance", Count: 2}},
 	}
 
-	p.ScanResult(report)
+	p.ScanResult(report, Output{Format: FormatTable})
 
 	want := "! Results are incomplete\n" +
 		"    me-south-1: AccessDenied (tag:GetResources)\n" +
@@ -94,7 +94,7 @@ func TestScanResultListsVariantsOrNoIssues(t *testing.T) {
 	p2.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1"}, ScannedRegions: []string{"eu-west-1"},
 		Resources: make([]inventory.Resource, 1), Discovery: &inventory.Discovery{Status: inventory.StatusUnavailable,
 			Regions: []inventory.DiscoveryRegion{{Region: "eu-west-1", Status: inventory.StatusUnavailable, Reason: "no Resource Explorer index"}}}},
-		Groups: report.Groups[1:2], Missing: []inventory.MissingRequiredTag{}, RulesPath: "r.yaml"})
+		Groups: report.Groups[1:2], Missing: []inventory.MissingRequiredTag{}, RulesPath: "r.yaml"}, Output{})
 	want2 := "No issues found (untagged-resource discovery: unavailable)\n" +
 		"Required tags missing (from r.yaml): none\n" +
 		"\n" +
@@ -108,21 +108,28 @@ func TestScanResultListsVariantsOrNoIssues(t *testing.T) {
 	}
 	p3, out3, _ := newPrinter()
 	p3.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1"}, ScannedRegions: []string{"eu-west-1"},
-		Discovery: &inventory.Discovery{Status: inventory.StatusComplete}}})
+		Discovery: &inventory.Discovery{Status: inventory.StatusComplete}}}, Output{})
 	if !strings.HasPrefix(out3.String(), "No issues found\nRequired tags missing: not checked (no rule file)\n") ||
 		!strings.Contains(out3.String(), "Untagged-resource discovery: complete\n\nSummary: 0 resources scanned in 1 of 1 regions · 0 variant groups\n") {
 		t.Fatalf("stdout: %q", out3.String())
 	}
 }
 
+// samplePlan is the U1 plan in the U4 model: the changes belong to their
+// resources (contract C2).
 func samplePlan() *planner.Plan {
+	rename := func(id, arn, from string, merge bool) planner.Change {
+		return planner.Change{ChangeID: id, ResourceARN: arn, Kind: planner.KindRenameKey, FromKey: from, ToKey: "Environment",
+			FromValue: "dev", MergesIntoExisting: merge}
+	}
 	return &planner.Plan{
 		ScannedResources: 10,
-		Changes: []planner.Change{
-			{ChangeID: "c-000001", ResourceARN: "arn:a", FromKey: "env", ToKey: "Environment", Value: "dev"},
-			{ChangeID: "c-000002", ResourceARN: "arn:b", FromKey: "env", ToKey: "Environment", Value: "dev"},
-			{ChangeID: "c-000003", ResourceARN: "arn:b", FromKey: "Env", ToKey: "Environment", Value: "dev", MergesIntoExisting: true},
+		Resources: []planner.PlannedResource{
+			{ARN: "arn:a", BeforeTags: map[string]string{"env": "dev"}, Changes: []planner.Change{rename("c-000001", "arn:a", "env", false)}},
+			{ARN: "arn:b", BeforeTags: map[string]string{"env": "dev", "Env": "dev"}, Changes: []planner.Change{
+				rename("c-000002", "arn:b", "env", false), rename("c-000003", "arn:b", "Env", true)}},
 		},
+		InventoryComplete: true,
 		Conflicts: []planner.KeyConflict{{ResourceARN: "arn:c", CanonicalKey: "Environment",
 			PresentTags: map[string]string{"env": "dev\x1b[2J", "Environment": `pr\od`}, KeyOrder: []string{"env", "Environment"}}},
 		ImpactFindings: []planner.ImpactFinding{
@@ -142,15 +149,17 @@ func samplePlan() *planner.Plan {
 func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T) {
 	p, out, _ := newPrinter()
 
-	p.PlanResult(samplePlan())
+	p.PlanResult(samplePlan(), Output{Format: FormatTable})
 
+	// Since U4 renames are grouped by their keys only (BR2.1), so "(merge
+	// into existing)" is gone, and the summary has the U4 counts.
 	want := "! Impact analysis is incomplete\n" +
 		"    IAM managed policy arn:p3: access denied to iam:GetPolicyVersion\n" +
 		"    IAM managed policies: access denied to iam:ListPolicies\n" +
 		"\n" +
 		"Changes: 2 resources\n" +
 		"  ~ rename key   env -> Environment                 2 resources\n" +
-		"  ~ rename key   Env -> Environment                 1 resource  (merge into existing)\n" +
+		"  ~ rename key   Env -> Environment                 1 resource\n" +
 		"  (A resource with several changes is counted once in the total.)\n" +
 		"\n" +
 		"Conflicts (not changed; values differ): 1 resource\n" +
@@ -164,7 +173,7 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 		"      Statement \"#0\"  Condition Null aws:ResourceTag/${aws:PrincipalTag/team}\n" +
 		"      cannot decide (policy variable)\n" +
 		"\n" +
-		"Summary: 2 to change · 1 conflicts · 1 affected · 1 undecided\n"
+		"Summary: 2 to change · 1 conflicts · 1 affected · 1 undecided · 0 value not set · 0 remove candidates · 0 IaC-managed\n"
 	if out.String() != want {
 		t.Fatalf("stdout:\n%s\nwant:\n%s", out.String(), want)
 	}
@@ -173,7 +182,7 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 func TestPlanResultWithNothingToDo(t *testing.T) {
 	p, out, _ := newPrinter()
 
-	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: true})
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: true}, Output{})
 
 	if out.String() != "No changes needed\nSummary: 3 resources scanned · 0 to change\n" {
 		t.Fatalf("stdout: %q", out.String())
@@ -185,7 +194,7 @@ func TestPlanResultWithNothingToDo(t *testing.T) {
 func TestPlanResultWithNothingToDoButAnIncompleteInventory(t *testing.T) {
 	p, out, _ := newPrinter()
 
-	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: false})
+	p.PlanResult(&planner.Plan{ScannedResources: 3, ImpactAnalysisComplete: true, InventoryComplete: false}, Output{})
 
 	if out.String() != "Summary: 3 resources scanned · 0 to change\n" {
 		t.Fatalf("stdout: %q", out.String())
@@ -199,7 +208,7 @@ func TestScanResultWithNoIssuesButFailedRegions(t *testing.T) {
 		p, out, _ := newPrinter()
 		p.ScanResult(&inventory.ScanReport{Snapshot: &inventory.Snapshot{EnabledRegions: []string{"eu-west-1", "us-east-1"},
 			ScannedRegions: []string{"eu-west-1", "us-east-1"}, Discovery: d,
-			FailedRegions: []inventory.FailedRegion{{Region: "eu-west-1", Kind: "AccessDenied", Operation: "tag:GetResources"}}}})
+			FailedRegions: []inventory.FailedRegion{{Region: "eu-west-1", Kind: "AccessDenied", Operation: "tag:GetResources"}}}}, Output{})
 		if !strings.HasPrefix(out.String(), "! Results are incomplete\n    eu-west-1: AccessDenied (tag:GetResources)\n\nRequired tags missing:") ||
 			strings.Contains(out.String(), "No issues found") {
 			t.Fatalf("stdout: %q", out.String())
@@ -226,7 +235,7 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 	p.Error("access denied for tag:GetResources", "allow it")
 	p.Fatal("stopped")
 	p.Done(12*time.Second, 412)
-	p.ExitCode(2, "issues found")
+	p.ExitCode(2, ExitMeaningIssuesFound)
 
 	want := "Account 123456789012 · region us-east-1\n" +
 		"scan: waiting: eu-west-1, us-east-1\n" +

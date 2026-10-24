@@ -359,7 +359,9 @@ func TestAcceptance_AC3_1_8_PlanStdoutHoldsOnlyResults(t *testing.T) {
 	r := w.run("plan", "--debug", "--rules", rules, "--region", "us-east-1")
 
 	r.requireExit(t, 2)
-	for _, line := range []string{"Account 123456789012", "scan: us-east-1 started", "scan: us-east-1 done", "warning: ", "debug: ", "Done in ", "Exit code: 2"} {
+	// U4 applies required tags, so the warning that they were not applied is
+	// gone; U4's own AC3.1.8 test checks a rule file warning instead.
+	for _, line := range []string{"Account 123456789012", "scan: us-east-1 started", "scan: us-east-1 done", "debug: ", "Done in ", "Exit code: 2"} {
 		requireNotContains(t, "stdout", r.stdout, line)
 		requireContains(t, "stderr", r.stderr, line)
 	}

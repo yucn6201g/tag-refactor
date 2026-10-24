@@ -27,9 +27,9 @@ func (p *Printer) DraftIncomplete(failed []inventory.FailedRegion) {
 		if len(failed) == 0 {
 			return
 		}
-		p.line(p.errOut, "! Results are incomplete")
+		p.say(styleImpact, "result.incomplete")
 		for _, f := range failed {
-			p.line(p.errOut, "    %s: %s (%s)", f.Region, f.Kind, f.Operation)
+			p.say(styleNone, "result.failedRegion", f.Region, f.Kind, f.Operation)
 		}
 	})
 }
@@ -37,7 +37,7 @@ func (p *Printer) DraftIncomplete(failed []inventory.FailedRegion) {
 // DraftWritten says on standard error where --output wrote the draft.
 func (p *Printer) DraftWritten(path string, keys int) {
 	p.locked(func() {
-		p.line(p.errOut, "Draft written to %s (%s)", path, rawString(plural(keys, "key")))
+		p.say(styleNone, "stderr.draftWritten", path, rawString(p.count("unit.key", keys)))
 	})
 }
 
@@ -45,6 +45,6 @@ func (p *Printer) DraftWritten(path string, keys int) {
 // resources only (never-tagged resources are not looked for).
 func (p *Printer) SuggestScope(snap *inventory.Snapshot) {
 	p.locked(func() {
-		p.line(p.errOut, "Checked: %s", rawString(taggedScope(snap)))
+		p.say(styleNone, "stderr.checked", rawString(taggedScope(p.lang, snap)))
 	})
 }

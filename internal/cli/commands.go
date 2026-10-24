@@ -2,11 +2,14 @@ package cli
 
 import (
 	"context"
+	"io"
 	"slices"
 	"sync"
 
 	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
+	"github.com/yucn6201g/tag-refactor/internal/fileout"
 	"github.com/yucn6201g/tag-refactor/internal/impact"
 	"github.com/yucn6201g/tag-refactor/internal/inventory"
 	"github.com/yucn6201g/tag-refactor/internal/planner"
@@ -161,20 +164,6 @@ func (a *app) loadRules(path string) (*rules.RuleSet, error) {
 	return rs, nil
 }
 
-// notAppliedYet reports whether the rule file has values, required tags or
-// removed keys, which plan reads but does not apply until U4.
-func notAppliedYet(rs *rules.RuleSet) bool {
-	if len(rs.RequiredTags) > 0 || len(rs.RemoveKeys) > 0 {
-		return true
-	}
-	for _, k := range rs.KeyRules {
-		if len(k.Values) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
 // requiredKeys returns the required keys scan counts. The rule file reader
 // has already left out keys starting with aws:, with a warning (U3 BR5.1).
 func requiredKeys(rs *rules.RuleSet) []string {
@@ -185,8 +174,8 @@ func requiredKeys(rs *rules.RuleSet) []string {
 	return keys
 }
 
-// runScan is workflow W1.
-func (a *app) runScan(ctx context.Context, rulesPath, profile string, regions []string) error {
+// runScan is workflow W1, with the result in the given format (U4 W3).
+func (a *app) runScan(ctx context.Context, rulesPath, profile string, regions []string, format display.Format) error {
 	a.started = a.deps.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -206,42 +195,60 @@ func (a *app) runScan(ctx context.Context, rulesPath, profile string, regions []
 		return err
 	}
 	report := inventory.NewScanReport(snap, rulesPath, required)
-	a.p.ScanResult(report)
-	a.p.ScanScope(snap)
 	a.result = &outcome{
 		command:        "scan",
 		regionsMissing: !snap.Complete(),
 		needsReview:    report.IssuesFound(),
 		resources:      len(snap.Resources),
 	}
+	code, _ := a.result.exitCode()
+	a.p.ScanResult(report, display.Output{Format: format, ExitCode: code, ToolVersion: toolVersion()})
+	a.p.ScanScope(snap)
 	return nil
 }
 
-// runPlan is workflow W2. It reads every region like scan but does not look
-// for never-tagged resources: only tagged resources are renamed (BR5.6).
-func (a *app) runPlan(ctx context.Context, rulesPath, profile string, regions []string) error {
+// planArgs are the options of plan.
+type planArgs struct {
+	rules, profile string
+	regions        []string
+	format         display.Format
+	// out is the --out file, or "".
+	out string
+}
+
+// planPrefix starts the name of the temporary file of plan --out.
+const planPrefix = ".tag-refactor-plan-"
+
+// runPlan is workflow W1 of U4 (W2 of U1). It reads every region like scan
+// but does not look for never-tagged resources: only tagged resources are
+// changed (BR5.6). The options are checked in the order of the U4 security
+// design §1, so a mistake stops the command before any AWS call: --format
+// and --lang (already checked), --out, the rule file, then the connection.
+// With --out the plan is saved before the result is printed (W2).
+func (a *app) runPlan(ctx context.Context, args planArgs) error {
 	a.started = a.deps.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if rulesPath == "" {
+	if args.rules == "" {
+		l := a.p.Lang()
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage,
-			Detail: "plan needs a rule file", Hint: "pass it with --rules, for example: tag-refactor plan --rules tagrules.yaml"}
+			Detail: display.T(l, "err.planNeedsRules"), Hint: display.T(l, "err.planNeedsRulesFix")}
 	}
-	rs, err := a.loadRules(rulesPath)
+	if args.out != "" {
+		if err := fileout.Prepare(args.out, planPrefix); err != nil {
+			return withOption(err, "--out")
+		}
+	}
+	rs, err := a.loadRules(args.rules)
 	if err != nil {
 		return err
 	}
-	if notAppliedYet(rs) {
-		// U4 applies values, required and remove to the plan; until then plan
-		// says it reads them only.
-		a.p.Warn("values / required / remove are read but not applied to the plan yet")
-	}
-	r, snap, err := a.collectAll(ctx, profile, regions)
+	r, snap, err := a.collectAll(ctx, args.profile, args.regions)
 	if err != nil {
 		return err
 	}
-	plan := planner.Build(snap, rs, a.deps.Now())
-	if len(plan.Changes) > 0 {
+	plan := planner.Build(snap, rs, planner.Options{Now: a.deps.Now(), RuleFile: args.rules, ToolVersion: toolVersion()})
+	if plan.NeedsAnalysis() {
 		policies := &stoppingPolicyReader{inner: r.policies, cancel: cancel}
 		var analyzer planner.ImpactAnalyzer = impact.New(policies)
 		result, err := analyzer.Analyze(ctx, plan.ImpactInputs())
@@ -253,16 +260,34 @@ func (a *app) runPlan(ctx context.Context, rulesPath, profile string, regions []
 		}
 		plan.AttachImpact(result)
 	}
-	a.p.ResultsIncomplete(snap.FailedRegions)
-	a.p.PlanResult(plan)
-	a.p.PlanScope(snap, len(plan.Changes) > 0)
+	if args.out != "" {
+		if err := a.saveFile(ctx, args.out, planPrefix, planner.MaxPlanBytes, func(w io.Writer) error {
+			safe := planner.NewSafeJSONWriter(w)
+			if err := planner.WritePlan(safe, plan); err != nil {
+				return err
+			}
+			return safe.Close()
+		}); err != nil {
+			return withOption(err, "--out")
+		}
+		a.p.PlanSaved(args.out, plan)
+	}
 	a.result = &outcome{
 		command:        "plan",
-		regionsMissing: !snap.Complete(),
+		regionsMissing: !plan.InventoryComplete,
 		incomplete:     !plan.ImpactAnalysisComplete,
 		needsReview:    plan.NeedsReview(),
 		resources:      plan.ScannedResources,
 	}
+	if args.out == "" && plan.NeedsAnalysis() {
+		a.result.saveHint = args.rules
+	}
+	code, _ := a.result.exitCode()
+	if args.format == display.FormatTable || args.format == display.FormatDiff {
+		a.p.PlanHeader(plan)
+	}
+	a.p.PlanResult(plan, display.Output{Format: args.format, ExitCode: code, ToolVersion: plan.ToolVersion})
+	a.p.PlanScope(snap, plan.NeedsAnalysis())
 	return nil
 }
 

@@ -132,7 +132,13 @@ func TestRedrawRewritesTheTableInPlace(t *testing.T) {
 	p.DiscoveryRegionDone("eu-west-1", "complete")
 	p.Done(time.Minute, 3)
 
-	got := errOut.String()
+	// Since U4 standard error has colors on a terminal (NFR11.7): the warning
+	// is yellow. The checks read the lines without the color sequences.
+	raw := errOut.String()
+	got := StripColors(raw)
+	if !strings.Contains(raw, "\x1b[33mwarning: x") {
+		t.Errorf("the warning must be colored on a terminal:\n%q", raw)
+	}
 	if !strings.HasPrefix(first, "Account 123456789012 · region us-east-1\nAccount 123456789012 · 2 regions\n"+
 		"  [waiting]  eu-west-1\n  [waiting]  us-east-1\n  0/2 regions · elapsed 00:00\n") || strings.Contains(first, "[running]") {
 		t.Fatalf("first draw:\n%q", first)

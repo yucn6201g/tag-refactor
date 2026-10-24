@@ -71,7 +71,8 @@ func TestRulesWithoutASubcommandShowsHelp(t *testing.T) {
 	requireContains(t, "stdout", r.stdout, "suggest")
 	help.requireExit(t, 0)
 	requireContains(t, "help stdout", help.stdout, "--output")
-	requireNotContains(t, "help stdout", help.stdout, "--lang")
+	// U4 made --lang available on every command (contract C5).
+	requireContains(t, "help stdout", help.stdout, "--lang")
 	if len(w.fake.Calls()) != 0 {
 		t.Fatalf("AWS was called: %v", w.fake.Ops())
 	}
@@ -90,30 +91,32 @@ func TestScanNamesTheFormOfACloudFormationType(t *testing.T) {
 	requireContains(t, "stderr", r.stderr, `Fix: write "s3"`)
 }
 
-// plan says that values, required and remove are not applied only when the
-// rule file has one of them; scan never says it.
-func TestPlanSaysWhatItDoesNotApplyYet(t *testing.T) {
+// U3 plan said that values, required and remove were read but not applied.
+// U4 applies them (BR1.3 to BR1.5), so plan never says it and each part gives
+// its change.
+func TestPlanAppliesValuesRequiredAndRemove(t *testing.T) {
 	cases := []struct {
 		rules string
-		said  bool
+		line  string
 	}{
-		{aliasRules, false},
-		{aliasRules + "    values:\n      production: [prod]\n", true},
-		{aliasRules + "remove: [tmp]\n", true},
-		{aliasRules + "required:\n  Owner: {}\n", true},
+		{aliasRules + "    values:\n      production: [prod]\n", `(?m)^  ~ value\s+Environment: prod -> production\s+1 resource$`},
+		{aliasRules + "remove: [tmp]\n", `(?m)^  - remove\s+tmp\s+1 resource$`},
+		{aliasRules + "required:\n  Owner:\n    default: team\n", `(?m)^  \+ add\s+Owner = team\s+1 resource$`},
 	}
 	for i, tc := range cases {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			w := newWorld(t)
-			w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"Environment": "prod"}})
+			w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"Environment": "prod", "tmp": "x"}})
+			w.givenAttachedPolicies(map[string]string{})
 			path := w.givenRuleFile(tc.rules)
 
 			plan := w.run("plan", "--rules", path, "--region", "us-east-1")
 			scan := w.run("scan", "--rules", path, "--region", "us-east-1")
 
-			requireNotContains(t, "scan stderr", scan.stderr, "not applied to the plan yet")
-			if got := strings.Contains(plan.stderr, "values / required / remove are read but not applied to the plan yet"); got != tc.said {
-				t.Fatalf("said = %v, want %v:\n%s", got, tc.said, plan.stderr)
+			plan.requireExit(t, 2)
+			requireMatch(t, "plan stdout", plan.stdout, tc.line)
+			for _, r := range []result{plan, scan} {
+				requireNotContains(t, "stderr", r.stderr, "not applied to the plan yet")
 			}
 		})
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
@@ -17,7 +18,13 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 	}{
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: "bad flag"}, "bad flag", "--help"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Detail: "plain detail", Hint: "do this"}, "plain detail", "do this"},
-		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOptionNotAvailable, Subject: "--out"}, "--out is not available in this version", "scan"},
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOptionNotAvailable, Subject: "apply"}, "apply is not available in this version", "scan"},
+		// U4: the files tag-refactor writes name the option to change.
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOutputExists, Subject: "plan.json", Key: "--out"}, "plan.json already exists", "another file name to --out"},
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOutputFolderMissing, Subject: "x/plan.json", Key: "--output"}, "the folder of x/plan.json does not exist", "--output"},
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOutputTooLarge, Subject: "plan.json"}, "larger than 256 MiB", "--region"},
+		{&errkind.Error{Kind: errkind.StorageFailed, Reason: errkind.ReasonOutputFailed, Subject: "plan.json", Cause: secret}, "plan.json could not be written", "free space"},
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonPlanFile, Subject: "p.json", Detail: "version is missing", Hint: "save it again"}, "p.json: version is missing", "save it again"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonProfileNotFound, Subject: "dev"}, `the AWS profile "dev" was not found`, "aws configure --profile"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionNotSet}, "no AWS region is set", "AWS_REGION"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRegionInvalid, Region: "x!"}, `"x!" is not an AWS region name`, "--region"},
@@ -42,12 +49,21 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 		{&errkind.Error{Kind: errkind.Conflict, Op: "x"}, "an unexpected error occurred in x", "--debug"},
 	}
 	for _, tc := range cases {
-		what, fix := describe(tc.err)
+		what, fix := describe(tc.err, display.English)
 		if !strings.Contains(what, tc.what) || !strings.Contains(fix, tc.fixPart) {
 			t.Errorf("describe(%s/%s) = %q / %q, want %q / %q", tc.err.Kind, tc.err.Reason, what, fix, tc.what, tc.fixPart)
 		}
 		if strings.Contains(what+fix, "AKIA") || strings.Contains(what+fix, "secret text") {
 			t.Errorf("describe leaks the cause: %q / %q", what, fix)
+		}
+		// U4 BR3.9: the same error in Japanese is another text with the same
+		// values, and never leaks the cause either.
+		jaWhat, jaFix := describe(tc.err, display.Japanese)
+		if jaWhat == "" || jaFix == "" || strings.Contains(jaWhat+jaFix, "AKIA") || strings.Contains(jaWhat+jaFix, "secret text") {
+			t.Errorf("describe in Japanese = %q / %q", jaWhat, jaFix)
+		}
+		if tc.err.Subject != "" && tc.err.Kind != errkind.CredentialsMissing && !strings.Contains(jaWhat+jaFix, tc.err.Subject) {
+			t.Errorf("the Japanese message lost the subject %q: %q / %q", tc.err.Subject, jaWhat, jaFix)
 		}
 	}
 }
@@ -70,8 +86,8 @@ func TestExitCodeFollowsBR6_3(t *testing.T) {
 		{outcome{command: "plan"}, 0, "no changes needed"},
 	}
 	for _, tc := range cases {
-		code, meaning := tc.o.exitCode()
-		if code != tc.code || meaning != tc.mean {
+		code, id := tc.o.exitCode()
+		if meaning := display.T(display.English, id); code != tc.code || meaning != tc.mean {
 			t.Errorf("%+v -> %d %q, want %d %q", tc.o, code, meaning, tc.code, tc.mean)
 		}
 	}
