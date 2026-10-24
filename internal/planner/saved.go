@@ -270,13 +270,12 @@ func LoadPlan(path string) (*Plan, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return nil, &errkind.Error{Kind: errkind.NotFound, Reason: errkind.ReasonPlanFile, Subject: path,
-				Detail: "the plan file does not exist", Hint: "check the path of the plan file", Cause: err}
+			return nil, fileError(errkind.NotFound, path, msg("planfile.notExist"), msg("planfile.hintPath"), err)
 		}
 		return nil, readFailed(path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return nil, planError(path, "the plan file is not a regular file", "pass the path of a plan file saved with plan --out")
+		return nil, planError(path, msg("planfile.notRegular"), msg("planfile.hintRegular"))
 	}
 	if info.Size() > MaxPlanBytes {
 		return nil, tooLarge(path)
@@ -297,17 +296,11 @@ func LoadPlan(path string) (*Plan, error) {
 }
 
 func readFailed(path string, err error) error {
-	return &errkind.Error{Kind: errkind.StorageFailed, Reason: errkind.ReasonPlanFile, Subject: path,
-		Detail: "the plan file could not be read", Hint: "check that the file is readable", Cause: err}
+	return fileError(errkind.StorageFailed, path, msg("planfile.unreadable"), msg("planfile.hintReadable"), err)
 }
 
 func tooLarge(path string) error {
-	return planError(path, "the plan file is larger than 256 MiB",
-		"create smaller plans with --region, for example one region at a time")
-}
-
-func planError(path, detail, hint string) error {
-	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonPlanFile, Subject: path, Detail: detail, Hint: hint}
+	return planError(path, msg("planfile.tooLarge"), msg("planfile.hintRegion"))
 }
 
 // quote shows a value from the file in a message: quoted and at most 64
@@ -330,8 +323,7 @@ func ParsePlan(path string, data []byte) (*Plan, error) {
 	}
 	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
 	if bytes.HasPrefix(data, []byte("\xff\xfe")) || bytes.HasPrefix(data, []byte("\xfe\xff")) {
-		return nil, planError(path, "the plan file is UTF-16",
-			"save it again as UTF-8; on Windows PowerShell 5.1, save plans with --out instead of a redirection")
+		return nil, planError(path, msg("planfile.utf16"), msg("planfile.hintUTF8"))
 	}
 	var head struct {
 		Version     json.RawMessage `json:"version"`
@@ -341,18 +333,17 @@ func ParsePlan(path string, data []byte) (*Plan, error) {
 		return nil, decodeError(path, err)
 	}
 	if head.Version == nil {
-		return nil, missing(path, "version")
+		return nil, planError(path, msg("planfile.missing", "version"), msg("planfile.hintSave"))
 	}
 	var version int
 	if err := json.Unmarshal(head.Version, &version); err != nil {
-		return nil, planError(path, "version must be a whole number", "save the plan again with plan --out")
+		return nil, planError(path, msg("planfile.versionNumber"), msg("planfile.hintSave"))
 	}
 	if version != SupportedVersion {
 		var tool string
 		_ = json.Unmarshal(head.ToolVersion, &tool)
-		return nil, &errkind.Error{Kind: errkind.UnsupportedVersion, Reason: errkind.ReasonPlanFile, Subject: path,
-			Detail: fmt.Sprintf("plan file version %d (written by tag-refactor %s) is not supported", version, quote(tool)),
-			Hint:   fmt.Sprintf("this version of tag-refactor reads plan file version %d; create the plan again with it", SupportedVersion)}
+		return nil, fileError(errkind.UnsupportedVersion, path, msg("planfile.unsupported", version, quote(tool)),
+			msg("planfile.hintVersion", SupportedVersion), nil)
 	}
 	var rp readPlan
 	if err := json.Unmarshal(data, &rp); err != nil {
@@ -368,37 +359,33 @@ func decodeError(path string, err error) error {
 	var typ *json.UnmarshalTypeError
 	switch {
 	case errors.As(err, &syntax):
-		return planError(path, fmt.Sprintf("the plan file is not valid JSON (at byte %d)", syntax.Offset),
-			"save the plan again with plan --out")
+		return planError(path, msg("planfile.syntax", syntax.Offset), msg("planfile.hintSave"))
 	case errors.As(err, &typ):
 		field := typ.Field
 		if field == "" {
-			field = "the plan"
+			field = "(the plan)"
 		}
-		return planError(path, fmt.Sprintf("%s must be %s, not a JSON %s", field, typeName(typ.Type.Kind().String()), typ.Value),
-			"save the plan again with plan --out")
+		return planError(path, typeMessage(field, typ.Type.Kind().String(), typ.Value), msg("planfile.hintSave"))
 	}
-	return planError(path, "the plan file is not valid JSON", "save the plan again with plan --out")
+	return planError(path, msg("planfile.notJSON"), msg("planfile.hintSave"))
 }
 
-func typeName(kind string) string {
+// typeMessage says which type a field must have; value is the JSON type it
+// had ("string", "number"...), shown as it is.
+func typeMessage(field, kind, value string) text {
 	switch kind {
 	case "struct", "map":
-		return "an object"
+		return msg("planfile.typeObject", field, value)
 	case "slice":
-		return "an array"
+		return msg("planfile.typeArray", field, value)
 	case "bool":
-		return "true or false"
+		return msg("planfile.typeBool", field, value)
 	case "int":
-		return "a whole number"
+		return msg("planfile.typeNumber", field, value)
 	case "string":
-		return "a string"
+		return msg("planfile.typeString", field, value)
 	}
-	return kind
-}
-
-func missing(path, field string) error {
-	return planError(path, field+" is missing", "save the plan again with plan --out")
+	return msg("planfile.typeOther", field, kind, value)
 }
 
 // planReader checks a decoded plan field by field and stops at the first
@@ -408,15 +395,15 @@ type planReader struct {
 	err  error
 }
 
-func (r *planReader) fail(detail string) {
+func (r *planReader) fail(detail text) {
 	if r.err == nil {
-		r.err = planError(r.path, detail, "save the plan again with plan --out")
+		r.err = planError(r.path, detail, msg("planfile.hintSave"))
 	}
 }
 
 func (r *planReader) str(field string, v *string) string {
 	if v == nil {
-		r.fail(field + " is missing")
+		r.fail(msg("planfile.missing", field))
 		return ""
 	}
 	return *v
@@ -427,17 +414,17 @@ func (r *planReader) str(field string, v *string) string {
 func (r *planReader) key(field string, v *string) string {
 	k := r.str(field, v)
 	if r.err == nil && k == "" {
-		r.fail(field + " is empty")
+		r.fail(msg("planfile.empty", field))
 	}
 	if r.err == nil && inventory.IsAWSReservedKey(k) {
-		r.fail(fmt.Sprintf("%s %s starts with aws:; keys of AWS are never changed", field, quote(k)))
+		r.fail(msg("planfile.awsKey", field, quote(k)))
 	}
 	return k
 }
 
 func (r *planReader) boolean(field string, v *bool) bool {
 	if v == nil {
-		r.fail(field + " is missing")
+		r.fail(msg("planfile.missing", field))
 		return false
 	}
 	return *v
@@ -463,15 +450,15 @@ func (r *planReader) build(rp *readPlan) (*Plan, error) {
 	if r.err == nil {
 		t, err := time.Parse(time.RFC3339, created)
 		if err != nil {
-			r.fail(fmt.Sprintf("createdAt %s is not a date and time such as 2026-10-19T12:04:00Z", quote(created)))
+			r.fail(msg("planfile.badTime", "createdAt", quote(created)))
 		} else if t = t.UTC(); t.Year() < 0 || t.Year() > 9999 {
-			r.fail(fmt.Sprintf("createdAt %s is out of range", quote(created)))
+			r.fail(msg("planfile.timeRange", "createdAt", quote(created)))
 		} else {
 			p.CreatedAt = t
 		}
 	}
 	if rp.Regions == nil && r.err == nil {
-		r.fail("regions is missing")
+		r.fail(msg("planfile.missing", "regions"))
 	} else if rp.Regions != nil {
 		p.Regions = append([]string{}, *rp.Regions...)
 	}
@@ -479,7 +466,7 @@ func (r *planReader) build(rp *readPlan) (*Plan, error) {
 		p.RuleFile = *rp.RuleFile
 	}
 	if rp.Resources == nil {
-		r.fail("resources is missing")
+		r.fail(msg("planfile.missing", "resources"))
 	} else {
 		r.resources(p, *rp.Resources)
 	}
@@ -492,7 +479,7 @@ func (r *planReader) build(rp *readPlan) (*Plan, error) {
 		at := fmt.Sprintf("unsetRequiredTags[%d]", i)
 		key := r.str(at+".key", u.Key)
 		if u.ARNs == nil {
-			r.fail(at + ".arns is missing")
+			r.fail(msg("planfile.missing", at+".arns"))
 			continue
 		}
 		p.UnsetRequiredTags = append(p.UnsetRequiredTags, UnsetRequiredTag{Key: key, ARNs: append([]string{}, *u.ARNs...)})
@@ -525,14 +512,14 @@ func (r *planReader) resources(p *Plan, resources []readResource) {
 			ResourceType: r.str(at+".resourceType", res.ResourceType),
 		}
 		if r.err == nil && pr.ARN == "" {
-			r.fail(at + ".arn is empty")
+			r.fail(msg("planfile.empty", at+".arn"))
 		}
 		if r.err == nil && arns[pr.ARN] {
-			r.fail(fmt.Sprintf("%s.arn %s appears twice", at, quote(pr.ARN)))
+			r.fail(msg("planfile.twice", at+".arn", quote(pr.ARN)))
 		}
 		arns[pr.ARN] = true
 		if res.BeforeTags == nil || *res.BeforeTags == nil {
-			r.fail(at + ".beforeTags is missing")
+			r.fail(msg("planfile.missing", at+".beforeTags"))
 			return
 		}
 		pr.BeforeTags = make(map[string]string, len(*res.BeforeTags))
@@ -543,7 +530,7 @@ func (r *planReader) resources(p *Plan, resources []readResource) {
 			pr.IaCManagedBy = *res.IaCManagedBy
 		}
 		if res.Changes == nil {
-			r.fail(at + ".changes is missing")
+			r.fail(msg("planfile.missing", at+".changes"))
 			return
 		}
 		for j, c := range *res.Changes {
@@ -552,7 +539,7 @@ func (r *planReader) resources(p *Plan, resources []readResource) {
 				return
 			}
 			if ids[change.ChangeID] {
-				r.fail(fmt.Sprintf("%s.changes[%d].changeId %s appears twice", at, j, quote(change.ChangeID)))
+				r.fail(msg("planfile.twice", fmt.Sprintf("%s.changes[%d].changeId", at, j), quote(change.ChangeID)))
 				return
 			}
 			ids[change.ChangeID] = true
@@ -560,7 +547,7 @@ func (r *planReader) resources(p *Plan, resources []readResource) {
 			pr.Changes = append(pr.Changes, change)
 		}
 		if len(pr.Changes) == 0 {
-			r.fail(at + ".changes is empty")
+			r.fail(msg("planfile.empty", at+".changes"))
 			return
 		}
 		p.Resources = append(p.Resources, pr)
@@ -572,7 +559,7 @@ func (r *planReader) resources(p *Plan, resources []readResource) {
 func (r *planReader) change(at string, c readChange) Change {
 	id := r.str(at+".changeId", c.ChangeID)
 	if r.err == nil && id == "" {
-		r.fail(at + ".changeId is empty")
+		r.fail(msg("planfile.empty", at+".changeId"))
 	}
 	kind := ChangeKind(r.str(at+".kind", c.Kind))
 	if r.err != nil {
@@ -600,7 +587,7 @@ func (r *planReader) change(at string, c readChange) Change {
 			out.FromValue = *c.FromValue
 		}
 	default:
-		r.fail(fmt.Sprintf("%s.kind %s is not renameKey, changeValue, addRequired or removeKey", at, quote(string(kind))))
+		r.fail(msg("planfile.kind", at+".kind", quote(string(kind))))
 	}
 	return out
 }
@@ -611,7 +598,7 @@ func (r *planReader) conflicts(p *Plan, conflicts []readConflict) {
 		arn := r.str(at+".arn", c.ARN)
 		canonical := r.str(at+".canonicalKey", c.CanonicalKey)
 		if c.PresentTags == nil || *c.PresentTags == nil {
-			r.fail(at + ".presentTags is missing")
+			r.fail(msg("planfile.missing", at+".presentTags"))
 		}
 		if r.err != nil {
 			return
@@ -649,22 +636,22 @@ func (r *planReader) findings(p *Plan, findings []readFinding) {
 		ref := r.str(at+".policyRef", f.PolicyRef)
 		source := r.str(at+".sourceKind", f.SourceKind)
 		if f.ChangeIDs == nil {
-			r.fail(at + ".changeIds is missing")
+			r.fail(msg("planfile.missing", at+".changeIds"))
 		}
 		if r.err != nil {
 			return
 		}
 		if verdict != VerdictAffected && verdict != VerdictUndecided {
-			r.fail(fmt.Sprintf("%s.verdict %s is not affected or undecided", at, quote(string(verdict))))
+			r.fail(msg("planfile.verdict", at+".verdict", quote(string(verdict))))
 			return
 		}
 		if !slices.Contains(SourceKinds, source) {
-			r.fail(fmt.Sprintf("%s.sourceKind %s is not one of %s", at, quote(source), strings.Join(SourceKinds, ", ")))
+			r.fail(msg("planfile.source", at+".sourceKind", quote(source), strings.Join(SourceKinds, ", ")))
 			return
 		}
 		for j, id := range *f.ChangeIDs {
 			if !ids[id] {
-				r.fail(fmt.Sprintf("%s.changeIds[%d] %s names no change of the plan", at, j, quote(id)))
+				r.fail(msg("planfile.unknownChange", fmt.Sprintf("%s.changeIds[%d]", at, j), quote(id)))
 				return
 			}
 		}

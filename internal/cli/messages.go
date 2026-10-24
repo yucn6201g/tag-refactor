@@ -95,13 +95,20 @@ func describeOutput(e *errkind.Error, lang display.Lang) (string, string) {
 }
 
 // describeFileError formats rule file and plan file errors as "<file> line
-// <n>: <detail>".
+// <n>: <detail>". An error that names its messages (the plan file) is shown
+// in lang; the details of a rule file error are English.
 func describeFileError(e *errkind.Error, lang display.Lang) (string, string) {
-	what := display.T(lang, "err.file", e.Subject, e.Detail)
-	if e.Line > 0 {
-		what = display.T(lang, "err.fileLine", e.Subject, e.Line, e.Detail)
+	detail, fix := e.Detail, e.Hint
+	if e.DetailID != "" {
+		detail = display.T(lang, e.DetailID, e.DetailArgs...)
 	}
-	fix := e.Hint
+	if e.HintID != "" {
+		fix = display.T(lang, e.HintID, e.HintArgs...)
+	}
+	what := display.T(lang, "err.file", e.Subject, detail)
+	if e.Line > 0 {
+		what = display.T(lang, "err.fileLine", e.Subject, e.Line, detail)
+	}
 	if fix == "" {
 		fix = display.T(lang, "err.checkRules")
 	}

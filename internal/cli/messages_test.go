@@ -2,6 +2,7 @@ package cli
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -66,6 +67,48 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 		if tc.err.Subject != "" && tc.err.Kind != errkind.CredentialsMissing && !strings.Contains(jaWhat+jaFix, tc.err.Subject) {
 			t.Errorf("the Japanese message lost the subject %q: %q / %q", tc.err.Subject, jaWhat, jaFix)
 		}
+	}
+}
+
+// The errors of a saved plan are shown in the user's language (for U6, which
+// reads plans): the English lines are the planner's text, the Japanese ones
+// come from the catalog with the same values.
+func TestPlanFileErrorsAreShownInEitherLanguage(t *testing.T) {
+	cases := []struct {
+		data             string
+		en, enFix        string
+		ja, jaFix        string
+		subjectInMessage bool
+	}{
+		{`{"version":2,"toolVersion":"v9.0.0"}`,
+			`p.json: plan file version 2 (written by tag-refactor "v9.0.0") is not supported`, "reads plan file version 1",
+			`p.json: 変更案のファイルの版 2(tag-refactor "v9.0.0" で作成)には対応していません`, "変更案のファイルの版 1 です", true},
+		{`{"version":1}`, "p.json: toolVersion is missing", "save the plan again with plan --out",
+			"p.json: toolVersion がありません", "plan --out で変更案を保存し直してください", true},
+		{"\xff\xfe{", "p.json: the plan file is UTF-16", "save it again as UTF-8",
+			"p.json: 変更案のファイルが UTF-16 です", "UTF-8 で保存し直してください", true},
+		{`{"version":1,"inventoryComplete":"yes"}`, "p.json: inventoryComplete must be true or false, not a JSON string", "plan --out",
+			"p.json: inventoryComplete は true か false でなければなりません(JSON の string です)", "plan --out", true},
+	}
+	for _, tc := range cases {
+		_, err := planner.ParsePlan("p.json", []byte(tc.data))
+		e, ok := errkind.As(err)
+		if !ok {
+			t.Fatalf("%s: err = %v", tc.data, err)
+		}
+		what, fix := describe(e, display.English)
+		if what != tc.en || !strings.Contains(fix, tc.enFix) || what != "p.json: "+e.Detail || fix != e.Hint {
+			t.Errorf("English: %q / %q", what, fix)
+		}
+		what, fix = describe(e, display.Japanese)
+		if what != tc.ja || !strings.Contains(fix, tc.jaFix) {
+			t.Errorf("Japanese: %q / %q, want %q / %q", what, fix, tc.ja, tc.jaFix)
+		}
+	}
+	_, err := planner.LoadPlan(filepath.Join(t.TempDir(), "missing.json"))
+	e, _ := errkind.As(err)
+	if what, fix := describe(e, display.Japanese); !strings.Contains(what, "変更案のファイルがありません") || !strings.Contains(fix, "パスを確かめてください") {
+		t.Fatalf("not found in Japanese: %q / %q", what, fix)
 	}
 }
 

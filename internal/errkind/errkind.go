@@ -112,6 +112,14 @@ type Error struct {
 	Detail string
 	// Hint says how to fix it, written by the tool.
 	Hint string
+	// DetailID and HintID, when set, name the messages of Detail and Hint in
+	// the message catalog of the display, with their values, so the command
+	// line can show them in the user's language (U4: the errors of a saved
+	// plan). Detail and Hint keep the English text.
+	DetailID   string
+	DetailArgs []any
+	HintID     string
+	HintArgs   []any
 	// Cause is the underlying error. Its text is never printed.
 	Cause error
 }

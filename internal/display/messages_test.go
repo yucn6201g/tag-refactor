@@ -44,10 +44,26 @@ func TestEveryMessageHasBothLanguagesWithTheSameValues(t *testing.T) {
 	}
 }
 
+// The errors of a saved plan name catalog messages: every one of them is in
+// the catalog with the planner's English text, so English output is the same
+// whether the command line translates it or not.
+func TestPlanFileMessagesMatchThePlanner(t *testing.T) {
+	messages := planner.FileMessages()
+	if len(messages) < 30 {
+		t.Fatalf("only %d plan file messages", len(messages))
+	}
+	for id, en := range messages {
+		m, ok := catalog[id]
+		if !ok || m.en != en {
+			t.Errorf("%s: catalog %q, planner %q", id, m.en, en)
+		}
+	}
+}
+
 // Every identifier the sources use is in the catalog; the ones put together
 // at run time (kinds, states, statuses) are checked one by one.
 func TestEveryIdentifierInTheSourcesIsInTheCatalog(t *testing.T) {
-	prefixes := "unit|word|list|stderr|exit|scope|progress|state|result|status|discovery|scan|plan|kind|cause|diff|md|err"
+	prefixes := "unit|word|list|stderr|exit|scope|progress|state|result|status|discovery|scan|plan|kind|cause|diff|md|err|planfile|draft"
 	literal := regexp.MustCompile(`"((?:` + prefixes + `)\.[A-Za-z]+)"`)
 	used := 0
 	for _, dir := range []string{".", filepath.Join("..", "cli")} {
