@@ -154,7 +154,9 @@ echo "verify: building tag-refactor for the U3 check"
 go build -mod=readonly -o "$tool" ./cmd/tag-refactor || fail "cannot build tag-refactor"
 
 echo "verify: running rules suggest (profile $readonly_profile)"
-run_tool rules suggest --profile "$readonly_profile" --region "$region" --output "$draft"
+# --lang en: the checks below read the English comments and messages, which
+# the language of the machine would otherwise change (U4 BR3.8, BR3.9).
+run_tool rules suggest --lang en --profile "$readonly_profile" --region "$region" --output "$draft"
 [ "$TOOL_STATUS" -eq 0 ] || { sed 's/^/  /' "$u3_dir/stderr" >&2; fail "rules suggest ended with exit code $TOOL_STATUS, not 0"; }
 [ ! -s "$u3_dir/stdout" ] || fail "rules suggest printed to standard output although --output was given"
 [ -s "$draft" ] || fail "rules suggest did not write $draft"
@@ -168,7 +170,7 @@ if [ -z "$group" ]; then
 fi
 
 echo "verify: reading the draft back with scan --rules"
-run_tool scan --profile "$readonly_profile" --region "$region" --rules "$draft"
+run_tool scan --lang en --profile "$readonly_profile" --region "$region" --rules "$draft"
 # 0 (no issues) and 2 (issues to review) both mean the draft was read.
 if [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ] || grep -q '^Error:' "$u3_dir/stderr"; then
   sed 's/^/  /' "$u3_dir/stderr" >&2
