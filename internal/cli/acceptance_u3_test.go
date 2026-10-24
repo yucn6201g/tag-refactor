@@ -25,6 +25,13 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/testutil"
 )
 
+// Characters written as UTF-8 bytes, so the sources hold no invisible
+// characters: U+202E RIGHT-TO-LEFT OVERRIDE and U+2028 LINE SEPARATOR.
+const (
+	rlo           = "\xe2\x80\xae"
+	lineSeparator = "\xe2\x80\xa8"
+)
+
 // suggestOperations are the only AWS API operations rules suggest may call
 // (NFR3.6).
 var suggestOperations = []string{"sts:GetCallerIdentity", "ec2:DescribeRegions", "tag:GetResources"}
@@ -299,7 +306,7 @@ func TestAcceptanceU3_NFR8_14_RuleFileStringsAreSanitizedInMessages(t *testing.T
 	r.requireExit(t, 1)
 	requireTwoLineError(t, r)
 	requireContains(t, "stderr", r.stderr, "unknown key")
-	for _, raw := range []string{"\x1b", "‮", "\a"} {
+	for _, raw := range []string{"\x1b", rlo, "\a"} {
 		requireNotContains(t, "stderr", r.stderr, raw)
 	}
 }
@@ -309,10 +316,10 @@ func TestAcceptanceU3_NFR8_14_RuleFileStringsAreSanitizedInMessages(t *testing.T
 // suggest runs, Then none of them is printed as it is, and the draft reads
 // back to the original strings.
 func TestAcceptanceU3_NFR8_12_DraftEscapesUnprintableCharacters(t *testing.T) {
-	key := "team\u009b31m‮\U000E0001\U000E0041"
+	key := "team\u009b31m" + rlo + "\U000E0001\U000E0041"
 	second := "Team\x1b[2J\nx"
-	value := "a \"b\\c\x1b"
-	spelling := "A \"b\\c\x1b"
+	value := "a" + lineSeparator + "\"b\\c\x1b"
+	spelling := "A" + lineSeparator + "\"b\\c\x1b"
 	w := newWorld(t)
 	w.givenResources(
 		testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{key: value}},
@@ -324,7 +331,7 @@ func TestAcceptanceU3_NFR8_12_DraftEscapesUnprintableCharacters(t *testing.T) {
 	r := w.run("rules", "suggest", "--region", "us-east-1")
 
 	r.requireExit(t, 0)
-	for _, raw := range []string{"\u009b", "‮", "\U000E0001", "\U000E0041", "\x1b", " "} {
+	for _, raw := range []string{"\u009b", rlo, "\U000E0001", "\U000E0041", "\x1b", lineSeparator} {
 		requireNotContains(t, "stdout", r.stdout, raw)
 	}
 	doc := decodeDraft(t, r.stdout)
