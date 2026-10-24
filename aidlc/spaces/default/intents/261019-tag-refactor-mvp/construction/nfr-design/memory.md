@@ -6,10 +6,12 @@
 <!-- example: 2026-05-29T10:14:32Z — chose REST over GraphQL; the consuming team only needs CRUD, revisit if subscriptions land -->
 
 ## Deviations
+- 2026-10-24T00:29:16Z [unit u3-rules] — rules suggest に --output を足した; PowerShell のリダイレクトはコンソールのコードページで子の出力を読むため、日本語の値が保存で文字化けするから。
 - 2026-10-22T12:30:55Z [unit u2-scan] — Resource Explorer の GetView を操作に足した; 既定のビューの絞り込みの条件を確かめるため。承認済みの NFR 要件と機能設計の操作の表を同時に直した。
 <!-- example: 2026-05-29T10:14:32Z — skipped the optional caching layer the stage prose suggested; the dataset is small enough that it adds risk -->
 
 ## Tradeoffs
+- 2026-10-24T00:29:16Z [unit u3-rules] — 文字コードの見分けと大きさの判定を Parse の先頭にまとめた; ファジングの対象と一致させ、すべての経路に届かせるため。
 <!-- example: 2026-05-29T10:14:32Z — picked TDD over BDD this run; the team is unit-first and the domain is well-understood -->
 
 ## Open questions

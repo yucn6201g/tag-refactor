@@ -1,0 +1,116 @@
+{
+  "stage": "nfr-design",
+  "unit": "u3-rules",
+  "upstream_ids": [
+    "NFR1.11",
+    "NFR1.12",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR5.9",
+    "NFR8.12",
+    "NFR8.13",
+    "NFR8.14",
+    "NFR9.4",
+    "NFR9.5",
+    "NFR10.4",
+    "NFR10.5",
+    "NFR1.6",
+    "NFR1.7",
+    "NFR1.10",
+    "NFR3.1",
+    "NFR5.4",
+    "NFR5.8"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.11",
+      "status": "OK",
+      "target": "logical-components.md 性能の設計(1回の走査、大きさの調整の差し引き、rules の単体テスト)"
+    },
+    {
+      "id": "NFR1.12",
+      "status": "OK",
+      "target": "logical-components.md 性能の設計(読み込み時の対応表、when を上から比べる、1万件の照会のテスト)"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "security-design.md §1 rules suggest に読み取りの口だけを渡す、操作の照合のテスト"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "security-design.md §2 セッションを作る前にルールファイルを読む"
+    },
+    {
+      "id": "NFR5.9",
+      "status": "OK",
+      "target": "logical-components.md 信頼性の設計(U2 の収集のまま、上限と失敗のテスト)"
+    },
+    {
+      "id": "NFR8.12",
+      "status": "OK",
+      "target": "security-design.md §3 YAML のエスケープの表(\\uXXXX と \\UXXXXXXXX)、読み戻しのテスト"
+    },
+    {
+      "id": "NFR8.13",
+      "status": "OK",
+      "target": "security-design.md §4 ファジング(対象、確かめること、種の入力、手元の5分)"
+    },
+    {
+      "id": "NFR8.14",
+      "status": "OK",
+      "target": "security-design.md §4 誤りと警告の文言を %q と display の置き換えに通す"
+    },
+    {
+      "id": "NFR9.4",
+      "status": "OK",
+      "target": "logical-components.md 移植性とテストの設計(LF、期待のファイル)"
+    },
+    {
+      "id": "NFR9.5",
+      "status": "OK",
+      "target": "security-design.md §4 文字コードの見分けの表と大きさの上限"
+    },
+    {
+      "id": "NFR10.4",
+      "status": "OK",
+      "target": "logical-components.md 移植性とテストの設計(乱数の種を固定した読み戻しのテスト)"
+    },
+    {
+      "id": "NFR10.5",
+      "status": "OK",
+      "target": "logical-components.md 移植性とテストの設計(カバレッジ80%以上)"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "U2 の収集のまま(rules suggest も同じ収集を使う)"
+    },
+    {
+      "id": "NFR1.7",
+      "status": "OK",
+      "target": "U2 のまま。AWS の応答の解釈の時間は U2 の NFR1.7 で測る"
+    },
+    {
+      "id": "NFR1.10",
+      "status": "OK",
+      "target": "U2 のまま(rules suggest は一度もタグが付いていないリソースを探さない)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "U1 の security-design.md §1(読み取りの口だけを渡す)のまま。security-design.md §1"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "OK",
+      "target": "U2 の再試行のまま(logical-components.md 信頼性の設計)"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "OK",
+      "target": "U2 の認証情報の誤りでの取り消しのまま(logical-components.md 信頼性の設計)"
+    }
+  ]
+}
