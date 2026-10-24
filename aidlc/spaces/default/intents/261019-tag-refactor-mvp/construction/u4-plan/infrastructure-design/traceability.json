@@ -1,0 +1,22 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u4-plan",
+  "upstream_ids": ["NFR1.13", "NFR1.14", "NFR1.15", "NFR3.8", "NFR8.15", "NFR8.16", "NFR8.17", "NFR8.18", "NFR8.19", "NFR9.6", "NFR9.7", "NFR10.6", "NFR10.7", "NFR10.8", "NFR11.7"],
+  "coverage": [
+    { "id": "NFR1.13", "status": "OK", "target": "cicd-pipeline.md test と race のジョブ(性能のテスト、race のときの件数と上限)" },
+    { "id": "NFR1.14", "status": "OK", "target": "cicd-pipeline.md test と race のジョブ(出力と保存の性能のテスト)" },
+    { "id": "NFR1.15", "status": "OK", "target": "cicd-pipeline.md test と race のジョブ(読み込みの時間とメモリのテスト)" },
+    { "id": "NFR3.8", "status": "OK", "target": "cicd-pipeline.md 操作の集まりのテストと、検証のスクリプト(R2 の今の権限だけで動く)" },
+    { "id": "NFR8.15", "status": "OK", "target": "cicd-pipeline.md 出力の守りのテスト(test ジョブ)" },
+    { "id": "NFR8.16", "status": "OK", "target": "cicd-pipeline.md 出力の守りのテストと、チェックポイントで Markdown を貼る確認" },
+    { "id": "NFR8.17", "status": "OK", "target": "cicd-pipeline.md 保存と Ctrl+C のテスト(0600 は Linux と macOS)" },
+    { "id": "NFR8.18", "status": "OK", "target": "cicd-pipeline.md 種の入力を CI で、ファジングは手元で5分。種は testdata/fuzz の -text で守る" },
+    { "id": "NFR8.19", "status": "OK", "target": "cicd-pipeline.md 認証情報を書かないテスト(偽の AWS)" },
+    { "id": "NFR9.6", "status": "OK", "target": "cicd-pipeline.md 3つの OS で同じ期待のファイル(LF)と比べる" },
+    { "id": "NFR9.7", "status": "OK", "target": "cicd-pipeline.md 3つの OS の言語の決め方のテスト、Windows で実際の関数を呼ぶテスト、チェックポイントの PowerShell の確認" },
+    { "id": "NFR10.6", "status": "OK", "target": "cicd-pipeline.md 件数の一致のテストと、検証のスクリプトの結合テスト(実機で4つの形式と保存した変更案の件数を比べる)" },
+    { "id": "NFR10.7", "status": "OK", "target": "cicd-pipeline.md 文言の一覧のテスト" },
+    { "id": "NFR10.8", "status": "OK", "target": "cicd-pipeline.md coverage ジョブ(80% を変えない)" },
+    { "id": "NFR11.7", "status": "OK", "target": "cicd-pipeline.md 色の判定のテスト(3つの OS)" }
+  ]
+}

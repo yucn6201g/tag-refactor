@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"version\":1,\"toolVersion\":\"v\",\"planId\":\"p\",\"createdAt\":\"2026-10-19T12:04:00Z\",\"regions\":[],\"resources\":[{\"arn\":\"arn:a\",\"changes\":[{\"changeId\":\"c-000001\",\"kind\":\"renameKey\"}]}]}")

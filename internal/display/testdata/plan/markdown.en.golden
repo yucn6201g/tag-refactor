@@ -1,0 +1,73 @@
+## Target
+Account ` 123456789012 ` · 2 regions · 2026-10-19T12:04:00Z
+
+## ! Results are incomplete
+| Region | Reason |
+|---|---|
+| ` eu-west-1 ` | ` AccessDenied ` (` tag:GetResources `) |
+
+## ! Impact analysis is incomplete
+| Policy | Reason |
+|---|---|
+| ` arn:aws:iam::123456789012:policy/Hidden ` | ` access denied to iam:GetPolicyVersion ` |
+
+## Changes (4 resources)
+| Kind | Change | Resources |
+|---|---|---|
+| rename key | ` Env ` → ` Environment ` | 1 |
+| rename key | ` env ` → ` Environment ` | 1 |
+| value | ` Environment `: ` Prod ` → ` prod ` | 2 |
+| add | ` Owner ` = (from rules) | 3 |
+| add | ` CostCenter ` = ` cc-1 ` | 1 |
+| remove | ` tmp-owner ` | 2 |
+
+<details><summary>Changes by resource (4)</summary>
+
+| ARN | Changes | IaC | Impact |
+|---|---|---|---|
+| ` arn:aws:ec2:us-east-1:123456789012:instance/i-0abc ` | ` env ` → ` Environment `; ` Environment `: ` Prod ` → ` prod `; + ` CostCenter ` = ` cc-1 `; + ` Owner ` = ` compute-team ` |  | ! |
+| ` arn:aws:s3:::my-logs-bucket ` | ` Env ` → ` Environment `; + ` Owner ` = ` platform ` | ` logging ` | ! |
+| ` arn:aws:sqs:us-east-1:123456789012:qa ` | - ` tmp-owner ` |  |  |
+| ` arn:aws:sqs:us-east-1:123456789012:qb ` | ` Environment `: ` Prod ` → ` prod `; + ` Owner ` = ` platform `; - ` tmp-owner ` |  |  |
+
+</details>
+
+## Conflicts (1 resource)
+| ARN | Tags |
+|---|---|
+| ` arn:aws:sqs:us-east-1:123456789012:qa ` | ` env ` = ` dev `, ` Environment ` = ` test ` |
+
+## Required tag value not set (1 resource)
+No default or matching condition; not changed.
+
+| Key | Resources |
+|---|---|
+| ` CostCenter ` | 1 |
+
+<details><summary>Resources with a required tag value not set (1)</summary>
+
+| Key | ARN |
+|---|---|
+| ` CostCenter ` | ` arn:aws:sqs:us-east-1:123456789012:qa ` |
+
+</details>
+
+## Remove candidates (2 keys)
+Keys not in your rules; not changed.
+
+| Key | Resources |
+|---|---|
+| ` Name ` | 1 |
+| ` 日本語 ` | 1 |
+
+## Managed by IaC (1 resource)
+Changes may be reverted by the next deploy.
+
+## Impact
+| | Policy | Statement | Condition | Caused by |
+|---|---|---|---|---|
+| ! | ` arn:aws:iam::123456789012:policy/DevAccess ` | ` AllowDevEC2 ` | ` StringEquals ` ` aws:ResourceTag/env ` = ` dev ` | rename key ` env ` → ` Environment `, rename key ` Env ` → ` Environment ` |
+| ? | `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | cannot decide (policy variable) |
+
+## Summary
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

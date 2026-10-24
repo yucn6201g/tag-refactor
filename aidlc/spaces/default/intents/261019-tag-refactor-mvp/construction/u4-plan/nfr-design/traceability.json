@@ -1,0 +1,38 @@
+{
+  "stage": "nfr-design",
+  "unit": "u4-plan",
+  "upstream_ids": [
+    "NFR1.13",
+    "NFR1.14",
+    "NFR1.15",
+    "NFR3.8",
+    "NFR8.15",
+    "NFR8.16",
+    "NFR8.17",
+    "NFR8.18",
+    "NFR8.19",
+    "NFR9.6",
+    "NFR9.7",
+    "NFR10.6",
+    "NFR10.7",
+    "NFR10.8",
+    "NFR11.7"
+  ],
+  "coverage": [
+    { "id": "NFR1.13", "status": "OK", "target": "logical-components.md 性能の設計(1回の走査、照会の対応表、集計の対応表)" },
+    { "id": "NFR1.14", "status": "OK", "target": "logical-components.md 性能の設計(bufio、幅の表は ASCII でない文字だけ、WritePlan が項目を1つずつ書く)" },
+    { "id": "NFR1.15", "status": "OK", "target": "security-design.md §4 と logical-components.md 性能の設計(大きさの入れ物を先に用意して1回で読む)" },
+    { "id": "NFR3.8", "status": "OK", "target": "security-design.md §1(使い方の確かめの順、接続の関数を変えない、操作の集まりの比較)" },
+    { "id": "NFR8.15", "status": "OK", "target": "security-design.md §2(Sanitize と、保存と標準出力が共有する SafeJSONWriter)" },
+    { "id": "NFR8.16", "status": "OK", "target": "security-design.md §2(mdCode と、型でコードスパンの外への書き間違いを防ぐ)" },
+    { "id": "NFR8.17", "status": "OK", "target": "security-design.md §3(書く直前に作る一時ファイル、ハードリンク、閉じてから消す後片付け、外側の context による Ctrl+C の判定)" },
+    { "id": "NFR8.18", "status": "OK", "target": "security-design.md §3(大きさを数える書き込み口)と §4(LoadPlan、BOM、FuzzLoadPlan)" },
+    { "id": "NFR8.19", "status": "OK", "target": "security-design.md §3(planner の型の項目だけを書く、ruleFile は渡されたまま)" },
+    { "id": "NFR9.6", "status": "OK", "target": "logical-components.md 移植性とテストの設計(期待のファイル、LF の固定)" },
+    { "id": "NFR9.7", "status": "OK", "target": "security-design.md §5 と logical-components.md 移植性とテストの設計(差し替えられる判定の関数)" },
+    { "id": "NFR10.6", "status": "OK", "target": "logical-components.md 移植性とテストの設計(200通りの変更案で4つの形式の件数を比べる)" },
+    { "id": "NFR10.7", "status": "OK", "target": "logical-components.md 移植性とテストの設計(文言の一覧のテスト)" },
+    { "id": "NFR10.8", "status": "OK", "target": "U1 のカバレッジのジョブのまま(80%の下限を変えない)" },
+    { "id": "NFR11.7", "status": "OK", "target": "security-design.md §5(4つの条件の判定とストリームごとの仮想端末の処理)" }
+  ]
+}

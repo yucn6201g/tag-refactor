@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/testutil"
 )
 
@@ -147,8 +148,9 @@ func TestPerformanceU2CallsAndTimeFor10000Resources(t *testing.T) {
 	scan.requireExit(t, 2)
 	plan.requireExit(t, 2)
 	tagged, untagged := 10000/perfScale, 1000/perfScale
-	requireContains(t, "scan stdout", scan.stdout, fmt.Sprintf("Summary: %d resources scanned in 17 of 17 regions", tagged+untagged))
-	requireMatch(t, "scan stdout", scan.stdout, fmt.Sprintf(`(?m)^Resources with no user tags: %d$`, untagged))
+	// U4 BR3.6: counts have a comma every three digits.
+	requireContains(t, "scan stdout", scan.stdout, fmt.Sprintf("Summary: %s resources scanned in 17 of 17 regions", display.FormatCount(tagged+untagged)))
+	requireMatch(t, "scan stdout", scan.stdout, fmt.Sprintf(`(?m)^Resources with no user tags: %s$`, display.FormatCount(untagged)))
 	requireMatch(t, "scan stdout", scan.stdout, `(?m)^Untagged-resource discovery: partial \(not checked in ap-northeast-1: `)
 	if bound := callBound(loads, true, 0); scanCalls > bound {
 		t.Errorf("scan made %d calls, bound %d", scanCalls, bound)

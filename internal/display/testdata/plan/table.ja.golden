@@ -1,0 +1,35 @@
+! 結果が不完全です
+    eu-west-1: AccessDenied(tag:GetResources)
+
+! 影響分析が不完全です
+    IAM 管理ポリシー arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+
+変更: 4 リソース
+  ~ キー名の変更   Env -> Environment                 1 リソース
+  ~ キー名の変更   env -> Environment                 1 リソース
+  ~ 値の変更       Environment: Prod -> prod          2 リソース
+  + 追加           Owner = (ルールの値)               3 リソース
+  + 追加           CostCenter = cc-1                  1 リソース
+  - 削除           tmp-owner                          2 リソース
+  (複数の変更があるリソースも、総数では1件と数えます。)
+
+衝突(値が違うため変更しません): 1 リソース
+  arn:aws:sqs:us-east-1:123456789012:qa   env="dev"  Environment="test"
+
+必須タグの値が未指定(変更しません): 1 リソース
+  CostCenter   1 リソース(default も当てはまる条件もありません)
+
+消す候補(ルールにないキー。変更しません): 2 キー
+  Name(1)、日本語(1)
+
+IaC で管理されています(次のデプロイで元に戻るおそれがあります): 1 リソース
+
+影響(変更するタグを使っている参照)
+  ! IAM ポリシー  arn:aws:iam::123456789012:policy/DevAccess
+      ステートメント "AllowDevEC2"  条件 StringEquals aws:ResourceTag/env = "dev"
+      原因: キー名の変更 env -> Environment、キー名の変更 Env -> Environment
+  ? IAM ポリシー  arn:aws:iam::123456789012:policy/Teama|b`c<d>&\u{1B}[2J\u{202E}e
+      ステートメント "#0"  条件 StringEquals aws:ResourceTag/${aws:PrincipalTag/team} = "yes"
+      判定できません(ポリシー変数)
+
+要約: 変更 4 · 衝突 1 · 影響あり 1 · 判定できない 1 · 値が未指定 1 · 消す候補 2 · IaC 1

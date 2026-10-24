@@ -67,7 +67,7 @@ func (p *Printer) RegionsWaiting(regions []string) {
 		p.drawTable(true)
 		return
 	}
-	p.progressLine("scan: waiting: %s", strings.Join(regions, ", "))
+	p.say(styleNone, "progress.waiting", strings.Join(regions, ", "))
 }
 
 // RegionStarted implements inventory.ProgressSink.
@@ -75,7 +75,7 @@ func (p *Printer) RegionStarted(region string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.setRegion(region, regionProgress{state: stateRunning}) {
-		p.progressLine("scan: %s started", region)
+		p.say(styleNone, "progress.started", region)
 	}
 }
 
@@ -84,7 +84,7 @@ func (p *Printer) RegionDone(region string, count int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.setRegion(region, regionProgress{state: stateDone, count: count}) {
-		p.progressLine("scan: %s done (%s, elapsed %s)", region, plural(count, "resource"), p.elapsed())
+		p.say(styleNone, "progress.done", region, rawString(p.count("unit.resource", count)), p.elapsed())
 	}
 }
 
@@ -93,7 +93,7 @@ func (p *Printer) RegionFailed(region, reason string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if !p.setRegion(region, regionProgress{state: stateFailed, reason: reason}) {
-		p.progressLine("scan: %s failed (%s, elapsed %s)", region, reason, p.elapsed())
+		p.say(styleRemove, "progress.failed", region, reason, p.elapsed())
 	}
 }
 
@@ -110,7 +110,7 @@ func (p *Printer) DiscoveryStarted(regions []string) {
 		p.drawTable(true)
 		return
 	}
-	p.progressLine("scan: discovering never-tagged resources")
+	p.say(styleNone, "progress.discovering")
 }
 
 // DiscoveryRegionDone implements inventory.ProgressSink.
@@ -122,7 +122,16 @@ func (p *Printer) DiscoveryRegionDone(region, status string) {
 		p.drawTable(false)
 		return
 	}
-	p.progressLine("scan: %s never-tagged resources: %s", region, status)
+	p.say(styleNone, "progress.discoveryDone", region, rawString(statusWord(p.lang, status)))
+}
+
+// statusWord is the word of a discovery status in lang.
+func statusWord(lang Lang, status string) string {
+	switch status {
+	case "complete", "partial", "unavailable", "failed":
+		return T(lang, "status."+status)
+	}
+	return Sanitize(status)
 }
 
 // setRegion changes the state of a region. In redraw mode it redraws the
@@ -137,11 +146,6 @@ func (p *Printer) setRegion(region string, st regionProgress) bool {
 	}
 	p.drawTable(false)
 	return true
-}
-
-// progressLine appends one progress line.
-func (p *Printer) progressLine(format string, args ...any) {
-	p.line(p.errOut, format, args...)
 }
 
 // endProgress leaves the table on the screen in its final state, so the
@@ -161,25 +165,24 @@ func (p *Printer) endProgress() {
 func (p *Printer) tableLines() []string {
 	pr := p.progress
 	if pr.discovery {
-		return []string{fmt.Sprintf("  discovering never-tagged resources: %d/%d regions · elapsed %s",
-			pr.discoveryDone, len(pr.regions), p.elapsed())}
+		return []string{p.tr("progress.tableDiscovery", pr.discoveryDone, len(pr.regions), p.elapsed())}
 	}
-	lines := []string{Sanitize(fmt.Sprintf("Account %s · %s", p.account, plural(len(pr.regions), "region")))}
+	lines := []string{p.tr("progress.tableHeader", Sanitize(p.account), p.count("unit.region", len(pr.regions)))}
 	finished := 0
 	for _, name := range pr.regions {
 		rp := pr.byName[name]
-		row := fmt.Sprintf("  %-10s %-16s", "["+rp.state+"]", Sanitize(name))
+		row := "  " + padRight(p.tr("state."+rp.state), 10) + " " + padRight(Sanitize(name), 16)
 		switch rp.state {
 		case stateDone:
 			finished++
-			row += fmt.Sprintf(" %6d %s", rp.count, pluralWord(rp.count, "resource"))
+			row += " " + padLeft(FormatCount(rp.count), 6) + " " + word(p.lang, "word.resources", rp.count)
 		case stateFailed:
 			finished++
 			row += " " + Sanitize(rp.reason)
 		}
 		lines = append(lines, strings.TrimRight(row, " "))
 	}
-	lines = append(lines, fmt.Sprintf("  %d/%d regions · elapsed %s", finished, len(pr.regions), p.elapsed()))
+	lines = append(lines, p.tr("progress.tableFooter", finished, len(pr.regions), p.elapsed()))
 	return lines
 }
 

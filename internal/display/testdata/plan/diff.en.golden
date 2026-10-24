@@ -1,0 +1,29 @@
+! Results are incomplete
+    eu-west-1: AccessDenied (tag:GetResources)
+
+! Impact analysis is incomplete
+    IAM managed policy arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+
+arn:aws:ec2:us-east-1:123456789012:instance/i-0abc
+! - env         = "Prod"
+! + Environment = "prod"
+  + CostCenter  = "cc-1"
+  + Owner       = "compute-team"
+
+arn:aws:s3:::my-logs-bucket   [IaC: CloudFormation stack "logging"]
+! ~ Env -> Environment = "dev"
+  + Owner = "platform"
+
+arn:aws:sqs:us-east-1:123456789012:qa
+  - tmp-owner = "a|b`c<d>&\u{1B}[2J\u{202E}e"
+  ! conflict: env="dev"  Environment="test"
+  ! required tag value not set: CostCenter
+
+arn:aws:sqs:us-east-1:123456789012:qb
+  - Environment = "Prod"
+  + Environment = "prod"
+  + Owner       = "platform"
+  - tmp-owner   = "y"
+
+Changes: 4 resources (rename key 2 · value 2 · add 4 · remove 2)
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

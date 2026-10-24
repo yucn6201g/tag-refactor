@@ -185,10 +185,16 @@ properties:
 
 | kind | 必須の項目 | 意味 |
 |---|---|---|
-| `renameKey` | `fromKey`、`toKey` | キー名を変える(値はそのまま) |
+| `renameKey` | `fromKey`、`toKey`、`mergesIntoExisting` | キー名を変える。`mergesIntoExisting` が false なら `toKey` に `fromKey` の値を付けてから `fromKey` を消す。true なら `toKey` には書かず `fromKey` を消すだけ(U4 の機能設計 BR1.1、BR1.9) |
 | `changeValue` | `fromKey`、`fromValue`、`toValue` | 値を変える(キー名はそのまま。`toKey` は使わない) |
 | `addRequired` | `toKey`、`toValue` | 必須タグを付ける |
 | `removeKey` | `fromKey` | キーを消す |
+
+**U4 で足した項目(項目を足すだけなので `version` は 1 のまま):**
+
+- `resources[].changes[].mergesIntoExisting`(真偽値。`renameKey` で必須。意味は上の表)
+- `keyConflicts[]`: 変えなかった衝突のリソース。各項目は `arn`(必須)、`canonicalKey`(必須)、`presentTags`(必須。キーから収集したままの値への対応表)
+- `changeValue` の `fromKey` は、同じリソースの `renameKey` の `toKey`(変更後のキー名)になることがあります。変更はリソースの中で `changes` の順に行います。`renameKey` と `removeKey` にも、参考として `fromValue` を書きます。
 
 - 影響のある変更は、`impactFindings[].changeIds` から `resources[].changes[].changeId` へたどれます。たどった先の `resources[].arn` が、影響を受けるリソースです。`impacted` はその結果を変更の側にも書いたもので、U6 は確認画面の強調と、`--yes` だけのときの停止の判定(FR5.4、FR5.5)に使います。
 - **グローバルなリソース:** `global: true` とし、`region` には、そのリソースのタグの API を呼ぶリージョンを入れます(例: `us-east-1`)。種類ごとの正しい値の確認は未決事項です。
@@ -270,6 +276,7 @@ properties:
 ```
 
 - 一覧、差分、JSON、Markdown の4つの形式で、件数は一致させます(FR3.5)。
+- **U4 で足した項目(`version` は 1 のまま):** plan の `details` に `planId`、`createdAt`、`regions`、`keyConflicts`(C2 と同じ形)を入れます。`summary` に `conflictResources` と `unsetRequiredResources` を足します。`failedRegions` と `unsupportedResourceTypes` は scan と plan のどちらにも入れます。Markdown の形は U4 の機能設計(BR3.5)で決めました。
 
 ## C4. 書き換えの記録(JSON)
 
@@ -516,7 +523,7 @@ mapping:
 | C7 | 一度もタグが付いていないリソースを探すときの件数の上限と、打ち切ったときの扱い(要件 OQ5) | U2 |
 | C2、C7 | グローバルなリソースの種類ごとに、タグの API を呼ぶリージョンの確認 | U2、U6 |
 | C2 | IaC への反映(第3弾)に追加で必要な項目 | U8 |
-| C3 | Markdown 出力の詳しい形 | U4 |
+| C3 | Markdown 出力の詳しい形(U4 の機能設計で決定済み) | U4 |
 
 ## レビューを受けて決めたこと
 

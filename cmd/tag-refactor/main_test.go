@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/cli"
 )
@@ -36,6 +39,34 @@ func TestRunTurnsAPanicIntoOneFixedLine(t *testing.T) {
 	}
 	if strings.Contains(stderr.String(), "AKIA") || stdout.Len() != 0 {
 		t.Fatal("the panic value or a stack trace was printed")
+	}
+}
+
+// U4 NFR design §3: the context of the command ends on the signals, or when
+// stop is called; Ctrl+C is always one of the signals.
+func TestInterruptContextEndsWithStopOrItsParent(t *testing.T) {
+	if !slices.Contains(interruptSignals, os.Interrupt) {
+		t.Fatalf("signals = %v, want os.Interrupt among them", interruptSignals)
+	}
+	ctx, stop := interruptContext(context.Background(), interruptSignals)
+	if ctx.Err() != nil {
+		t.Fatal("the context must not start cancelled")
+	}
+	stop()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not end the context")
+	}
+
+	parent, cancel := context.WithCancel(context.Background())
+	ctx, stop = interruptContext(parent, interruptSignals)
+	defer stop()
+	cancel()
+	select {
+	case <-ctx.Done():
+	case <-time.After(5 * time.Second):
+		t.Fatal("the parent did not end the context")
 	}
 }
 

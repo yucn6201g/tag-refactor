@@ -4,123 +4,147 @@ import (
 	"fmt"
 
 	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
-const (
-	helpHint        = `run "tag-refactor --help" to see the commands and options`
-	permissionsHint = "docs/iam/readonly-policy.json lists the permissions tag-refactor needs"
-	supportedHint   = "this version has scan (--rules, --profile, --region), plan (--rules, --profile, --region) and " +
-		"rules suggest (--profile, --region, --output), plus --debug"
-)
-
-// describe turns an error into the two lines shown to the user: what
-// happened and how to fix it (W3, NFR11.4). Only tool-authored fields of the
-// error are used; the text of SDK errors is never shown (BR1.4).
-func describe(e *errkind.Error) (what, fix string) {
+// describe turns an error into the two lines shown to the user, in lang:
+// what happened and how to fix it (W3, NFR11.4). Only tool-authored fields of
+// the error are used; the text of SDK errors is never shown (BR1.4). The
+// Detail and Hint that other packages write (rule file and plan file
+// checks) are in English and are shown as they are inside the translated
+// lines.
+func describe(e *errkind.Error, lang display.Lang) (what, fix string) {
+	t := func(id string, args ...any) string { return display.T(lang, id, args...) }
 	switch e.Kind {
 	case errkind.InvalidInput:
-		return describeInvalidInput(e)
-	case errkind.UnsupportedVersion, errkind.NotFound, errkind.StorageFailed:
-		return describeFileError(e)
+		return describeInvalidInput(e, lang)
+	case errkind.UnsupportedVersion, errkind.NotFound:
+		return describeFileError(e, lang)
+	case errkind.StorageFailed:
+		if e.Reason == errkind.ReasonOutputFailed {
+			return describeOutput(e, lang)
+		}
+		return describeFileError(e, lang)
 	case errkind.CredentialsMissing:
-		return describeCredentials(e)
+		return describeCredentials(e, lang)
 	case errkind.AccessDenied:
 		// The IAM action is what the user has to allow; it differs from the
 		// API name for Resource Explorer's ListResources (security design §3).
 		action := awsaccess.IAMAction(e.Op)
-		return fmt.Sprintf("access denied for %s%s", action, inRegion(e.Region)),
-			fmt.Sprintf("allow %s for the identity you use; %s", action, permissionsHint)
+		return t("err.accessDenied", action, inRegion(e.Region, lang)), t("err.accessDeniedFix", action, t("err.permissions"))
 	case errkind.Transient:
 		if e.Reason == errkind.ReasonTimeout {
-			return fmt.Sprintf("AWS did not answer %s in time%s", e.Op, inRegion(e.Region)),
-				"try again later; add --debug to see the time of each call"
+			return t("err.timeout", e.Op, inRegion(e.Region, lang)), t("err.timeoutFix")
 		}
-		return fmt.Sprintf("AWS kept failing on %s after retries%s", e.Op, inRegion(e.Region)),
-			"try again later; add --debug to see each call and its retries"
+		return t("err.transient", e.Op, inRegion(e.Region, lang)), t("err.transientFix")
 	default:
-		return describeInternal(e)
+		return describeInternal(e, lang)
 	}
 }
 
-func inRegion(region string) string {
+func inRegion(region string, lang display.Lang) string {
 	if region == "" {
 		return ""
 	}
-	return " (region " + region + ")"
+	return display.T(lang, "err.inRegion", region)
 }
 
-func describeInvalidInput(e *errkind.Error) (string, string) {
+func describeInvalidInput(e *errkind.Error, lang display.Lang) (string, string) {
+	t := func(id string, args ...any) string { return display.T(lang, id, args...) }
 	switch e.Reason {
-	case errkind.ReasonRuleFile:
-		return describeFileError(e)
+	case errkind.ReasonRuleFile, errkind.ReasonPlanFile:
+		return describeFileError(e, lang)
+	case errkind.ReasonOutputExists, errkind.ReasonOutputFolderMissing, errkind.ReasonOutputTooLarge:
+		return describeOutput(e, lang)
 	case errkind.ReasonOptionNotAvailable:
-		return fmt.Sprintf("%s is not available in this version", e.Subject), supportedHint
+		return t("err.notAvailable", e.Subject), t("err.supported")
 	case errkind.ReasonProfileNotFound:
-		return fmt.Sprintf("the AWS profile %q was not found", e.Subject),
-			`check the profile name in your AWS config file, or create it with "aws configure --profile <name>"`
+		return t("err.profileNotFound", e.Subject), t("err.profileFix")
 	case errkind.ReasonRegionNotSet:
-		return "no AWS region is set", "pass --region (for example --region us-east-1) or set AWS_REGION"
+		return t("err.regionNotSet"), t("err.regionNotSetFix")
 	case errkind.ReasonRegionInvalid:
-		return fmt.Sprintf("%q is not an AWS region name", e.Region), "pass a region name such as us-east-1 with --region"
+		return t("err.regionInvalid", e.Region), t("err.regionInvalidFix")
 	case errkind.ReasonRegionUnavailable:
-		return fmt.Sprintf("the region %s is not available for this account", e.Region),
-			"pass an enabled region with --region or set AWS_REGION"
+		return t("err.regionNA", e.Region), t("err.regionNAFix")
 	}
 	fix := e.Hint
 	if fix == "" {
-		fix = helpHint
+		fix = t("err.help")
 	}
 	return e.Detail, fix
 }
 
-// describeFileError formats rule file errors as "<file> line <n>: <detail>".
-func describeFileError(e *errkind.Error) (string, string) {
-	what := e.Subject
-	if e.Line > 0 {
-		what += fmt.Sprintf(" line %d", e.Line)
+// describeOutput formats the errors of the files tag-refactor writes; Key is
+// the option (--out or --output).
+func describeOutput(e *errkind.Error, lang display.Lang) (string, string) {
+	t := func(id string, args ...any) string { return display.T(lang, id, args...) }
+	option := e.Key
+	if option == "" {
+		option = "--out"
 	}
-	what += ": " + e.Detail
-	fix := e.Hint
+	switch e.Reason {
+	case errkind.ReasonOutputExists:
+		return t("err.outExists", e.Subject), t("err.outExistsFix", option)
+	case errkind.ReasonOutputFolderMissing:
+		return t("err.outFolder", e.Subject), t("err.outFolderFix", option)
+	case errkind.ReasonOutputTooLarge:
+		return t("err.outTooLarge", e.Subject), t("err.outTooLargeFix")
+	}
+	return t("err.outFailed", e.Subject), t("err.outFailedFix")
+}
+
+// describeFileError formats rule file and plan file errors as "<file> line
+// <n>: <detail>". An error that names its messages (the plan file) is shown
+// in lang; the details of a rule file error are English.
+func describeFileError(e *errkind.Error, lang display.Lang) (string, string) {
+	detail, fix := e.Detail, e.Hint
+	if e.DetailID != "" {
+		detail = display.T(lang, e.DetailID, e.DetailArgs...)
+	}
+	if e.HintID != "" {
+		fix = display.T(lang, e.HintID, e.HintArgs...)
+	}
+	what := display.T(lang, "err.file", e.Subject, detail)
+	if e.Line > 0 {
+		what = display.T(lang, "err.fileLine", e.Subject, e.Line, detail)
+	}
 	if fix == "" {
-		fix = "check the rule file"
+		fix = display.T(lang, "err.checkRules")
 	}
 	return what, fix
 }
 
-func describeCredentials(e *errkind.Error) (string, string) {
+func describeCredentials(e *errkind.Error, lang display.Lang) (string, string) {
+	t := func(id string, args ...any) string { return display.T(lang, id, args...) }
 	login := `"aws sso login"`
 	if e.Subject != "" && e.Subject != "default" {
 		login = fmt.Sprintf(`"aws sso login --profile %s"`, e.Subject)
 	}
 	switch e.Reason {
 	case errkind.ReasonSSOSessionExpired:
-		return "the AWS SSO session has expired or is not signed in", "run " + login + " and try again"
+		return t("err.ssoExpired"), t("err.ssoExpiredFix", login)
 	case errkind.ReasonCredentialsExpired:
-		return fmt.Sprintf("the AWS credentials have expired (%s)", e.Op),
-			"sign in again, for example with " + login + ", or refresh the temporary credentials"
+		return t("err.credExpired", e.Op), t("err.credExpiredFix", login)
 	case errkind.ReasonCredentialsRejected:
-		return fmt.Sprintf("AWS rejected the credentials (%s)", e.Op),
-			"check the access key of the profile or the environment, or sign in again"
+		return t("err.credRejected", e.Op), t("err.credRejectedFix")
 	case errkind.ReasonCredentialsTimeout:
-		return "AWS credentials could not be obtained in time",
-			"check the profile settings and the network, or pass --profile"
+		return t("err.credTimeout"), t("err.credTimeoutFix")
 	default:
-		return "no AWS credentials were found",
-			`run "aws configure" or "aws sso login", set AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY, or pass --profile`
+		return t("err.credMissing"), t("err.credMissingFix")
 	}
 }
 
 // describeInternal names the operation only; the error text and its type are
 // kept out of the message (security design §5).
-func describeInternal(e *errkind.Error) (string, string) {
+func describeInternal(e *errkind.Error, lang display.Lang) (string, string) {
 	where := e.Op
 	if where == "" {
 		where = "tag-refactor"
 	}
-	what := "an unexpected error occurred in " + where + inRegion(e.Region)
+	what := display.T(lang, "err.internal", where, inRegion(e.Region, lang))
 	if e.Detail != "" {
-		what += ": " + e.Detail
+		what = display.T(lang, "err.internalDetail", where, inRegion(e.Region, lang), e.Detail)
 	}
-	return what, "run the command again with --debug to see the failing call"
+	return what, display.T(lang, "err.internalFix")
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 
 	"github.com/yucn6201g/tag-refactor/internal/cli"
 )
@@ -24,7 +25,24 @@ const panicMessage = "Error: tag-refactor stopped because of an unexpected inter
 type runFunc func(ctx context.Context, args []string, stdout, stderr io.Writer, deps cli.Deps) int
 
 func main() {
-	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr, cli.Run))
+	ctx, stop := interruptContext(context.Background(), interruptSignals)
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, cli.Run)
+	stop()
+	os.Exit(code)
+}
+
+// interruptContext returns a context that Ctrl+C (and on Unix SIGTERM)
+// cancels (U4 NFR design §3): the AWS calls stop, and the command cleans up
+// its temporary files, puts the terminal back and says it was interrupted.
+// The first signal also gives the signals back to Go's default, so a second
+// Ctrl+C ends the process at once.
+func interruptContext(parent context.Context, signals []os.Signal) (context.Context, context.CancelFunc) {
+	ctx, stop := signal.NotifyContext(parent, signals...)
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+	return ctx, stop
 }
 
 // run calls the command line and turns an unexpected panic into exit code 1

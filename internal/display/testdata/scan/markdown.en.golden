@@ -1,0 +1,38 @@
+## Target
+Account ` 123456789012 ` · 2 of 3 regions · 2026-10-19T12:04:00Z
+
+## ! Results are incomplete
+| Region | Reason |
+|---|---|
+| ` eu-west-1 ` | ` AccessDenied ` (` tag:GetResources `) |
+
+## Tag key variants
+Candidates; confirm them in your rule file.
+
+| Group | Spelling | Resources |
+|---|---|---|
+| ` environment ` | ` Env ` | 1 |
+| ` environment ` | ` Environment ` | 1 |
+| ` environment ` | ` env ` | 1 |
+| ` costcenter ` | ` cost-center ` | 1 |
+| ` costcenter ` | ` cost_center ` | 1 |
+
+## Required tags missing
+From ` tagrules.yaml `.
+
+| Key | Resources | Resources that cannot be tagged |
+|---|---|---|
+| ` Owner ` | 4 | 1 |
+
+## Never-tagged resources
+Resources with no user tags: 2
+
+Untagged-resource discovery: partial
+
+## Resource types not supported for tag changes
+| Type | Resources |
+|---|---|
+| ` ssm:patch-compliance ` | 1 |
+
+## Summary
+Summary: 5 resources scanned in 2 of 3 regions · 2 variant groups · 1 required tag missing

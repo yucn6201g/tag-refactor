@@ -2,27 +2,21 @@ package cli
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"io/fs"
-	"os"
-	"path/filepath"
+	"io"
 	"runtime/debug"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
+	"github.com/yucn6201g/tag-refactor/internal/fileout"
 	"github.com/yucn6201g/tag-refactor/internal/inventory"
 	"github.com/yucn6201g/tag-refactor/internal/rules"
 )
 
 // suggestCommandName is the command of U3 workflow W2.
 const suggestCommandName = "rules suggest"
-
-// draftTooLargeWarning is printed when the draft is over 64 KiB even without
-// value candidates (U3 BR6.7).
-const draftTooLargeWarning = "the draft is larger than 64 KiB and cannot be read as it is; remove keys you do not need"
 
 func (a *app) rulesCommand() *cobra.Command {
 	cmd := &cobra.Command{
@@ -49,9 +43,6 @@ func (a *app) suggestCommand() *cobra.Command {
 			"On Windows PowerShell, save it with --output so it stays UTF-8.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if err := rejectUnavailableFlags(cmd); err != nil {
-				return err
-			}
 			return ensureKind(a.runSuggest(cmd.Context(), profile, output, regions))
 		},
 	}
@@ -59,7 +50,6 @@ func (a *app) suggestCommand() *cobra.Command {
 	cmd.Flags().StringArrayVar(&regions, "region", nil, regionFlagHelp)
 	cmd.Flags().StringVar(&output, "output", "",
 		"write the draft to this file (UTF-8) instead of standard output; an existing file is never overwritten")
-	addUnavailableFlags(cmd)
 	return cmd
 }
 
@@ -72,18 +62,21 @@ func (a *app) runSuggest(ctx context.Context, profile, output string, regions []
 	defer cancel()
 	if output != "" {
 		// Before AWS is called, so a wrong path does not cost a collection.
-		if err := checkOutputPath(output); err != nil {
-			return err
+		if err := fileout.Prepare(output, draftPrefix); err != nil {
+			return withOption(err, "--output")
 		}
 	}
 	_, snap, err := collect(ctx, a, profile, regions, tagReadersOf)
 	if err != nil {
 		return err
 	}
-	draft := rules.Suggest(suggestInput(snap, a.deps.Now()))
+	draft := rules.Suggest(suggestInput(snap, a.deps.Now(), a.p.Lang()))
 	if output != "" {
-		if err := writeDraftFile(output, draft.Text); err != nil {
+		if err := a.saveFile(ctx, output, draftPrefix, draftFileLimit, func(w io.Writer) error {
+			_, err := w.Write(draft.Text)
 			return err
+		}); err != nil {
+			return withOption(err, "--output")
 		}
 		a.p.DraftWritten(output, len(draft.Keys))
 	} else {
@@ -91,7 +84,8 @@ func (a *app) runSuggest(ctx context.Context, profile, output string, regions []
 	}
 	a.p.DraftIncomplete(snap.FailedRegions)
 	if draft.TooLarge {
-		a.p.Warn(draftTooLargeWarning)
+		// U3 BR6.7: over 64 KiB even without value candidates.
+		a.p.WarnText("stderr.draftTooLarge")
 	}
 	a.p.SuggestScope(snap)
 	a.result = &outcome{
@@ -103,9 +97,34 @@ func (a *app) runSuggest(ctx context.Context, profile, output string, regions []
 	return nil
 }
 
+// catalogComments are the comments of the draft from the display catalog,
+// in lang.
+func catalogComments(lang display.Lang) rules.DraftComments {
+	t := func(id string) string { return display.T(lang, id) }
+	return rules.DraftComments{
+		Generated:     t("draft.generated"),
+		Account:       t("draft.account"),
+		Incomplete:    t("draft.incomplete"),
+		Review:        []string{t("draft.review1"), t("draft.review2")},
+		TooManyValues: t("draft.tooManyValues"),
+		SizeLimit:     t("draft.sizeLimit"),
+	}
+}
+
+// draftComments are the comments of the draft for lang (U4 BR3.9): nil, the
+// English draft as it was, unless the language is Japanese.
+func draftComments(lang display.Lang) *rules.DraftComments {
+	if lang != display.Japanese {
+		return nil
+	}
+	c := catalogComments(lang)
+	return &c
+}
+
 // suggestInput turns the collection into the input of rules.Suggest, with
-// the grouping of scan (inventory.CanonicalKey and its dictionary).
-func suggestInput(snap *inventory.Snapshot, now time.Time) rules.SuggestInput {
+// the grouping of scan (inventory.CanonicalKey and its dictionary) and the
+// comments of the language of the run.
+func suggestInput(snap *inventory.Snapshot, now time.Time, lang display.Lang) rules.SuggestInput {
 	resources := make([]rules.TaggedResource, 0, len(snap.Resources))
 	for _, r := range snap.Resources {
 		resources = append(resources, rules.TaggedResource{ARN: r.ARN, Tags: r.Tags})
@@ -124,6 +143,7 @@ func suggestInput(snap *inventory.Snapshot, now time.Time) rules.SuggestInput {
 		RegionsEnabled: len(snap.EnabledRegions),
 		FailedRegions:  failed,
 		GeneratedAt:    now,
+		Comments:       draftComments(lang),
 	}
 }
 
@@ -151,74 +171,61 @@ func toolVersion() string {
 	return "devel"
 }
 
-// checkOutputPath rejects an --output that already exists, or whose folder
-// does not, before anything else happens.
-func checkOutputPath(path string) error {
-	if _, err := os.Lstat(path); err == nil {
-		return outputExists(path)
+// The temporary file prefix and the size limit of the --output draft. A
+// draft over 64 KiB is still written (U3 BR6.7), so the limit only guards
+// against a draft no rule file reader would take.
+const (
+	draftPrefix    = ".tag-refactor-draft-"
+	draftFileLimit = 64 << 20
+)
+
+// withOption names the option of an error about a file the command writes,
+// so its message can tell which option to change.
+func withOption(err error, option string) error {
+	if e, ok := errkind.As(err); ok {
+		switch e.Reason {
+		case errkind.ReasonOutputExists, errkind.ReasonOutputFolderMissing, errkind.ReasonOutputFailed, errkind.ReasonOutputTooLarge:
+			if e.Key == "" {
+				e.Key = option
+			}
+		}
 	}
-	dir := filepath.Dir(path)
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: path,
-			Detail: fmt.Sprintf("the folder of %s does not exist", path),
-			Hint:   "create the folder first, or pass another path to --output"}
-	}
-	return nil
+	return err
 }
 
-func outputExists(path string) error {
-	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: path,
-		Detail: fmt.Sprintf("%s already exists; rules suggest never overwrites a file", path),
-		Hint:   "delete the file first, or pass another file name to --output"}
-}
-
-func outputFailed(path string, err error) error {
-	return &errkind.Error{Kind: errkind.StorageFailed, Subject: path, Detail: "the draft could not be written",
-		Hint: "check that the folder is writable and has free space", Cause: err}
-}
-
-// writeDraftFile writes the draft to a temporary file in the same folder
-// and then gives it its name, so an interrupted run never leaves a partial
-// draft (security design §3). The name is given with a hard link, which
-// fails when the file exists, so a file created meanwhile is not
-// overwritten either; a file system without hard links gets a rename after
-// one more check. The temporary file is always removed.
-func writeDraftFile(path string, data []byte) error {
-	return writeDraftFileWith(path, data, os.Link, os.Rename)
-}
-
-// writeDraftFileWith is writeDraftFile with the link and the rename passed
-// in, so the tests can reach the rename and the failure paths.
-func writeDraftFileWith(path string, data []byte, link, rename func(oldname, newname string) error) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".tag-refactor-draft-*.tmp")
+// saveFile writes a file through internal/fileout: a temporary file in the
+// folder of path, written by write and then given its name, so an
+// interrupted run never leaves a partial file and an existing file is never
+// overwritten (security design §3). The temporary file is removed however
+// the command ends. A run interrupted while it writes stops at the next
+// write.
+func (a *app) saveFile(ctx context.Context, path, prefix string, limit int64, write func(io.Writer) error) error {
+	pending, err := fileout.Create(path, prefix, limit)
 	if err != nil {
-		return outputFailed(path, err)
+		return err
 	}
-	tmpName := tmp.Name()
-	defer func() { _ = os.Remove(tmpName) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return outputFailed(path, err)
+	defer pending.Discard()
+	if a.deps.savingHook != nil {
+		a.deps.savingHook()
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return outputFailed(path, err)
+	if err := write(contextWriter{ctx: ctx, w: pending.Writer()}); err != nil {
+		return err
 	}
-	if err := tmp.Close(); err != nil {
-		return outputFailed(path, err)
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	err = link(tmpName, path)
-	switch {
-	case err == nil:
-		return nil
-	case errors.Is(err, fs.ErrExist):
-		return outputExists(path)
+	return pending.Commit()
+}
+
+// contextWriter stops writing once ctx is cancelled (Ctrl+C).
+type contextWriter struct {
+	ctx context.Context
+	w   io.Writer
+}
+
+func (c contextWriter) Write(b []byte) (int, error) {
+	if err := c.ctx.Err(); err != nil {
+		return 0, err
 	}
-	if _, statErr := os.Lstat(path); statErr == nil {
-		return outputExists(path)
-	}
-	if err := rename(tmpName, path); err != nil {
-		return outputFailed(path, err)
-	}
-	return nil
+	return c.w.Write(b)
 }

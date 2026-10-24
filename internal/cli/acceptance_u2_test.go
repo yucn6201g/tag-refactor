@@ -337,7 +337,8 @@ func TestAcceptanceU2_AC1_1_5_IncompleteResultsNeverSayNothingWasFound(t *testin
 		r.requireExit(t, 1)
 		requireMatch(t, "stdout", r.stdout, `(?m)^! Results are incomplete$`)
 		requireNotContains(t, "stdout", r.stdout, "No changes needed")
-		requireMatch(t, "stdout", r.stdout, `(?m)^Summary: 1 resource scanned · 0 to change$`)
+		// Since U4 the key no rule names (Owner) is a remove candidate (BR2.3).
+		requireMatch(t, "stdout", r.stdout, `(?m)^Summary: 1 resource scanned · 0 to change · 1 remove candidate$`)
 		requireContains(t, "stderr", r.stderr, "Exit code: 1 (results incomplete)")
 	})
 }

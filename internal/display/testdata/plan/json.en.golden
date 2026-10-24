@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "toolVersion": "v0.1.0",
+  "command": "plan",
+  "exitCode": 1,
+  "accountId": "123456789012",
+  "complete": {
+    "inventory": false,
+    "impactAnalysis": false
+  },
+  "failedRegions": [
+    {"region":"eu-west-1","reason":"AccessDenied (tag:GetResources)"}
+  ],
+  "unsupportedResourceTypes": [],
+  "summary": {
+    "scannedResources": 4,
+    "resourcesToChange": 4,
+    "changesByKind": {"addRequired":4,"changeValue":2,"removeKey":2,"renameKey":2},
+    "conflictResources": 1,
+    "unsetRequiredResources": 1,
+    "affectedReferences": 1,
+    "undecidedReferences": 1,
+    "iacManagedResources": 1
+  },
+  "details": {
+    "planId": "plan-20261019T120400Z-7f3a",
+    "createdAt": "2026-10-19T12:04:00Z",
+    "regions": ["eu-west-1","us-east-1"],
+    "resources": [
+      {"arn":"arn:aws:ec2:us-east-1:123456789012:instance/i-0abc","region":"us-east-1","global":false,"resourceType":"ec2:instance","beforeTags":{"env":"Prod"},"iacManagedBy":null,"changes":[{"changeId":"c-000001","kind":"renameKey","fromKey":"env","toKey":"Environment","fromValue":"Prod","mergesIntoExisting":false,"impacted":true},{"changeId":"c-000002","kind":"changeValue","fromKey":"Environment","fromValue":"Prod","toValue":"prod","impacted":true},{"changeId":"c-000003","kind":"addRequired","toKey":"CostCenter","toValue":"cc-1","impacted":false},{"changeId":"c-000004","kind":"addRequired","toKey":"Owner","toValue":"compute-team","impacted":false}]},
+      {"arn":"arn:aws:s3:::my-logs-bucket","region":"us-east-1","global":true,"resourceType":"s3","beforeTags":{"CostCenter":"c","Env":"dev","aws:cloudformation:stack-name":"logging"},"iacManagedBy":"cloudformation:logging","changes":[{"changeId":"c-000005","kind":"renameKey","fromKey":"Env","toKey":"Environment","fromValue":"dev","mergesIntoExisting":false,"impacted":true},{"changeId":"c-000006","kind":"addRequired","toKey":"Owner","toValue":"platform","impacted":false}]},
+      {"arn":"arn:aws:sqs:us-east-1:123456789012:qa","region":"us-east-1","global":false,"resourceType":"sqs","beforeTags":{"Environment":"test","Name":"a|b`c\u003cd\u003e\u0026\u001b[2J\u202ee","Owner":"x","env":"dev","tmp-owner":"a|b`c\u003cd\u003e\u0026\u001b[2J\u202ee"},"iacManagedBy":null,"changes":[{"changeId":"c-000007","kind":"removeKey","fromKey":"tmp-owner","fromValue":"a|b`c\u003cd\u003e\u0026\u001b[2J\u202ee","impacted":false}]},
+      {"arn":"arn:aws:sqs:us-east-1:123456789012:qb","region":"us-east-1","global":false,"resourceType":"sqs","beforeTags":{"CostCenter":"c","Environment":"Prod","tmp-owner":"y","日本語":"値"},"iacManagedBy":null,"changes":[{"changeId":"c-000008","kind":"changeValue","fromKey":"Environment","fromValue":"Prod","toValue":"prod","impacted":false},{"changeId":"c-000009","kind":"addRequired","toKey":"Owner","toValue":"platform","impacted":false},{"changeId":"c-000010","kind":"removeKey","fromKey":"tmp-owner","fromValue":"y","impacted":false}]}
+    ],
+    "keyConflicts": [
+      {"arn":"arn:aws:sqs:us-east-1:123456789012:qa","canonicalKey":"Environment","presentTags":{"Environment":"test","env":"dev"}}
+    ],
+    "impactFindings": [
+      {"verdict":"affected","policyRef":"arn:aws:iam::123456789012:policy/DevAccess","sourceKind":"iamManaged","statementId":"AllowDevEC2","conditionKey":"aws:ResourceTag/env","conditionValue":"dev","changeIds":["c-000001","c-000005"]},
+      {"verdict":"undecided","policyRef":"arn:aws:iam::123456789012:policy/Teama|b`c\u003cd\u003e\u0026\u001b[2J\u202ee","sourceKind":"iamManaged","statementId":"#0","conditionKey":"aws:ResourceTag/${aws:PrincipalTag/team}","conditionValue":"yes","changeIds":["c-000002"]}
+    ],
+    "unreadPolicies": [
+      {"sourceKind":"iamManaged","reason":"access denied to iam:GetPolicyVersion"}
+    ],
+    "unsetRequiredTags": [
+      {"key":"CostCenter","arns":["arn:aws:sqs:us-east-1:123456789012:qa"]}
+    ],
+    "removeCandidates": ["Name","日本語"]
+  }
+}

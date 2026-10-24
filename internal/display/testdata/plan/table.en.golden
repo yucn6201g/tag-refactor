@@ -1,0 +1,35 @@
+! Results are incomplete
+    eu-west-1: AccessDenied (tag:GetResources)
+
+! Impact analysis is incomplete
+    IAM managed policy arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+
+Changes: 4 resources
+  ~ rename key   Env -> Environment                 1 resource
+  ~ rename key   env -> Environment                 1 resource
+  ~ value        Environment: Prod -> prod          2 resources
+  + add          Owner = (from rules)               3 resources
+  + add          CostCenter = cc-1                  1 resource
+  - remove       tmp-owner                          2 resources
+  (A resource with several changes is counted once in the total.)
+
+Conflicts (not changed; values differ): 1 resource
+  arn:aws:sqs:us-east-1:123456789012:qa   env="dev"  Environment="test"
+
+Required tag value not set (not changed): 1 resource
+  CostCenter   1 resource  (no default or matching condition)
+
+Remove candidates (keys not in your rules; not changed): 2 keys
+  Name (1), 日本語 (1)
+
+Managed by IaC (changes may be reverted by the next deploy): 1 resource
+
+Impact (references that use the tags being changed)
+  ! IAM policy  arn:aws:iam::123456789012:policy/DevAccess
+      Statement "AllowDevEC2"  Condition StringEquals aws:ResourceTag/env = "dev"
+      affected by: rename key env -> Environment, rename key Env -> Environment
+  ? IAM policy  arn:aws:iam::123456789012:policy/Teama|b`c<d>&\u{1B}[2J\u{202E}e
+      Statement "#0"  Condition StringEquals aws:ResourceTag/${aws:PrincipalTag/team} = "yes"
+      cannot decide (policy variable)
+
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

@@ -79,6 +79,17 @@ const (
 	// ReasonNoDefaultView is an AccessDenied of Resource Explorer: the region
 	// has no default view, so ListResources cannot be used (U2, C12).
 	ReasonNoDefaultView Reason = "no-default-view"
+
+	// Reasons of the files tag-refactor writes (U4: plan --out and rules
+	// suggest --output). Subject is the path; Key is the option, filled in
+	// by the command line.
+	ReasonOutputExists        Reason = "output-exists"
+	ReasonOutputFolderMissing Reason = "output-folder-missing"
+	ReasonOutputFailed        Reason = "output-failed"
+	ReasonOutputTooLarge      Reason = "output-too-large"
+	// ReasonPlanFile is an error in a saved plan that is read back (U4
+	// BR4.4). Subject is the path; Detail names the field and the problem.
+	ReasonPlanFile Reason = "plan-file"
 )
 
 // Error is an error with a kind. Only the tool-authored fields are safe to
@@ -101,6 +112,14 @@ type Error struct {
 	Detail string
 	// Hint says how to fix it, written by the tool.
 	Hint string
+	// DetailID and HintID, when set, name the messages of Detail and Hint in
+	// the message catalog of the display, with their values, so the command
+	// line can show them in the user's language (U4: the errors of a saved
+	// plan). Detail and Hint keep the English text.
+	DetailID   string
+	DetailArgs []any
+	HintID     string
+	HintArgs   []any
 	// Cause is the underlying error. Its text is never printed.
 	Cause error
 }

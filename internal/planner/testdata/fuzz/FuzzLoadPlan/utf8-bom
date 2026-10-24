@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("\xef\xbb\xbf{\"version\":1,\"toolVersion\":\"v\",\"planId\":\"p\",\"accountId\":\"a\",\"createdAt\":\"2026-10-19T12:04:00Z\",\"regions\":[],\"inventoryComplete\":true,\"impactAnalysisComplete\":true,\"resources\":[]}")
