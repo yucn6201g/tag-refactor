@@ -313,11 +313,15 @@ func TestWritePlanEscapesUnprintableCharacters(t *testing.T) {
 		}
 	}
 	for _, escaped := range []string{esc("007f"), esc("009b"), esc("202e"), esc("db40") + esc("dc01"), esc("003c"), esc("0026"),
-		// Invalid UTF-8 becomes U+FFFD itself, which is printable.
-		esc("003e"), esc("001b"), `\n`, string(rune(0xfffd))} {
+		esc("003e"), esc("001b"), `\n`} {
 		if !bytes.Contains(data, []byte(escaped)) {
 			t.Errorf("the file has no %s", escaped)
 		}
+	}
+	// Invalid UTF-8 becomes U+FFFD: encoding/json writes it escaped before
+	// Go 1.27 and as the printable character itself from Go 1.27.
+	if !bytes.Contains(data, []byte(string(rune(0xfffd)))) && !bytes.Contains(data, []byte(esc("fffd"))) {
+		t.Error("the file has no U+FFFD for the invalid UTF-8")
 	}
 	loaded, err := ParsePlan("p.json", data)
 	if err != nil {
