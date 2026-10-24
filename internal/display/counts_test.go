@@ -49,10 +49,30 @@ func first(t *testing.T, text, pattern string) int {
 	return 0
 }
 
-var summaryLine = regexp.MustCompile(`(?m)^Summary: ([\d,]+) to change · ([\d,]+) conflicts · ([\d,]+) affected · ([\d,]+) undecided · ` +
-	`([\d,]+) value not set · ([\d,]+) remove candidates · ([\d,]+) IaC-managed$`)
+var summaryLine = regexp.MustCompile(`(?m)^Summary: ([\d,]+) to change · ([\d,]+) conflicts? · ([\d,]+) affected · ([\d,]+) undecided · ` +
+	`([\d,]+) value not set · ([\d,]+) remove candidates? · ([\d,]+) IaC-managed$`)
 
-var nothingLine = regexp.MustCompile(`(?m)^Summary: [\d,]+ resources? scanned · 0 to change(?: · ([\d,]+) remove candidates)?$`)
+var nothingLine = regexp.MustCompile(`(?m)^Summary: [\d,]+ resources? scanned · 0 to change(?: · ([\d,]+) remove candidates?)?$`)
+
+// The English summary says "1 conflict" and "1 remove candidate", and the
+// plural for every other count (review of U4).
+func TestTheSummaryUsesTheSingularForOne(t *testing.T) {
+	plan := goldenPlan(t)
+	out := render(t, English, func(p *Printer) { p.PlanResult(plan, Output{Format: FormatTable}) })
+	if !strings.Contains(out, " · 1 conflict · ") || strings.Contains(out, "1 conflicts") || !strings.Contains(out, " · 2 remove candidates · ") {
+		t.Fatalf("summary:\n%s", out)
+	}
+	plan.RemoveCandidates = plan.RemoveCandidates[:1]
+	plan.Conflicts = nil
+	out = render(t, English, func(p *Printer) { p.PlanResult(plan, Output{Format: FormatTable}) })
+	if !strings.Contains(out, " · 0 conflicts · ") || !strings.Contains(out, " · 1 remove candidate · ") {
+		t.Fatalf("summary:\n%s", out)
+	}
+	ja := render(t, Japanese, func(p *Printer) { p.PlanResult(plan, Output{Format: FormatTable}) })
+	if !strings.Contains(ja, " · 衝突 0 · ") || !strings.Contains(ja, " · 消す候補 1 · ") {
+		t.Fatalf("Japanese summary:\n%s", ja)
+	}
+}
 
 // fromSummary reads the summary line, or the one of a plan with nothing to
 // do.

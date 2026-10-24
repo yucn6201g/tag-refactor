@@ -173,7 +173,7 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 		"      Statement \"#0\"  Condition Null aws:ResourceTag/${aws:PrincipalTag/team}\n" +
 		"      cannot decide (policy variable)\n" +
 		"\n" +
-		"Summary: 2 to change · 1 conflicts · 1 affected · 1 undecided · 0 value not set · 0 remove candidates · 0 IaC-managed\n"
+		"Summary: 2 to change · 1 conflict · 1 affected · 1 undecided · 0 value not set · 0 remove candidates · 0 IaC-managed\n"
 	if out.String() != want {
 		t.Fatalf("stdout:\n%s\nwant:\n%s", out.String(), want)
 	}

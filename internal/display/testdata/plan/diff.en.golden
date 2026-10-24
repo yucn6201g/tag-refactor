@@ -26,4 +26,4 @@ arn:aws:sqs:us-east-1:123456789012:qb
   - tmp-owner   = "y"
 
 Changes: 4 resources (rename key 2 · value 2 · add 4 · remove 2)
-Summary: 4 to change · 1 conflicts · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

@@ -168,6 +168,39 @@ func TestGoldenScanFormats(t *testing.T) {
 	}
 }
 
+// A plan saved and read back has no condition operator (contract C2 does not
+// keep it): the table, the diff and Markdown leave out the word and its
+// space instead of an empty word.
+func TestALoadedPlanShowsItsConditionsWithoutAnOperator(t *testing.T) {
+	var b bytes.Buffer
+	w := planner.NewSafeJSONWriter(&b)
+	if err := planner.WritePlan(w, goldenPlan(t)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := planner.ParsePlan("plan.json", b.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range []Lang{English, Japanese} {
+		table := render(t, lang, func(p *Printer) { p.PlanResult(loaded, Output{Format: FormatTable}) })
+		want := map[Lang]string{English: "Condition aws:ResourceTag/env = \"dev\"\n", Japanese: "条件 aws:ResourceTag/env = \"dev\"\n"}[lang]
+		if !strings.Contains(table, want) || strings.Contains(table, "Condition  ") || strings.Contains(table, "条件  ") {
+			t.Errorf("%s table:\n%s", lang, table)
+		}
+		md := render(t, lang, func(p *Printer) { p.PlanResult(loaded, Output{Format: FormatMarkdown}) })
+		if !strings.Contains(md, "| ` aws:ResourceTag/env ` = ` dev ` |") || strings.Contains(md, "`  ` ") {
+			t.Errorf("%s Markdown:\n%s", lang, md)
+		}
+		diff := render(t, lang, func(p *Printer) { p.PlanResult(loaded, Output{Format: FormatDiff}) })
+		if !strings.Contains(diff, "! - env         = \"Prod\"\n") || strings.Contains(diff, "  \n") {
+			t.Errorf("%s diff:\n%s", lang, diff)
+		}
+	}
+}
+
 // BR3.4: JSON is never translated, so both languages give the same bytes.
 func TestJSONIsTheSameInEveryLanguage(t *testing.T) {
 	plan := goldenPlan(t)

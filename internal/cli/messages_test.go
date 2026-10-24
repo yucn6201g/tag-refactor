@@ -7,6 +7,7 @@ import (
 
 	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
+	"github.com/yucn6201g/tag-refactor/internal/planner"
 )
 
 func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
@@ -69,21 +70,27 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 }
 
 // BR6.3: an error or an incomplete result is 1, anything to review is 2,
-// otherwise 0; incomplete wins over review.
+// otherwise 0; incomplete wins over review. plan takes its code from
+// Plan.ExitCode (U4 BR2.6), the one place of its rule.
 func TestExitCodeFollowsBR6_3(t *testing.T) {
+	change := []planner.PlannedResource{{ARN: "a", Changes: []planner.Change{{ChangeID: "c-000001", Kind: planner.KindRemoveKey}}}}
+	plan := func(inventory, impact bool, resources []planner.PlannedResource, candidates int) *planner.Plan {
+		return &planner.Plan{InventoryComplete: inventory, ImpactAnalysisComplete: impact, Resources: resources,
+			RemoveCandidates: make([]planner.RemoveCandidate, candidates)}
+	}
 	cases := []struct {
 		o    outcome
 		code int
 		mean string
 	}{
-		{outcome{command: "plan", incomplete: true, needsReview: true}, 1, "impact analysis incomplete"},
+		{outcome{command: "plan", plan: plan(true, false, change, 0)}, 1, "impact analysis incomplete"},
 		// U2 BR5.3, BR5.6: a region the tagging API could not read is 1.
 		{outcome{command: "scan", regionsMissing: true, needsReview: true}, 1, "results incomplete"},
-		{outcome{command: "plan", regionsMissing: true, incomplete: true}, 1, "results incomplete"},
+		{outcome{command: "plan", plan: plan(false, false, nil, 0)}, 1, "results incomplete"},
 		{outcome{command: "scan", needsReview: true}, 2, "issues found"},
-		{outcome{command: "plan", needsReview: true}, 2, "review needed"},
+		{outcome{command: "plan", plan: plan(true, true, change, 0)}, 2, "review needed"},
 		{outcome{command: "scan"}, 0, "no issues"},
-		{outcome{command: "plan"}, 0, "no changes needed"},
+		{outcome{command: "plan", plan: plan(true, true, nil, 3)}, 0, "no changes needed"},
 	}
 	for _, tc := range cases {
 		code, id := tc.o.exitCode()

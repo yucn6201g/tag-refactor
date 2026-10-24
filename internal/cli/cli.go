@@ -16,6 +16,7 @@ import (
 
 	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
+	"github.com/yucn6201g/tag-refactor/internal/planner"
 )
 
 // Deps holds what the command line takes from its environment. The zero value
@@ -67,19 +68,26 @@ type outcome struct {
 	draftTooLarge bool
 	needsReview   bool
 	resources     int
+	// plan is the plan of a plan command; its exit code is planner's
+	// Plan.ExitCode (U4 BR2.6), the one place that rule is written.
+	plan *planner.Plan
 	// saveHint is the rule file of a plan that was not saved: the last line
 	// says how to save it (screen 4).
 	saveHint string
 }
 
-// exitCode applies BR6.3, BR5.3 and U4 BR2.6: error or incomplete is 1,
-// otherwise anything to review is 2, otherwise 0. An error is handled before
-// an outcome exists. Never-tagged resources that could not be looked for
-// change nothing, and neither do remove candidates (U4 Q4). rules suggest
-// finds nothing to review: its draft gives 0 even with variants, and 1 when
-// it is incomplete or too large (U3 BR6.6, BR6.7). The meaning is a
-// display.ExitMeaning identifier.
+// exitCode applies BR6.3 and BR5.3 to scan and rules suggest: error or
+// incomplete is 1, otherwise anything to review is 2, otherwise 0. plan
+// takes its code from Plan.ExitCode (U4 BR2.6), which the JSON output also
+// carries. An error is handled before an outcome exists. Never-tagged
+// resources that could not be looked for change nothing, and neither do
+// remove candidates (U4 Q4). rules suggest finds nothing to review: its
+// draft gives 0 even with variants, and 1 when it is incomplete or too large
+// (U3 BR6.6, BR6.7). The meaning is a display.ExitMeaning identifier.
 func (o outcome) exitCode() (int, string) {
+	if o.plan != nil {
+		return planExitCode(o.plan)
+	}
 	switch {
 	case o.regionsMissing:
 		return ExitError, display.ExitMeaningResultsIncomplete
@@ -97,6 +105,22 @@ func (o outcome) exitCode() (int, string) {
 		return ExitOK, display.ExitMeaningNoIssues
 	default:
 		return ExitOK, display.ExitMeaningNoChangesNeeded
+	}
+}
+
+// planExitCode is the exit code of a plan (Plan.ExitCode) with the meaning
+// shown next to it.
+func planExitCode(p *planner.Plan) (int, string) {
+	code := p.ExitCode()
+	switch {
+	case code == ExitError && !p.InventoryComplete:
+		return code, display.ExitMeaningResultsIncomplete
+	case code == ExitError:
+		return code, display.ExitMeaningImpactIncomplete
+	case code == ExitNeedsReview:
+		return code, display.ExitMeaningReviewNeeded
+	default:
+		return code, display.ExitMeaningNoChangesNeeded
 	}
 }
 

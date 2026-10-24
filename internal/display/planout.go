@@ -436,7 +436,11 @@ func (r *results) mdFindings(plan *planner.Plan) {
 		if f.Verdict == planner.VerdictUndecided {
 			symbol = "?"
 		}
-		condition := mdCell(f.ConditionOperator).mdText() + " " + mdCell(f.ConditionKey).mdText()
+		condition := mdCell(f.ConditionKey).mdText()
+		if f.ConditionOperator != "" {
+			// A plan read from a file has no operator (contract C2).
+			condition = mdCell(f.ConditionOperator).mdText() + " " + condition
+		}
 		if f.ConditionValue != "" {
 			condition += " = " + mdCell(f.ConditionValue).mdText()
 		}

@@ -70,4 +70,4 @@ Changes may be reverted by the next deploy.
 | ? | `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | cannot decide (policy variable) |
 
 ## Summary
-Summary: 4 to change · 1 conflicts · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

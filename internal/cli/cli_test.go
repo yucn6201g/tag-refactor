@@ -249,7 +249,7 @@ func TestPlanWarnsAboutARuleFileWithoutKeyRules(t *testing.T) {
 	// Since U4 a key no rule names is a remove candidate (BR2.3), listed under
 	// "No changes needed" without changing the exit code (Q4).
 	if r.stdout != "No changes needed\n\nRemove candidates (keys not in your rules; not changed): 1 key\n  env (1)\n\n"+
-		"Summary: 1 resource scanned · 0 to change · 1 remove candidates\n" {
+		"Summary: 1 resource scanned · 0 to change · 1 remove candidate\n" {
 		t.Fatalf("stdout = %q", r.stdout)
 	}
 	requireContains(t, "stderr", r.stderr, "warning: "+display.Sanitize(rules)+` line 1: no key rules: "keys" is missing or empty, so no tag key is renamed`)
@@ -290,7 +290,7 @@ func TestPlanWithOnlyConflictsNeedsReviewWithoutImpactAnalysis(t *testing.T) {
 	r := w.run("plan", "--rules", rules, "--region", "us-east-1")
 
 	r.requireExit(t, 2)
-	requireContains(t, "stdout", r.stdout, "Summary: 0 to change · 1 conflicts · 0 affected · 0 undecided")
+	requireContains(t, "stdout", r.stdout, "Summary: 0 to change · 1 conflict · 0 affected · 0 undecided")
 	if w.fake.Count("iam:ListPolicies") != 0 {
 		t.Fatal("no change, so no impact analysis")
 	}

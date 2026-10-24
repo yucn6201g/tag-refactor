@@ -32,4 +32,4 @@ Impact (references that use the tags being changed)
       Statement "#0"  Condition StringEquals aws:ResourceTag/${aws:PrincipalTag/team} = "yes"
       cannot decide (policy variable)
 
-Summary: 4 to change · 1 conflicts · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed
+Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

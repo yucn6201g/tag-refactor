@@ -264,8 +264,8 @@ func firstCount(t *testing.T, text, pattern string) int {
 }
 
 // summaryPattern is the summary line of the table, the diff and Markdown.
-const summaryPattern = `(?m)^Summary: ([\d,]+) to change · ([\d,]+) conflicts · ([\d,]+) affected · ([\d,]+) undecided · ` +
-	`([\d,]+) value not set · ([\d,]+) remove candidates · ([\d,]+) IaC-managed$`
+const summaryPattern = `(?m)^Summary: ([\d,]+) to change · ([\d,]+) conflicts? · ([\d,]+) affected · ([\d,]+) undecided · ` +
+	`([\d,]+) value not set · ([\d,]+) remove candidates? · ([\d,]+) IaC-managed$`
 
 // summaryCounts reads the summary line into c.
 func summaryCounts(t *testing.T, text string, c *planCounts) {

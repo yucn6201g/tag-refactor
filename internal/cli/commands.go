@@ -272,21 +272,14 @@ func (a *app) runPlan(ctx context.Context, args planArgs) error {
 		}
 		a.p.PlanSaved(args.out, plan)
 	}
-	a.result = &outcome{
-		command:        "plan",
-		regionsMissing: !plan.InventoryComplete,
-		incomplete:     !plan.ImpactAnalysisComplete,
-		needsReview:    plan.NeedsReview(),
-		resources:      plan.ScannedResources,
-	}
+	a.result = &outcome{command: "plan", plan: plan, resources: plan.ScannedResources}
 	if args.out == "" && plan.NeedsAnalysis() {
 		a.result.saveHint = args.rules
 	}
-	code, _ := a.result.exitCode()
 	if args.format == display.FormatTable || args.format == display.FormatDiff {
 		a.p.PlanHeader(plan)
 	}
-	a.p.PlanResult(plan, display.Output{Format: args.format, ExitCode: code, ToolVersion: plan.ToolVersion})
+	a.p.PlanResult(plan, display.Output{Format: args.format, ExitCode: plan.ExitCode(), ToolVersion: plan.ToolVersion})
 	a.p.PlanScope(snap, plan.NeedsAnalysis())
 	return nil
 }

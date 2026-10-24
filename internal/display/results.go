@@ -318,7 +318,7 @@ func (r *results) planNothing(plan *planner.Plan) {
 		r.planCandidates(plan)
 		r.blank()
 		r.line(styleNone, "plan.summaryNothingRC", rawString(r.count("unit.resource", plan.ScannedResources)),
-			FormatCount(len(plan.RemoveCandidates)))
+			rawString(r.count("unit.removeCandidate", len(plan.RemoveCandidates))))
 		return
 	}
 	r.line(styleNone, "plan.summaryNothing", rawString(r.count("unit.resource", plan.ScannedResources)))
@@ -355,9 +355,11 @@ func (r *results) planTable(plan *planner.Plan, s planner.PlanSummary) {
 
 // planSummaryLine is the summary line of the table, the diff and Markdown.
 func (r *results) planSummaryLine(s planner.PlanSummary) string {
-	return r.tr("plan.summary", FormatCount(s.ResourcesToChange), FormatCount(s.ConflictResources), FormatCount(s.AffectedReferences),
-		FormatCount(s.UndecidedReferences), FormatCount(s.UnsetRequiredResources), FormatCount(s.RemoveCandidateKeys),
-		FormatCount(s.IaCManagedResources))
+	// Conflicts and remove candidates are counted nouns: "1 conflict", "2
+	// conflicts". The other parts read the same for any count.
+	return r.tr("plan.summary", FormatCount(s.ResourcesToChange), r.count("unit.conflict", s.ConflictResources),
+		FormatCount(s.AffectedReferences), FormatCount(s.UndecidedReferences), FormatCount(s.UnsetRequiredResources),
+		r.count("unit.removeCandidate", s.RemoveCandidateKeys), FormatCount(s.IaCManagedResources))
 }
 
 // kindSymbol is the symbol and the color of a kind of change.
@@ -456,9 +458,15 @@ func (r *results) planFindings(plan *planner.Plan) {
 			symbol, st = "?", styleUndecided
 		}
 		r.line(st, "plan.policy", rawString(symbol), f.PolicyRef)
-		if f.ConditionValue != "" {
+		// A plan read from a file has no operator: the word and its space go.
+		switch {
+		case f.ConditionOperator == "" && f.ConditionValue != "":
+			r.line(styleNone, "plan.statementValueNoOp", f.StatementID, f.ConditionKey, f.ConditionValue)
+		case f.ConditionOperator == "":
+			r.line(styleNone, "plan.statementNoOp", f.StatementID, f.ConditionKey)
+		case f.ConditionValue != "":
 			r.line(styleNone, "plan.statementValue", f.StatementID, f.ConditionOperator, f.ConditionKey, f.ConditionValue)
-		} else {
+		default:
 			r.line(styleNone, "plan.statement", f.StatementID, f.ConditionOperator, f.ConditionKey)
 		}
 		if f.Verdict == planner.VerdictUndecided {
