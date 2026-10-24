@@ -150,8 +150,8 @@ func fromMarkdown(t *testing.T, out string) counts {
 	c.unset = first(t, out, `(?m)^## Required tag value not set \(([\d,]+) resources?\)$`)
 	c.removeKeys = first(t, out, `(?m)^## Remove candidates \(([\d,]+) keys?\)$`)
 	c.iac = first(t, out, `(?m)^## Managed by IaC \(([\d,]+) resources?\)$`)
-	c.affected = len(regexp.MustCompile("(?m)^\\| ! \\| ").FindAllString(out, -1))
-	c.undecided = len(regexp.MustCompile("(?m)^\\| \\? \\| ").FindAllString(out, -1))
+	c.affected = len(regexp.MustCompile(`(?m)^\| ! \| `).FindAllString(out, -1))
+	c.undecided = len(regexp.MustCompile(`(?m)^\| \? \| `).FindAllString(out, -1))
 	s := fromSummary(t, out)
 	if s.total != c.total || s.affected != c.affected || s.undecided != c.undecided || s.removeKeys != c.removeKeys {
 		t.Fatalf("the summary disagrees with the sections: %+v vs %+v\n%s", s, c, out)

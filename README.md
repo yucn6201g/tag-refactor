@@ -7,14 +7,14 @@ enabled region, finds resources that were never tagged, counts missing
 required tags, and drafts a rule file from the tags in use. It only reads
 from AWS. (The rest of this README is in Japanese.)
 
-## できること(U1〜U3)
+## できること(U1〜U4)
 
 AWS への書き込みは一切しません。
 
 | コマンド | できること |
 |---|---|
 | `scan` | アカウントで有効なすべてのリージョンを読み(`--region` で絞れます)、書き方の違うタグのキーをまとめて示します。大文字・小文字と区切り文字(`-`、`_`、空白)の違いに加えて、略語の辞書(`env`→`environment`、`prod`→`production`、`dev`→`development`、`stg`→`staging`。キー全体が一致するときだけ)でまとめます。辞書を使って初めてまとまったものには `(abbreviation match)` の印を付け、終了コードの理由にしません。`--rules` のルールファイルの `required` のキーが付いていないリソースの数、一度もタグが付いていないリソース、タグを変更できない種類も示します。`aws:` で始まるキーは対象にしません。 |
-| `plan` | ルールファイルの別名(例: `env` を `Environment` にする)から、キー名の変更案を作ります。値が違ってぶつかるものは変えずに示します。さらに、ユーザー・ロール・グループに付いている、利用者が作った IAM の管理ポリシーのうち、`<前置>:ResourceTag/<キー>` の条件で変更するキーを使っているものを示します。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
+| `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、ユーザー・ロール・グループに付いている、利用者が作った IAM の管理ポリシーのうち、`<前置>:ResourceTag/<キー>` の条件で変更するキーを使っているものを示します。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
 | `rules suggest` | 今使われているタグから、ルールファイルの下書きを作ります。`scan` と同じまとめ方でキーをまとめ、最も多くのリソースで使われている書き方を正しいキー名に、残りを別名にします。値も同じまとめ方でまとめ、書き方が2つ以上ある値を `values` の候補にします。全リージョンを読みます(`--region` で絞れます。一度もタグが付いていないリソースは探しません)。 |
 
 調べる範囲は次のとおりです。どのコマンドも、調べた範囲を `Checked:` で始まる1行で標準エラーに出します。
@@ -27,7 +27,9 @@ AWS への書き込みは一切しません。
 - IAM のグローバルな種類(ユーザー、グループ、ロール、管理ポリシー)は、一度もタグが付いていないリソースの検出の対象外です。AWS Config は既定ではこれらを記録せず、Resource Explorer は IAM のタグを索引しないためです。
 - `plan` の影響分析が読むのは、ユーザー・ロール・グループに付いている、利用者が作った IAM の管理ポリシーだけです。インラインポリシー、リソースベースのポリシー、AWS の管理ポリシー、組織の SCP は読みません。「0 affected」は、この範囲での結果です。変更がないときは、ポリシーを読みません。
 
-まだできないこと(後の作業単位): 値の変更と必須タグを付ける変更と消すキー(ルールファイルの `values`、`required` の `default` と `when`、`remove` は読み込んで確かめますが、`plan` の変更案にはまだ使いません)、変更の適用と取り消し、JSON などの出力形式、日本語の表示、色、インラインポリシーやリソースポリシーの影響分析。
+どのコマンドも、英語か日本語で表示でき(`--lang`)、端末では色を付けます(`NO_COLOR` で消せます)。
+
+まだできないこと(後の作業単位): 変更の適用と取り消し(`apply`、`rollback`)、IaC への反映、インラインポリシーやリソースポリシーの影響分析。
 
 ## インストール
 
@@ -54,6 +56,17 @@ tag-refactor rules suggest --profile dev --output tagrules.yaml
 # ルールファイルから変更案と影響を見る(書き換えはしない)
 tag-refactor plan --rules tagrules.yaml --profile dev
 
+# 変更案をリソースごとの差分で見る / プルリクエストに貼る Markdown にする
+tag-refactor plan --rules tagrules.yaml --format diff
+tag-refactor plan --rules tagrules.yaml --format markdown > plan.md
+
+# 変更案をファイルに保存する(後の apply が読む。標準出力にはいつもの一覧が出る)
+tag-refactor plan --rules tagrules.yaml --out plan.json
+
+# 日本語で表示する / スクリプトから JSON で読む
+tag-refactor scan --lang ja
+tag-refactor scan --format json > scan.json
+
 # AWS の呼び出しごとに1行(操作、リージョン、時間、再試行の回数)を標準エラーに出す
 tag-refactor scan --debug --region us-east-1
 ```
@@ -64,11 +77,85 @@ tag-refactor scan --debug --region us-east-1
 | `--region` | 読むリージョン。繰り返して複数を指定できます(同じ値は1つにまとめます)。省略するとアカウントで有効なすべてのリージョンを読みます。アカウントの確認(STS、EC2、IAM)は、最初の `--region`、またはプロファイルか `AWS_REGION` のリージョンで行います。有効でない値が1つでもあれば、リソースを読む前にエラーにします。 |
 | `--rules` | ルールファイル。`plan` では必須、`scan` では省略できます(省略すると `Required tags missing: not checked (no rule file)`)。`rules suggest` は受け付けません。 |
 | `--output` | `rules suggest` だけ。下書きを標準出力ではなくこのファイルに、UTF-8(BOM なし、LF の改行)で書きます。同じフォルダの一時ファイルに書いてから名前を付けるので、途中で止まっても壊れたファイルは残りません。既にあるファイルは上書きせずにエラーにします(消してから実行してください)。名前はハードリンクで付けるので、確かめてから書くまでの間にできたファイルも上書きしません。ハードリンクを使えないファイルシステム(FAT32 など)では、確かめたあとに名前を変えるため、その間にできたファイルを置き換えることがあります。下書きのファイルは本人だけが読み書きできる権限(Unix の 0600)で作ります。 |
-| `--debug` | 呼び出しの記録を標準エラーに出します。タグの値、ポリシーの中身、問い合わせの文、認証情報は出しません。 |
+| `--format` | 標準出力の結果の形式。`scan` は `table`(既定)、`json`、`markdown`、`plan` はこれに `diff` を加えた4つです。知らない値は、AWS を呼ぶ前にエラーにします。 |
+| `--out` | `plan` だけ。変更案を JSON のファイルに保存します(下の「変更案の保存」)。既にあるファイルは上書きしません。保存先のフォルダに書けるかを、AWS を呼ぶ前に確かめます。 |
+| `--lang` | 表示の言語。`en`(英語)か `ja`(日本語)。どのコマンドにも付けられます(下の「言語と色」)。 |
+| `--debug` | 呼び出しの記録を標準エラーに出します。タグの値、ポリシーの中身、問い合わせの文、認証情報は出しません。この行は言語によらず英語です。 |
 
 認証情報を受け取るオプションはありません。認証情報は AWS の SDK が、環境変数、共有の設定ファイル、SSO などの標準の方法で読みます。実行の途中で認証情報の期限が切れた場合は、すべての読み取りを止め、途中までの結果は出さずに終了コード 1 で終わります。
 
 AWS の呼び出しは、呼び出し回数の上限などの一時的な失敗のとき、待ち時間を延ばしながら最大10回まで試します(1回の待ちは最大20秒、1回の試行は30秒まで、再試行を含めた1回の呼び出しは5分まで)。
+
+Ctrl+C(Linux と macOS では `SIGTERM` も)で止めると、AWS の呼び出しを取り消し、一時ファイルを消し、端末の設定を戻してから、`Interrupted. Nothing was saved.` と出して終了コード 1 で終わります。2回目の Ctrl+C では、後片付けを待たずにすぐ終わります。
+
+### plan の出力の形式
+
+`--format` で選びます。4つの形式は同じ変更案から作るので、変更の件数(種類ごとと総数)、衝突、値が未指定、消す候補のキーの数、IaC で管理されているリソース、影響の件数は、どの形式でも同じです。件数には3桁ごとにカンマを付けます(JSON は数のまま)。
+
+一覧(`table`、既定):
+
+```
+Changes: 5,341 resources
+  ~ rename key   env -> Environment                 2,950 resources
+  ~ value        Environment: Prod -> prod            640 resources
+  + add          Owner = (from rules)               1,189 resources
+  - remove       tmp-owner                             52 resources
+  (A resource with several changes is counted once in the total.)
+
+Required tag value not set (not changed): 55 resources
+  CostCenter   55 resources  (no default or matching condition)
+
+Remove candidates (keys not in your rules; not changed): 3 keys
+  Name (812), team (40), tmp (3)
+
+Managed by IaC (changes may be reverted by the next deploy): 214 resources
+
+Impact (references that use the tags being changed)
+  ! IAM policy  arn:aws:iam::123456789012:policy/DevAccess
+      Statement "AllowDevEC2"  Condition StringEquals aws:ResourceTag/env = "dev"
+      affected by: rename key env -> Environment
+
+Summary: 5,341 to change · 0 conflicts · 1 affected · 0 undecided · 55 value not set · 3 remove candidates · 214 IaC-managed
+```
+
+差分(`diff`)は、変更、衝突、値が未指定のあるすべてのリソースを ARN の順に出し、変わるタグだけを変更前(`-`)と変更後(`+`)で示します。キー名だけが変わり値が同じなら `~ 古いキー -> 新しいキー` の1行です。影響のある変更の行の先頭には `!`、判定できない参照だけが当たる行には `?` が付きます。CloudFormation のスタックのリソースには `[IaC: CloudFormation stack "名前"]` を付けます。最後に種類ごとの件数と要約の行を出します。
+
+```
+arn:aws:ec2:ap-northeast-1:123456789012:instance/i-0abc
+! - env         = "Prod"
+! + Environment = "prod"
+  + Owner       = "compute-team"
+
+arn:aws:s3:::my-logs-bucket   [IaC: CloudFormation stack "logging"]
+  ~ Env -> Environment = "dev"
+```
+
+JSON(`json`)は、スクリプトから読むための形です。`version`、`toolVersion`、`command`、`exitCode`(実際の終了コードと同じ値)、`accountId`、`complete`、`failedRegions`、`unsupportedResourceTypes`、`summary`、`details` を持ち、`details` には保存した変更案と同じ形の `resources`、`keyConflicts`、`impactFindings`、`unreadPolicies`、`unsetRequiredTags`、`removeCandidates` が入ります。`scan --format json` も同じ枠で、表記ゆれと必須タグの欠落を出します。文字列は訳しません。制御文字、DEL、C1 の制御文字、双方向の制御文字などの書式の文字は `\u` で始まる形にエスケープするので、端末に出しても働きません(JSON として読めば元の文字列に戻ります)。
+
+Markdown(`markdown`)は、プルリクエストや Wiki に貼るための形です。対象(アカウント、リージョンの数、作成日時)、変更、衝突、値が未指定、消す候補、IaC、影響、要約を見出しと表で書き、リソースごとの変更は `<details>` で畳んだ表に全件を書きます。
+
+- AWS から読んだ文字列(キー、値、ARN、ポリシーの名前など)は、すべてコードの書式(`` ` ``)の中に書きます。そのため、タグの値に HTML、Markdown の記号、`|` があっても、貼った先で働いたり表を崩したりしません。コードの書式の中の `<`、`>`、`&` はそのまま見えます(貼った先で値をそのままコピーできるように、文字の参照には変えていません)。
+- 表のセルの中の `|` は `\|` と書きます。GitHub など、表の中のコードの書式で `\|` を `|` と表示するところに貼ってください。
+- 貼る前に、標準出力だけをファイルに保存してください(`> plan.md`)。案内や終了コードの行は標準エラーに出るので、ファイルには入りません。
+
+### 変更案の保存(plan --out)
+
+`--out plan.json` を付けると、変更案を JSON(UTF-8、BOM なし、LF の改行)で保存します。標準出力には、付けないときと同じ結果が出ます。保存したことは標準エラーに `Saved plan to plan.json (5,341 resources, account 123456789012).` と出ます。
+
+- 中身: 形式の版(`version`)、ツールの版、変更案の ID(`plan-20261019T120400Z-7f3a` の形)、アカウント、作成日時(UTC)、リージョン、不完全の印、使ったルールファイル(`--rules` に渡したとおり)、変更のあるリソースごとの変更前のタグ全体(`aws:` で始まるものも)と変更、衝突、影響、値が未指定、消す候補、タグを変更できない種類。認証情報、プロファイルの設定、環境変数の値は書きません。
+- 既にあるファイルは上書きしません。同じフォルダの一時ファイル(`.tag-refactor-plan-*.tmp`)に書いてから名前を付けるので、保存先には完全な変更案だけが現れます。一時ファイルは、成功しても失敗しても、Ctrl+C で止めても消します。ファイルは本人だけが読み書きできる権限(Unix の 0600)で作ります。
+- 256 MiB を超える変更案は保存しません。`--region` で分けて作ってください。
+- 収集や影響分析が不完全でも保存し、不完全の印(`inventoryComplete`、`impactAnalysisComplete`)を付けます。
+- **Windows PowerShell 5.1 では、変更案を `--out` で保存してください。** `>` のリダイレクトは UTF-16 で書き直すので、`--format json > plan.json` で作ったファイルは変更案として読めません(読むと「UTF-8 で保存し直す」案内が出ます)。
+
+### 言語と色
+
+言語は、`--lang` があればそれを使います。なければ `LC_ALL`、`LC_MESSAGES`、`LANG` の順に最初の空でない値を見て、`ja` で始まれば日本語、それ以外は英語です。Windows で3つとも空のときは、Windows の表示言語(最初の優先言語)が日本語なら日本語にします。読めなければ英語です。
+
+- 日本語にするのは、結果(一覧、差分、Markdown)、進み具合、案内、警告、エラーです。`--help`、`--debug` の行、JSON、`rules suggest` の下書きのコメントは英語のままです。数字、ARN、ポリシー名、キー、値、オプション名は訳しません。ルールファイルの誤りの説明など、一部の詳しい文言は日本語の表示でも英語のままです。
+- Windows のコンソールでは、コードページによらず日本語が正しく出ます。列の揃えは、端末での文字の幅(全角は2文字分)で計算します。
+
+色は補助です。意味は必ず記号(`+` 追加、`~` 変更、`-` 削除、`!` 影響ありまたは不完全、`?` 判定できない)と文字でも示します。色を付けるのは、標準出力と標準エラーのそれぞれについて、端末であり、`NO_COLOR` が設定されていない(または空)、`TERM` が `dumb` でない、Windows では仮想端末の処理を有効にできた、のすべてを満たすときだけです。ファイルやパイプに向けた出力には色の制御の文字は入りません。Windows で有効にした仮想端末の処理は、終わるときに元に戻します。
 
 ### ルールファイルの下書き(rules suggest)
 
@@ -104,7 +191,7 @@ keys:
 - 見つかったすべてのキー(`aws:` で始まるものを除く)を入れます。書き方が1つのキーは `{}` です。入れておかないと、`plan` でそのキーが「消す候補」になるためです。
 - 正しいキー名は、最も多くのリソースで使われている書き方です。同じ数なら略語の辞書の正式な形(`environment` など)、次に名前の順で選びます。別名は数の多い順です。どれを正しいキー名にするかは、下書きを見て決め直してください。
 - 異なる値が20個を超えるキー(名前や ID など)は、値の候補を出さず、その旨をコメントで書きます。
-- キーと値はすべて二重引用符で囲み、制御文字や双方向の制御文字など印字できない文字は `\uXXXX`(基本多言語面の外は `\UXXXXXXXX`)で書きます。`[` と `{` も `[`、`{` で書きます(読み込み側の括弧の数の上限に数えないため)。読み込むと元の文字列に戻ります。
+- キーと値はすべて二重引用符で囲み、制御文字や双方向の制御文字など印字できない文字は `\uXXXX`(基本多言語面の外は `\UXXXXXXXX`)で書きます。`[` と `{` も `\u005B`、`\u007B` で書きます(読み込み側の括弧の数の上限に数えないため)。読み込むと元の文字列に戻ります。
 - `required` と `remove` は利用者が決めるもので、書き方の例だけをコメントで書きます。
 - 下書きは読み込みの上限(64 KiB)に収めます。超えるときは、リソースの少ないキーから値の候補を外し、`values omitted: the draft would exceed 64 KiB` と書きます。キーだけで超えるときは、下書きを出したうえで警告し、終了コード 1 で終わります。
 - 読めなかったリージョンがあると、下書きの先頭に `# Results are incomplete: <リージョン>` を書き、標準エラーにも示して、終了コード 1 で終わります。それ以外は、表記ゆれがあっても終了コード 0 です。
@@ -146,7 +233,12 @@ remove: [tmp-owner]
 
 そのほかの決まり:
 
-- この版の `plan` は、`keys` の `aliases` だけを変更案に使います。`values`、`required`、`remove` は読み込んで確かめますが、変更案にはまだ使わず、`values / required / remove are read but not applied to the plan yet` の1行を出します。`scan` は `required` のキーが付いていないリソースの数を数えます(大文字・小文字を区別します)。
+- `plan` は、リソースごとに次の順で変更を作り、この順に番号(`c-000001` から)を振ります。
+  1. 正しいキー名(名前の順)ごとに、付いている正しいキー名と別名の値を、`values` の別の書き方を正しい値にしてから比べます。すべて同じなら、別名を正しいキー名に変えます(正しいキー名が既にあれば別名を消すだけ)。違えば変えずに「衝突」にします。続けて、正しいキー名の値が別の書き方なら正しい値に変えます。
+  2. 付いていない必須タグ(キーの順)を付けます。値は `when`、`default` の順に決め、`values` の別の書き方で書いてあれば正しい値にします。既に付いている値は変えません。値が決まらなければ「値が未指定」にし、そのリソースのほかの変更は残します。
+  3. `remove` のキーを消します。
+- どの規則にも書かれていないキーは「消す候補」として示すだけで、消しません。消す候補だけなら終了コードは 0 です。
+- `scan` は `required` のキーが付いていないリソースの数を数えます(大文字・小文字を区別します)。
 - `keys`、`aliases`、`required`、`remove` の `aws:` で始まるキーは、その規則を無視して警告します。
 - 必須タグのキーは、別名や消すキーと同じにできません。消すキーは、正しいキー名や別名と同じにできません。
 - タグのキーは1〜128文字、値は0〜256文字です(AWS の制限)。数のように見える値(`123`、`true`)は引用符で囲みます。
@@ -158,20 +250,20 @@ remove: [tmp-owner]
 
 ### 出力と終了コード
 
-- 標準出力には結果だけを出します。アカウントとリージョン、進み具合、警告、エラー、`Checked:` の行、かかった時間、`Exit code` の行は標準エラーに出します。
+- 標準出力には結果(一覧、差分、JSON、Markdown)だけを出します。アカウントとリージョン、変更案の作成日時、進み具合、警告、エラー、`Checked:` の行、かかった時間、`Exit code` の行、次の手順(`Save this plan: ...`)、`Saved plan` の行は標準エラーに出します。形式や言語を変えても、`--out` を付けても同じです。
 - 進み具合は、標準エラーが端末なら同じ場所を書き換えて示します(リージョンごとの状態と経過時間)。端末でないとき、`TERM=dumb` のとき、Windows で仮想端末の処理を有効にできないときは、状態が変わるたびに1行ずつ追記します。標準出力をファイルに向けても、標準エラーが端末なら書き換えます。
-- 記号: `~` 名前の変更、`!` 影響あり、`?` 判定できない(キーにポリシー変数を含む条件)。色は使いません。
-- AWS から読んだ文字列(ARN、種類の名前など)の制御文字や双方向の制御文字は、`\u{…}` の形に置き換えて出します。
+- 記号: `+` 追加、`~` 名前や値の変更、`-` 削除、`!` 影響ありまたは不完全、`?` 判定できない(キーにポリシー変数を含む条件)。
+- AWS から読んだ文字列(ARN、種類の名前など)の制御文字や双方向の制御文字は、一覧と差分では `\u{…}` の形に置き換えて出します。
 
 | 終了コード | 意味 |
 |---|---|
-| 0 | 問題なし(`scan`: 表記ゆれも必須タグの欠落もない、`plan`: 変更不要、`rules suggest`: 下書きを出した) |
-| 1 | エラー、読めなかったリージョンがある、影響分析が不完全(ポリシーを読めなかった)、または `rules suggest` の下書きがキーだけで 64 KiB を超えた |
-| 2 | 確認が必要(表記ゆれ、必須タグの欠落、変更、ぶつかり、影響のどれかがある) |
+| 0 | 問題なし(`scan`: 表記ゆれも必須タグの欠落もない、`plan`: 変更不要(消す候補だけはありうる)、`rules suggest`: 下書きを出した) |
+| 1 | エラー、Ctrl+C での中断、読めなかったリージョンがある、影響分析が不完全(ポリシーを読めなかった)、変更案を保存できなかった、または `rules suggest` の下書きがキーだけで 64 KiB を超えた |
+| 2 | 確認が必要(`scan`: 表記ゆれか必須タグの欠落、`plan`: 変更、衝突、値が未指定、影響のどれかがある) |
 
 一度もタグが付いていないリソースを探せなかったこと、見つかったこと、タグを変更できない種類があることだけでは、終了コードは変わりません。
 
-エラーは2行(`Error:` 何が起きたか、`Fix:` どう直すか)で出します。AWS の SDK のエラー文はそのまま出しません。
+エラーは2行(`Error:` 何が起きたか、`Fix:` どう直すか。日本語では `エラー:` と `直し方:`)で出します。AWS の SDK のエラー文はそのまま出しません。
 
 ## 必要な権限
 
@@ -205,10 +297,14 @@ gofmt -l .
 golangci-lint run
 go vet -tags integration ./...
 go tool govulncheck ./...
-go test -mod=readonly -run '^$' -fuzz FuzzParse -fuzztime 5m ./internal/rules/   # ルールファイルの読み込みのファジング(手元だけ)
+go test -mod=readonly -run '^$' -fuzz FuzzParse -fuzztime 5m ./internal/rules/      # ルールファイルの読み込みのファジング(手元だけ)
+go test -mod=readonly -run '^$' -fuzz FuzzLoadPlan -fuzztime 5m ./internal/planner/ # 保存した変更案の読み込みのファジング(手元だけ)
+go test -mod=readonly -run 'TestGolden' ./internal/display/... -update               # 出力の期待のファイルを作り直す(差分を人が見る)
 ```
 
-- CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
+- CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
+- 出力の期待のファイル(`internal/display/testdata/`)は、4つの形式 × 2つの言語と保存した変更案です。`.gitattributes` で LF に固定し、3つの OS で同じバイト列になることを確かめます。
+- 端末での文字の幅の表(`internal/display/width_table.go`)は、Go の `unicode` パッケージと同じ版の Unicode の `EastAsianWidth.txt` から作ります。Go を上げて Unicode の版が新しくなると、テストが「表を作り直す」案内で失敗します。そのときは `internal/display` で `go generate` を動かし(`gen_width.go` が `https://www.unicode.org/Public/<版>/ucd/EastAsianWidth.txt` を取ってきます。取れないときは `go run gen_width.go -in <手元のファイル>`)、できた `width_table.go`(先頭に元の URL と SHA-256 を書きます)をコミットします。CI はネットワークを使わず、コミットした表だけを使います。
 
 - テストは AWS を呼びません。HTTP の層の偽の AWS(`internal/testutil`)を使い、手元の `~/.aws` も読みません。
 - CI(`.github/workflows/ci.yml`)は Linux、macOS、Windows と Go の2つの版でテストし、Linux で `-race` 付きのテスト、カバレッジ、lint(`cfn-lint` は `test/sandbox/*-fixtures.yaml`)、govulncheck、モジュールの確認、ビルドを行います。
@@ -251,6 +347,7 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 1. `scripts/verify-u1.sh`(すべてのテストと、U1 の結合テスト)を動かします。
 2. 管理者のプロファイルの呼び出し元のアカウントを `TAG_REFACTOR_SANDBOX_ACCOUNT_ID` と比べ、違えば止めます。
    続けて U3 の確認をします。U1 のスタック(`tag-refactor-u1-fixtures`)があることを確かめ、`tag-refactor` をビルドし、読み取り用のプロファイルで `rules suggest --region ap-northeast-1 --output <一時フォルダのファイル>` を動かします。終了コードが 0、標準出力が空、下書きの先頭が `# generated by tag-refactor`、`env` と `Env` が1つのまとまりであることを確かめ、`scan --rules` でその下書きを読み込めることを確かめます。一時フォルダはスクリプトの終わりに必ず消します。
+   続けて U4 の確認をします。U4 の結合テスト(`internal/cli/integration_u4_test.go`)を読み取り用のプロファイルで動かし、`plan` を `--format json --out` で1回、一覧、差分、Markdown で1回ずつ動かして、4つの形式と保存した変更案の件数が一致すること、保存した変更案を読み込めること、`env` と `Env` から `Environment` への名前の変更と `Owner` の追加があることを確かめます。テストが飛ばされたとき、またはこのテストの `PASS` の行がちょうど1つでないときは失敗にします。
 3. U2 のスタックと `ap-northeast-1` の索引(種類 `LOCAL`、状態 `ACTIVE`)と条件のない既定のビューを確かめ、全リージョンの索引の種類を表示します。集約の索引があるときは、前提と違うので止めます。
 4. `ap-northeast-1` にタグのない SQS のキュー(`tag-refactor-u2-untagged-<乱数>`)を作ります。スクリプトの終わりに必ず消します(消せなかったときは名前を表示します)。
 5. Resource Explorer の `tag:none` にキューが現れるまで、1分ごとに最大30分待ちます。現れなければ失敗にします。索引の中身がそろうまで数時間かかることがあるので、時間をおいて再実行してください。
