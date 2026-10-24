@@ -116,7 +116,8 @@ func countAfter(t *testing.T, stdout, pattern string) int {
 	if m == nil {
 		t.Fatalf("stdout does not match %q:\n%s", pattern, stdout)
 	}
-	n, _ := strconv.Atoi(m[1])
+	// Since U4 counts have a comma every three digits (BR3.6).
+	n, _ := strconv.Atoi(strings.ReplaceAll(m[1], ",", ""))
 	return n
 }
 
@@ -138,14 +139,14 @@ func TestIntegrationU2ScanOfTheIndexedRegion(t *testing.T) {
 	} else {
 		requireContains(t, "stderr", r.stderr, "never-tagged resources via Resource Explorer in 1 region")
 	}
-	if n := countAfter(t, r.stdout, `(?m)^Resources with no user tags: (\d+)$`); n < 1 {
+	if n := countAfter(t, r.stdout, `(?m)^Resources with no user tags: ([\d,]+)$`); n < 1 {
 		t.Fatalf("no never-tagged resource was found (the queue %s should be)", e.untaggedARN)
 	}
 	// QA, QB, QC, B1 and the queue without tags have no Owner.
-	if n := countAfter(t, r.stdout, `(?m)^  Owner\s+(\d+) resources?`); n < 5 {
+	if n := countAfter(t, r.stdout, `(?m)^  Owner\s+([\d,]+) resources?`); n < 5 {
 		t.Fatalf("Owner is missing on %d resources, want at least 5", n)
 	}
-	requireMatch(t, "stdout", r.stdout, `(?m)^  environment\s+\d+ resources$`)
+	requireMatch(t, "stdout", r.stdout, `(?m)^  environment\s+[\d,]+ resources$`)
 }
 
 func TestIntegrationU2ScanAndPlanOfEveryRegion(t *testing.T) {
@@ -158,14 +159,14 @@ func TestIntegrationU2ScanAndPlanOfEveryRegion(t *testing.T) {
 	scan.requireExit(t, 2)
 	requireNotContains(t, "scan stderr", scan.stderr, "Error:")
 	requireNotContains(t, "scan stdout", scan.stdout, "Results are incomplete")
-	enabled := countAfter(t, scan.stdout, `(?m)^Summary: \d+ resources? scanned in \d+ of (\d+) regions`)
+	enabled := countAfter(t, scan.stdout, `(?m)^Summary: [\d,]+ resources? scanned in \d+ of (\d+) regions`)
 	if len(e.indexed) >= enabled {
 		requireMatch(t, "scan stdout", scan.stdout, `(?m)^Untagged-resource discovery: complete$`)
 	} else {
 		requireMatch(t, "scan stdout", scan.stdout, `(?m)^Untagged-resource discovery: partial \(not checked in .*(AWS Config not recording).*\)$`)
 		requireNotContains(t, "scan stdout", scan.stdout, "not checked in "+u2Region+",")
 	}
-	requireMatch(t, "scan stdout", scan.stdout, fmt.Sprintf(`(?m)^Summary: \d+ resources? scanned in %d of %d regions`, enabled, enabled))
+	requireMatch(t, "scan stdout", scan.stdout, fmt.Sprintf(`(?m)^Summary: [\d,]+ resources? scanned in %d of %d regions`, enabled, enabled))
 
 	plan.requireExit(t, 2)
 	requireNotContains(t, "plan stderr", plan.stderr, "Error:")

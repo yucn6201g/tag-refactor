@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# U2 (scan of every region) and U3 (rules suggest) checkpoint verification.
+# U2 (scan of every region), U3 (rules suggest) and U4 (plan formats and the
+# saved plan) checkpoint verification.
 # It calls the sandbox AWS account, so it only runs locally, never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
@@ -10,6 +11,12 @@
 #    draft (first comment, env and Env in one group), and reads it back with
 #    "scan --rules". It uses no queue and no Resource Explorer index, so it
 #    runs before the U2 wait.
+# U4. Runs the U4 sandbox test (internal/cli/integration_u4_test.go) with
+#    the read-only profile: plan in the four formats and with --out against
+#    the U1 stack, the counts of every format and of the saved plan agree,
+#    and the saved plan reads back. A skipped test, or anything but exactly
+#    one PASS line of TestIntegrationU4PlanFormatsAndSavedPlan, is a failure.
+#    It needs no queue or index either, so it also runs before the U2 wait.
 # 3. Checks the U2 stack and the Resource Explorer index of ap-northeast-1, and
 #    records the type of every index.
 # 4. Creates an SQS queue without tags in ap-northeast-1 and always deletes it
@@ -170,6 +177,24 @@ fi
 draft_keys="$(grep -cE '^  "' "$draft" || true)"
 echo "verify: U3 draft has $draft_keys keys; the env group:"
 printf '%s\n' "$group" | sed 's/^/  /'
+
+# U4. plan in the four formats and the saved plan, against the U1 stack
+# (checked above). The test reads the sandbox account ID from
+# TAG_REFACTOR_SANDBOX_ACCOUNT_ID.
+echo "verify: running the U4 sandbox test (profile $readonly_profile)"
+LAST_OUTPUT=""
+if ! TAG_REFACTOR_IT_PROFILE="$readonly_profile" \
+  run_go_test -mod=readonly -count=1 -tags integration -run '^TestIntegrationU4' -v ./internal/cli/...; then
+  fail "the U4 sandbox test failed"
+fi
+if printf '%s\n' "$LAST_OUTPUT" | grep -q -- '--- SKIP'; then
+  fail "the U4 sandbox test was skipped"
+fi
+# Only the line of the test itself (its name, a space and a parenthesis)
+# counts, so a -run pattern that matches nothing cannot pass.
+u4_passed="$(printf '%s\n' "$LAST_OUTPUT" | grep -c -- '^--- PASS: TestIntegrationU4PlanFormatsAndSavedPlan (' || true)"
+[ "$u4_passed" -eq 1 ] || fail "$u4_passed PASS lines of TestIntegrationU4PlanFormatsAndSavedPlan, want exactly 1"
+printf '%s\n' "$LAST_OUTPUT" | grep -E 'U4 counts:' | sed 's/^ *//' || true
 
 # 3. The U2 stack and the Resource Explorer index of ap-northeast-1.
 status="$(aws_admin cloudformation describe-stacks --stack-name "$stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||
