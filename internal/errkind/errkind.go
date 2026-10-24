@@ -90,8 +90,6 @@ const (
 	// ReasonPlanFile is an error in a saved plan that is read back (U4
 	// BR4.4). Subject is the path; Detail names the field and the problem.
 	ReasonPlanFile Reason = "plan-file"
-	// ReasonInterrupted is a command stopped by Ctrl+C (U4 NFR design §3).
-	ReasonInterrupted Reason = "interrupted"
 )
 
 // Error is an error with a kind. Only the tool-authored fields are safe to
