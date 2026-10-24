@@ -37,7 +37,9 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		"positional argument":      {[]string{"scan", "extra"}, `unknown command "extra"`},
 		"unknown command":          {[]string{"nope"}, `unknown command "nope"`},
 		"later command":            {[]string{"apply", "--plan", "p.json"}, "apply is not available in this version"},
-		"rules suggest":            {[]string{"rules", "suggest"}, "rules is not available in this version"},
+		"rules suggest with rules": {[]string{"rules", "suggest", "--rules", "r.yaml"}, "unknown flag: --rules"},
+		"lang on rules suggest":    {[]string{"rules", "suggest", "--lang", "ja"}, "--lang is not available in this version"},
+		"unknown rules command":    {[]string{"rules", "check"}, `unknown command "check"`},
 		"format on scan":           {[]string{"scan", "--format", "json"}, "--format is not available in this version"},
 		"comma-separated regions":  {[]string{"scan", "--region", "us-east-1,eu-west-1"}, `"us-east-1,eu-west-1" is not an AWS region name`},
 		"broken rule file on scan": {[]string{"scan", "--rules", "missing-rules.yaml"}, "missing-rules.yaml: the rule file does not exist"},
@@ -359,7 +361,7 @@ func TestARegionThatKeepsFailingIsReportedInTheResult(t *testing.T) {
 }
 
 // BR5.2: scan counts the required keys, so it does not say they are unused;
-// plan does not use them yet and keeps the U1 warning.
+// plan does not use them yet and says so in one line (U3; U4 removes it).
 func TestScanUsesRequiredKeysWhilePlanWarnsAboutThem(t *testing.T) {
 	w := newWorld(t)
 	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"Environment": "dev"}})
@@ -372,8 +374,9 @@ func TestScanUsesRequiredKeysWhilePlanWarnsAboutThem(t *testing.T) {
 	scan.requireExit(t, 2)
 	requireMatch(t, "scan stdout", scan.stdout, `(?m)^  Owner\s+1 resource$`)
 	requireNotContains(t, "scan stderr", scan.stderr, `"required" is not used`)
+	requireNotContains(t, "scan stderr", scan.stderr, "not applied to the plan yet")
 	plan.requireExit(t, 0)
-	requireContains(t, "plan stderr", plan.stderr, `"required" is not used in this version`)
+	requireContains(t, "plan stderr", plan.stderr, "warning: values / required / remove are read but not applied to the plan yet")
 }
 
 // BR1.1: the first --region is where the account is identified; every

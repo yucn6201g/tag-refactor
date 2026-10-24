@@ -1,5 +1,5 @@
-// Package cli implements the tag-refactor command line: the scan and plan
-// subcommands and their options (contract C5, BR1.7), the assembly of the
+// Package cli implements the tag-refactor command line: the scan, plan and
+// rules suggest subcommands and their options (contract C5, BR1.7), the assembly of the
 // read-only parts (BR1.5), and the mapping from error kinds to exit codes and
 // two-line messages (contract C12, BR6.3). Only this package decides exit
 // codes; only the display package writes output.
@@ -55,20 +55,29 @@ type outcome struct {
 	// (BR4.1, BR5.6).
 	regionsMissing bool
 	// incomplete is true when the impact analysis is incomplete (plan).
-	incomplete  bool
-	needsReview bool
-	resources   int
+	incomplete bool
+	// draftTooLarge is true when the draft of rules suggest cannot be read as
+	// it is (U3 BR6.7).
+	draftTooLarge bool
+	needsReview   bool
+	resources     int
 }
 
 // exitCode applies BR6.3 and BR5.3: error or incomplete is 1, otherwise
 // anything to review is 2, otherwise 0. An error is handled before an outcome
 // exists. Never-tagged resources that could not be looked for change nothing.
+// rules suggest finds nothing to review: its draft gives 0 even with
+// variants, and 1 when it is incomplete or too large (U3 BR6.6, BR6.7).
 func (o outcome) exitCode() (int, string) {
 	switch {
 	case o.regionsMissing:
 		return ExitError, "results incomplete"
 	case o.incomplete:
 		return ExitError, "impact analysis incomplete"
+	case o.draftTooLarge:
+		return ExitError, "draft larger than 64 KiB"
+	case o.command == suggestCommandName:
+		return ExitOK, "draft ready"
 	case o.needsReview && o.command == "scan":
 		return ExitNeedsReview, "issues found"
 	case o.needsReview:
@@ -138,8 +147,8 @@ func (a *app) rootCommand() *cobra.Command {
 		Use:   "tag-refactor",
 		Short: "Find AWS tag keys that are written in different ways and plan how to unify them",
 		Long: "tag-refactor reads the tags of every enabled AWS region, groups tag keys that are written in\n" +
-			"different ways, counts missing required tags, and plans key renames from a rule file, showing\n" +
-			"which IAM policies use the tags. It only reads from AWS.",
+			"different ways, counts missing required tags, drafts a rule file from the tags in use, and plans\n" +
+			"key renames from a rule file, showing which IAM policies use the tags. It only reads from AWS.",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -152,8 +161,8 @@ func (a *app) rootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
-	root.AddCommand(a.scanCommand(), a.planCommand())
-	for _, name := range []string{"rules", "apply", "rollback", "iac"} {
+	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand())
+	for _, name := range []string{"apply", "rollback", "iac"} {
 		root.AddCommand(unavailableCommand(name))
 	}
 	return root
@@ -162,8 +171,9 @@ func (a *app) rootCommand() *cobra.Command {
 // unavailableOptions are the options of contract C5 that this version does
 // not support yet; they are accepted by the parser only to say so (BR1.7).
 var unavailableOptions = map[string][]string{
-	"scan": {"format", "lang"},
-	"plan": {"format", "out", "lang"},
+	"scan":    {"format", "lang"},
+	"plan":    {"format", "out", "lang"},
+	"suggest": {"lang"},
 }
 
 func addUnavailableFlags(cmd *cobra.Command) {

@@ -11,6 +11,12 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
+// load and parse read a rule file without options, as the U1 tests did
+// before U3 added them.
+func load(path string) (*RuleSet, error) { return Load(path, Options{}) }
+
+func parse(path string, data []byte) (*RuleSet, error) { return Parse(path, data, Options{}) }
+
 func writeFile(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "tagrules.yaml")
@@ -41,7 +47,7 @@ func TestLoadReadsAliasesFromCRLFFileWithBOM(t *testing.T) {
 	content := "\xef\xbb\xbf# tag rules\r\nversion: 1\r\nkeys:\r\n  Environment:\r\n    aliases:\r\n      - env\r\n      - Env\r\n  CostCenter:\r\n    aliases: [cost-center, cost_center]\r\n"
 	path := writeFile(t, content)
 
-	rs, err := Load(path)
+	rs, err := load(path)
 
 	if err != nil {
 		t.Fatal(err)
@@ -53,31 +59,31 @@ func TestLoadReadsAliasesFromCRLFFileWithBOM(t *testing.T) {
 	if env.CanonicalKey != "Environment" || env.Line != 4 || strings.Join(env.Aliases, ",") != "env,Env" {
 		t.Fatalf("Environment rule = %+v", env)
 	}
-	same, err := Parse("lf.yaml", []byte(strings.ReplaceAll(content, "\r\n", "\n")))
+	same, err := parse("lf.yaml", []byte(strings.ReplaceAll(content, "\r\n", "\n")))
 	if err != nil || same.KeyRules[1].Line != rs.KeyRules[1].Line {
 		t.Fatalf("CRLF and LF files differ: %+v %v", same, err)
 	}
 }
 
 func TestLoadAcceptsOnlyReadableRegularFilesUpTo64KiB(t *testing.T) {
-	_, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	_, err := load(filepath.Join(t.TempDir(), "missing.yaml"))
 	_ = requireRuleError(t, err, errkind.NotFound, 0, "")
 
-	_, err = Load(t.TempDir())
+	_, err = load(t.TempDir())
 	_ = requireRuleError(t, err, errkind.InvalidInput, 0, "")
 
 	if MaxFileSize != 64*1024 {
 		t.Fatalf("MaxFileSize = %d, want 64 KiB", MaxFileSize)
 	}
 	big := "version: 1\n" + strings.Repeat("#", MaxFileSize)
-	_, err = Load(writeFile(t, big))
+	_, err = load(writeFile(t, big))
 	e := requireRuleError(t, err, errkind.InvalidInput, 0, "")
 	if !strings.Contains(e.Detail, "64 KiB") || !strings.Contains(e.Hint, "64 KiB") {
 		t.Fatalf("detail = %q, hint = %q", e.Detail, e.Hint)
 	}
 
 	exact := "version: 1\n#" + strings.Repeat("x", MaxFileSize-len("version: 1\n#"))
-	if _, err := Load(writeFile(t, exact)); err != nil {
+	if _, err := load(writeFile(t, exact)); err != nil {
 		t.Fatalf("a file of exactly 64 KiB must be read: %v", err)
 	}
 	if e := storageError("p", os.ErrPermission).(*errkind.Error); e.Kind != errkind.StorageFailed || e.Subject != "p" {
@@ -103,14 +109,14 @@ func TestParseRejectsUnsafeYAMLFeatures(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse("r.yaml", []byte(tc.content))
+			_, err := parse("r.yaml", []byte(tc.content))
 			_ = requireRuleError(t, err, errkind.InvalidInput, tc.line, tc.key)
 		})
 	}
 	// Many aliases expanding a large structure (a "YAML bomb") never get
 	// expanded: the first anchor is rejected.
 	bomb := "version: 1\na: &a [x, x, x, x, x, x, x, x, x, x]\nb: &b [*a, *a, *a, *a, *a, *a, *a, *a, *a, *a]\nc: [*b, *b, *b, *b, *b, *b, *b, *b, *b, *b]\n"
-	_, err := Parse("bomb.yaml", []byte(bomb))
+	_, err := parse("bomb.yaml", []byte(bomb))
 	_ = requireRuleError(t, err, errkind.InvalidInput, 2, "")
 }
 
@@ -129,11 +135,13 @@ func TestDeepNestingIsRejectedBeforeTheParserRuns(t *testing.T) {
 		line    int
 		detail  string
 	}{
-		{"200k flow sequences", "version: 1\nremove: " + strings.Repeat("[", 200_000), 2, tooDeep},
-		{"flow mappings", "version: 1\nremove: " + strings.Repeat("{a: ", 200_000), 2, tooDeep},
-		{"after a document marker", "--- " + strings.Repeat("[", 200_000), 1, tooDeep},
+		// Since U3, Parse rejects more than 64 KiB first, so the inputs stay
+		// just below it to reach the nesting check.
+		{"60k flow sequences", "version: 1\nremove: " + strings.Repeat("[", 60_000), 2, tooDeep},
+		{"flow mappings", "version: 1\nremove: " + strings.Repeat("{a: ", 15_000), 2, tooDeep},
+		{"after a document marker", "--- " + strings.Repeat("[", 60_000), 1, tooDeep},
 		{"after anchors", "version: 1\nremove: " + strings.Repeat("[&a ']', ", 100), 2, tooDeep},
-		{"compact sequences", "version: 1\nremove:\n" + strings.Repeat("- ", 100_000) + "x\n", 3, tooDeep},
+		{"compact sequences", "version: 1\nremove:\n" + strings.Repeat("- ", 30_000) + "x\n", 3, tooDeep},
 		{"indentation", indented.String(), 34, tooDeep},
 		{"brackets in one quoted value", "version: 1\nremove: ['" + strings.Repeat("[", 2000) + "']\n", 2, tooManyBrackets},
 		{"brackets in a quoted value over lines", "version: 1\nremove: [\"a\n" + strings.Repeat("[[[[[[[[[[\n", 200) + "\"]\n", 105, tooManyBrackets},
@@ -141,7 +149,7 @@ func TestDeepNestingIsRejectedBeforeTheParserRuns(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			start := time.Now()
-			_, err := Parse("r.yaml", []byte(tc.content))
+			_, err := parse("r.yaml", []byte(tc.content))
 			elapsed := time.Since(start)
 
 			e := requireRuleError(t, err, errkind.InvalidInput, tc.line, "")
@@ -156,7 +164,7 @@ func TestDeepNestingIsRejectedBeforeTheParserRuns(t *testing.T) {
 
 	// The same through Load, with a file of brackets as large as allowed.
 	start := time.Now()
-	_, err := Load(writeFile(t, "version: 1\nremove: "+strings.Repeat("[", MaxFileSize-len("version: 1\nremove: "))))
+	_, err := load(writeFile(t, "version: 1\nremove: "+strings.Repeat("[", MaxFileSize-len("version: 1\nremove: "))))
 	e := requireRuleError(t, err, errkind.InvalidInput, 2, "")
 	if e.Detail != tooDeep || time.Since(start) > 2*time.Second {
 		t.Fatalf("detail = %q after %v", e.Detail, time.Since(start))
@@ -178,7 +186,7 @@ func TestNestingCheckIgnoresQuotesCommentsAndBlockScalars(t *testing.T) {
 		"remove:\n" +
 		"  - a[b\n" +
 		"  - \"c\"\n"
-	rs, err := Parse("r.yaml", []byte(content))
+	rs, err := parse("r.yaml", []byte(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,14 +197,14 @@ func TestNestingCheckIgnoresQuotesCommentsAndBlockScalars(t *testing.T) {
 	// The content of a block scalar is text: the parser reads it, and the
 	// schema (which wants plain or quoted text) rejects it.
 	blockScalar := "version: 1\nrequired:\n  CostCenter:\n    default: |\n      " + forty + "\n      '\n    when: []\n"
-	_, err = Parse("r.yaml", []byte(blockScalar))
+	_, err = parse("r.yaml", []byte(blockScalar))
 	e, ok := errkind.As(err)
 	if !ok || e.Line != 4 || e.Detail != `"default" must be a text value` {
 		t.Fatalf("block scalar content must reach the parser: %v", err)
 	}
 
 	// 20 levels pass the check; the schema then rejects the nested lists.
-	_, err = Parse("r.yaml", []byte("version: 1\nremove: "+strings.Repeat("[", 20)+strings.Repeat("]", 20)+"\n"))
+	_, err = parse("r.yaml", []byte("version: 1\nremove: "+strings.Repeat("[", 20)+strings.Repeat("]", 20)+"\n"))
 	e, ok = errkind.As(err)
 	if !ok || e.Kind != errkind.InvalidInput || e.Detail == tooDeep || !strings.Contains(e.Detail, `"remove"`) {
 		t.Fatalf("20 levels must reach the parser and the schema check: %v", err)
@@ -221,7 +229,7 @@ func TestParseVersionAndStructureErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse("r.yaml", []byte(tc.content))
+			_, err := parse("r.yaml", []byte(tc.content))
 			_ = requireRuleError(t, err, tc.kind, tc.line, tc.key)
 		})
 	}
@@ -247,7 +255,7 @@ func TestParseReportsUnknownKeysAndTypesWithAFix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Parse("r.yaml", []byte(tc.content))
+			_, err := parse("r.yaml", []byte(tc.content))
 			e := requireRuleError(t, err, errkind.InvalidInput, tc.line, tc.key)
 			if !strings.Contains(e.Hint, tc.hint) {
 				t.Fatalf("hint = %q, want it to contain %q", e.Hint, tc.hint)
@@ -257,16 +265,16 @@ func TestParseReportsUnknownKeysAndTypesWithAFix(t *testing.T) {
 }
 
 func TestAliasesBelongToOneCanonicalKey(t *testing.T) {
-	_, err := Parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [env]\n  Stage:\n    aliases: [env]\n"))
+	_, err := parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [env]\n  Stage:\n    aliases: [env]\n"))
 	e := requireRuleError(t, err, errkind.InvalidInput, 6, "env")
 	if !strings.Contains(e.Detail, "line 4") || !strings.Contains(e.Detail, "line 6") {
 		t.Fatalf("both lines must be named: %q", e.Detail)
 	}
 
-	_, err = Parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [Env]\n  Env:\n    aliases: [e]\n"))
+	_, err = parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [Env]\n  Env:\n    aliases: [e]\n"))
 	_ = requireRuleError(t, err, errkind.InvalidInput, 4, "Env")
 
-	rs, err := Parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [env, env, ENV]\n  environment:\n    aliases: [x]\n"))
+	rs, err := parse("r.yaml", []byte("version: 1\nkeys:\n  Environment:\n    aliases: [env, env, ENV]\n  environment:\n    aliases: [x]\n"))
 	if err != nil {
 		t.Fatalf("case differences are allowed: %v", err)
 	}
@@ -279,7 +287,9 @@ func TestAliasesBelongToOneCanonicalKey(t *testing.T) {
 	}
 }
 
-func TestAWSKeysAndUnusedItemsGiveWarnings(t *testing.T) {
+// U3: values, required and remove are read and no longer give a "not used"
+// warning; only the aws: keys do (BR5.1).
+func TestAWSKeysGiveWarnings(t *testing.T) {
 	content := `version: 1
 keys:
   aws:createdBy:
@@ -292,11 +302,11 @@ required:
   CostCenter:
     default: "0000"
     when:
-      - match: {resourceType: "AWS::EC2::Instance", region: us-east-1, tags: {env: prod}}
+      - match: {resourceType: "ec2:instance", region: us-east-1, tags: {env: prod}}
         value: "1111"
 remove: [tmp-owner]
 `
-	rs, err := Parse("r.yaml", []byte(content))
+	rs, err := parse("r.yaml", []byte(content))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +317,7 @@ remove: [tmp-owner]
 	for _, w := range rs.Warnings {
 		got = append(got, w.Key)
 	}
-	if strings.Join(got, ",") != "aws:createdBy,values,AWS:owner,required,remove" {
+	if strings.Join(got, ",") != "aws:createdBy,AWS:owner" {
 		t.Fatalf("warning keys = %v", got)
 	}
 }
@@ -326,7 +336,7 @@ func TestMissingOrEmptyKeysGiveAWarning(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rs, err := Parse("r.yaml", []byte(tc.content))
+			rs, err := parse("r.yaml", []byte(tc.content))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -340,7 +350,7 @@ func TestMissingOrEmptyKeysGiveAWarning(t *testing.T) {
 		})
 	}
 	// Keys that are all ignored (aws:) are already warned about one by one.
-	rs, err := Parse("r.yaml", []byte("version: 1\nkeys:\n  aws:x:\n    aliases: [y]\n"))
+	rs, err := parse("r.yaml", []byte("version: 1\nkeys:\n  aws:x:\n    aliases: [y]\n"))
 	if err != nil || len(rs.Warnings) != 1 || strings.Contains(rs.Warnings[0].Message, "no key rules") {
 		t.Fatalf("warnings = %+v, err = %v", rs, err)
 	}
@@ -362,20 +372,20 @@ func TestUnusedItemsAreStillChecked(t *testing.T) {
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := Parse("r.yaml", []byte(content))
+			_, err := parse("r.yaml", []byte(content))
 			if errkind.KindOf(err) != errkind.InvalidInput {
 				t.Fatalf("err = %v", err)
 			}
 		})
 	}
-	if _, err := Parse("r.yaml", []byte("version: 1\nkeys:\nrequired:\n  A:\n    when:\nremove:\n")); err != nil {
+	if _, err := parse("r.yaml", []byte("version: 1\nkeys:\nrequired:\n  A:\n    when:\nremove:\n")); err != nil {
 		t.Fatalf("empty sections are allowed: %v", err)
 	}
 }
 
 // The rule file of the sandbox checkpoint must load without warnings.
 func TestSandboxRuleFileIsValid(t *testing.T) {
-	rs, err := Load(filepath.Join("..", "..", "test", "sandbox", "u1-rules.yaml"))
+	rs, err := load(filepath.Join("..", "..", "test", "sandbox", "u1-rules.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,29 +407,25 @@ func TestSuggestAndEditDistance(t *testing.T) {
 	}
 }
 
-// U2 BR5.2: the required keys are kept in file order with their lines, and
-// the warning that they are unused is marked so scan can leave it out.
+// U2 BR5.2: the required keys are kept in file order with their lines. Since
+// U3 a required key starting with aws: is left out by the reader with a
+// warning (BR5.1), instead of by scan.
 func TestRequiredKeysAreKeptWithTheirLines(t *testing.T) {
-	rs, err := Parse("r.yaml", []byte("version: 1\nrequired:\n  Owner:\n    default: x\n  aws:createdBy:\n    default: y\n"))
+	rs, err := parse("r.yaml", []byte("version: 1\nrequired:\n  Owner:\n    default: x\n  aws:createdBy:\n    default: y\n  Team: {}\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(rs.RequiredTags) != "[{Owner 3} {aws:createdBy 5}]" {
-		t.Fatalf("required = %v", rs.RequiredTags)
+	var got []string
+	for _, r := range rs.RequiredTags {
+		got = append(got, fmt.Sprintf("%s@%d", r.Key, r.Line))
 	}
-	marked := 0
-	for _, w := range rs.Warnings {
-		if w.Key == RequiredNotUsedKey {
-			marked++
-			if w.Line != 2 || !strings.Contains(w.Message, `"required" is not used`) {
-				t.Fatalf("warning = %+v", w)
-			}
-		}
+	if strings.Join(got, ",") != "Owner@3,Team@7" {
+		t.Fatalf("required = %v", got)
 	}
-	if marked != 1 {
+	if len(rs.Warnings) != 2 || rs.Warnings[0].Line != 5 || !strings.Contains(rs.Warnings[0].Message, `the required tag "aws:createdBy" is ignored`) {
 		t.Fatalf("warnings = %+v", rs.Warnings)
 	}
-	none, err := Parse("r.yaml", []byte("version: 1\n"))
+	none, err := parse("r.yaml", []byte("version: 1\n"))
 	if err != nil || len(none.RequiredTags) != 0 {
 		t.Fatalf("required = %v, err %v", none.RequiredTags, err)
 	}

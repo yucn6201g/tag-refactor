@@ -1,0 +1,25 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u3-rules",
+  "upstream_ids": ["NFR1.11", "NFR1.12", "NFR3.6", "NFR3.7", "NFR5.9", "NFR8.12", "NFR8.13", "NFR8.14", "NFR9.4", "NFR9.5", "NFR10.4", "NFR10.5", "NFR1.6", "NFR1.7", "NFR1.10", "NFR3.1", "NFR5.4", "NFR5.8"],
+  "coverage": [
+    { "id": "NFR1.11", "status": "OK", "target": "cicd-pipeline.md test と race のジョブ(性能のテスト、race のときの件数と上限)" },
+    { "id": "NFR1.12", "status": "OK", "target": "cicd-pipeline.md test と race のジョブ(照会の性能のテスト)" },
+    { "id": "NFR3.6", "status": "OK", "target": "cicd-pipeline.md 操作の照合のテスト、検証のスクリプトの手順1(R2 の今の権限だけで動く)" },
+    { "id": "NFR3.7", "status": "N/A", "target": "読み込みの順で決まり、インフラを要しない(テストは test ジョブ)" },
+    { "id": "NFR5.9", "status": "OK", "target": "cicd-pipeline.md 呼び出し回数の上限とリージョンの失敗のテスト" },
+    { "id": "NFR8.12", "status": "N/A", "target": "書き出しの関数で決まり、インフラを要しない(テストは test ジョブ)" },
+    { "id": "NFR8.13", "status": "OK", "target": "cicd-pipeline.md 種の入力を CI で、ファジングは手元で5分。testdata/fuzz を -text にする" },
+    { "id": "NFR8.14", "status": "N/A", "target": "表示の置き換えで決まり、インフラを要しない" },
+    { "id": "NFR9.4", "status": "OK", "target": "cicd-pipeline.md 3つの OS で同じ期待のファイル(LF)と比べる" },
+    { "id": "NFR9.5", "status": "OK", "target": "cicd-pipeline.md UTF-16 の読み込みのテストと、チェックポイントの手元の PowerShell の確認" },
+    { "id": "NFR10.4", "status": "OK", "target": "cicd-pipeline.md 読み戻しのテストと、検証のスクリプトの手順3(実機の下書きを scan --rules で読む)" },
+    { "id": "NFR10.5", "status": "OK", "target": "cicd-pipeline.md coverage ジョブ(80% を変えない)" },
+    { "id": "NFR1.6", "status": "N/A", "target": "U2 の収集のまま" },
+    { "id": "NFR1.7", "status": "N/A", "target": "U2 の収集のまま" },
+    { "id": "NFR1.10", "status": "N/A", "target": "rules suggest は一度もタグが付いていないリソースを探さない" },
+    { "id": "NFR3.1", "status": "N/A", "target": "読み取りの口だけを渡す組み立てで決まり、インフラを要しない" },
+    { "id": "NFR5.4", "status": "N/A", "target": "U2 の再試行のまま" },
+    { "id": "NFR5.8", "status": "N/A", "target": "U2 の取り消しのまま" }
+  ]
+}

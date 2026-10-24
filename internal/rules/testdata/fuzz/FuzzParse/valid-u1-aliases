@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("version: 1\nkeys:\n  Environment:\n    aliases: [env, Env]\n")

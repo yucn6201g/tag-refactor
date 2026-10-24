@@ -5,6 +5,7 @@
 <!-- example: 2026-05-29T10:14:32Z — chose REST over GraphQL; the consuming team only needs CRUD, revisit if subscriptions land -->
 
 ## Deviations
+- 2026-10-24T00:10:00Z [unit u3-rules] — PowerShell 5.1 のリダイレクトが書く UTF-16 のルールファイルを読めるようにする要件(NFR9.5)を足した; 下書きを Windows でそのまま保存して使う主要な流れを壊さないため。
 <!-- example: 2026-05-29T10:14:32Z — skipped the optional caching layer the stage prose suggested; the dataset is small enough that it adds risk -->
 
 ## Tradeoffs

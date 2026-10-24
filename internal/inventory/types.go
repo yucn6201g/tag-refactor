@@ -84,6 +84,15 @@ func ConfigTypeToARNForm(configType string) string {
 	return configType
 }
 
+// ARNFormOf returns the ARN form of an AWS Config (CloudFormation) resource
+// type and true, or "" and false when the table does not know the type. The
+// rule file reader uses it to suggest the form to write in a condition (U3
+// BR3.4); it is passed as rules.Options.TypeHint.
+func ARNFormOf(configType string) (string, bool) {
+	t, ok := configToARNForm[configType]
+	return t, ok
+}
+
 // IsNotTaggable reports whether resources of the type (ARN form) cannot have
 // their tags changed through the tagging API (BR3.3).
 func IsNotTaggable(resourceType string) bool {

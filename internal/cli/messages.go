@@ -10,7 +10,8 @@ import (
 const (
 	helpHint        = `run "tag-refactor --help" to see the commands and options`
 	permissionsHint = "docs/iam/readonly-policy.json lists the permissions tag-refactor needs"
-	supportedHint   = "this version has scan (--rules, --profile, --region) and plan (--rules, --profile, --region), plus --debug"
+	supportedHint   = "this version has scan (--rules, --profile, --region), plan (--rules, --profile, --region) and " +
+		"rules suggest (--profile, --region, --output), plus --debug"
 )
 
 // describe turns an error into the two lines shown to the user: what

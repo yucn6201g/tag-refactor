@@ -1,0 +1,14 @@
+{
+  "stage": "code-generation",
+  "unit": "u3-rules",
+  "version": 1,
+  "writes": [
+    { "path": ".gitattributes" },
+    { "path": "README.md" },
+    { "path": "scripts/verify.sh" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/inventory/" },
+    { "path": "internal/rules/" }
+  ]
+}

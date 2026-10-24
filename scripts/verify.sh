@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
-# U2 (scan of every region) checkpoint verification. It calls the sandbox AWS
-# account, so it only runs locally, never in CI.
+# U2 (scan of every region) and U3 (rules suggest) checkpoint verification.
+# It calls the sandbox AWS account, so it only runs locally, never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
 # 2. Checks with the admin profile that the account is the sandbox account.
+# U3. Checks that the U1 stack exists, builds tag-refactor, runs
+#    "rules suggest --region ap-northeast-1 --output <file>" with the
+#    read-only profile (exit code 0, nothing on standard output), checks the
+#    draft (first comment, env and Env in one group), and reads it back with
+#    "scan --rules". It uses no queue and no Resource Explorer index, so it
+#    runs before the U2 wait.
 # 3. Checks the U2 stack and the Resource Explorer index of ap-northeast-1, and
 #    records the type of every index.
 # 4. Creates an SQS queue without tags in ap-northeast-1 and always deletes it
@@ -13,6 +19,9 @@
 # 6. Runs the U2 sandbox tests (internal/cli/integration_u2_test.go) with the
 #    read-only profile; a skipped test is a failure.
 # 7. Prints the 95th percentile of each call and the 10-minute estimate.
+#
+# The temporary folder of U3 and the queue of U2 are removed by one cleanup on
+# every exit; it is defined before the first of them is made.
 #
 # Environment:
 #   TAG_REFACTOR_SANDBOX_ACCOUNT_ID  the sandbox account ID (required)
@@ -72,6 +81,44 @@ aws_admin() {
   aws --profile "$admin" --region "$region" "$@"
 }
 
+# One cleanup for every exit (success, failure or interruption). It does
+# nothing for what was not made yet: the queue name and the temporary folder
+# are empty until then. Only this one EXIT trap is defined, so neither part
+# can replace the other.
+queue_name=""
+queue_url=""
+u3_dir=""
+cleanup() {
+  if [ -n "$u3_dir" ] && [ -d "$u3_dir" ]; then
+    rm -rf -- "$u3_dir"
+  fi
+  if [ -n "$queue_url" ]; then
+    if aws_admin sqs delete-queue --queue-url "$queue_url" >/dev/null 2>&1; then
+      echo "verify: deleted the queue $queue_name"
+    else
+      echo "verify: could not delete the queue $queue_name in $region; delete it by hand" >&2
+    fi
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
+
+# run_tool runs the built tag-refactor and keeps its exit code, standard
+# output and standard error. Application Control may block a freshly built
+# binary; only that case is retried (up to 3 attempts).
+run_tool() {
+  local attempt
+  for attempt in 1 2 3; do
+    TOOL_STATUS=0
+    "$tool" "$@" >"$u3_dir/stdout" 2>"$u3_dir/stderr" || TOOL_STATUS=$?
+    if ! grep -q 'An Application Control policy has blocked this file' "$u3_dir/stderr"; then
+      return 0
+    fi
+    echo "verify: Application Control blocked tag-refactor; retrying ($attempt of 3)" >&2
+  done
+  fail "Application Control blocked tag-refactor 3 times; run the verification again"
+}
+
 # 1. The U1 verification: every test and the U1 sandbox test.
 echo "verify: running scripts/verify-u1.sh"
 TAG_REFACTOR_IT_PROFILE="$readonly_profile" bash scripts/verify-u1.sh || fail "scripts/verify-u1.sh failed"
@@ -82,6 +129,47 @@ account="$(aws_admin sts get-caller-identity --query Account --output text)" ||
   fail "cannot identify the account with the profile $admin; run \"aws sso login --profile $admin\""
 [ "$account" = "$TAG_REFACTOR_SANDBOX_ACCOUNT_ID" ] ||
   fail "the profile $admin is account $account, not the sandbox account $TAG_REFACTOR_SANDBOX_ACCOUNT_ID; stopping"
+
+# U3. rules suggest against the U1 fixtures (their env and Env tags).
+u1_stack="tag-refactor-u1-fixtures"
+u1_status="$(aws_admin cloudformation describe-stacks --stack-name "$u1_stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||
+  fail "the stack $u1_stack does not exist; deploy the U1 fixtures stack (test/sandbox/u1-fixtures.yaml) as the U1 infrastructure-specification.md describes"
+case "$u1_status" in
+  CREATE_COMPLETE | UPDATE_COMPLETE) ;;
+  *) fail "the stack $u1_stack is $u1_status; deploy the U1 fixtures stack as the U1 infrastructure-specification.md describes" ;;
+esac
+# rules suggest --output never overwrites a file, so the draft goes to a new
+# name inside a temporary folder rather than to a file mktemp creates.
+u3_dir="$(mktemp -d)"
+draft="$u3_dir/tagrules.yaml"
+tool="$u3_dir/tag-refactor$(go env GOEXE)"
+echo "verify: building tag-refactor for the U3 check"
+go build -mod=readonly -o "$tool" ./cmd/tag-refactor || fail "cannot build tag-refactor"
+
+echo "verify: running rules suggest (profile $readonly_profile)"
+run_tool rules suggest --profile "$readonly_profile" --region "$region" --output "$draft"
+[ "$TOOL_STATUS" -eq 0 ] || { sed 's/^/  /' "$u3_dir/stderr" >&2; fail "rules suggest ended with exit code $TOOL_STATUS, not 0"; }
+[ ! -s "$u3_dir/stdout" ] || fail "rules suggest printed to standard output although --output was given"
+[ -s "$draft" ] || fail "rules suggest did not write $draft"
+head -n 1 "$draft" | grep -q '^# generated by tag-refactor ' || fail "the draft does not start with \"# generated by tag-refactor\""
+# env and Env are one group: a key line and the aliases line under it hold
+# both (which spelling is canonical depends on the counts).
+group="$(awk 'prev ~ /^  "/ && $0 ~ /^    aliases: / && (prev ~ /"env"/ || $0 ~ /"env"/) && (prev ~ /"Env"/ || $0 ~ /"Env"/) { print prev; print } { prev = $0 }' "$draft")"
+if [ -z "$group" ]; then
+  sed 's/^/  /' "$draft" >&2
+  fail "env and Env are not in one group of the draft"
+fi
+
+echo "verify: reading the draft back with scan --rules"
+run_tool scan --profile "$readonly_profile" --region "$region" --rules "$draft"
+# 0 (no issues) and 2 (issues to review) both mean the draft was read.
+if [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ] || grep -q '^Error:' "$u3_dir/stderr"; then
+  sed 's/^/  /' "$u3_dir/stderr" >&2
+  fail "scan could not read the draft of rules suggest"
+fi
+draft_keys="$(grep -cE '^  "' "$draft" || true)"
+echo "verify: U3 draft has $draft_keys keys; the env group:"
+printf '%s\n' "$group" | sed 's/^/  /'
 
 # 3. The U2 stack and the Resource Explorer index of ap-northeast-1.
 status="$(aws_admin cloudformation describe-stacks --stack-name "$stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||
@@ -112,18 +200,6 @@ indexed_regions="$(printf '%s\n' "$indexes" | awk 'NF { print $1 }' | paste -sd,
 # 4. A queue without tags, deleted on every exit.
 suffix="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
 queue_name="tag-refactor-u2-untagged-$suffix"
-queue_url=""
-cleanup() {
-  if [ -n "$queue_url" ]; then
-    if aws_admin sqs delete-queue --queue-url "$queue_url" >/dev/null 2>&1; then
-      echo "verify: deleted the queue $queue_name"
-    else
-      echo "verify: could not delete the queue $queue_name in $region; delete it by hand" >&2
-    fi
-  fi
-}
-trap cleanup EXIT
-trap 'exit 130' INT TERM
 queue_url="$(aws_admin sqs create-queue --queue-name "$queue_name" --query QueueUrl --output text)" ||
   fail "cannot create the queue $queue_name"
 queue_arn="$(aws_admin sqs get-queue-attributes --queue-url "$queue_url" --attribute-names QueueArn --query Attributes.QueueArn --output text)" ||

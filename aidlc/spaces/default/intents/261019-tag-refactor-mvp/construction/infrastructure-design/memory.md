@@ -10,6 +10,7 @@
 <!-- example: 2026-05-29T10:14:32Z — skipped the optional caching layer the stage prose suggested; the dataset is small enough that it adds risk -->
 
 ## Tradeoffs
+- 2026-10-24T00:37:11Z [unit u3-rules] — U3 の実機の確認は verify.sh の U2 のキューの前に置き、cleanup と trap の定義をスクリプトの先頭近くに移す; U2 の長い待ちに巻き込まれず、途中で止まっても一時ファイルとキューを残さないため。
 <!-- example: 2026-05-29T10:14:32Z — picked TDD over BDD this run; the team is unit-first and the domain is well-understood -->
 
 ## Open questions

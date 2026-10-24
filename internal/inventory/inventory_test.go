@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -242,5 +243,28 @@ func TestGroupKeysOrderAndAWSKeysLeftOut(t *testing.T) {
 	}
 	if len(GroupKeys(nil)) != 0 || Variants(nil) != nil {
 		t.Fatal("empty input must give no groups")
+	}
+}
+
+// U3 BR3.4: the rule file reader asks the type table for the form to write
+// in a condition; a type the table does not know has none.
+func TestARNFormOfLooksUpTheTypeTable(t *testing.T) {
+	for configType, want := range map[string]string{"AWS::EC2::Instance": "ec2:instance", "AWS::S3::Bucket": "s3", "AWS::SQS::Queue": "sqs"} {
+		if got, ok := ARNFormOf(configType); !ok || got != want {
+			t.Errorf("ARNFormOf(%q) = %q, %v; want %q", configType, got, ok, want)
+		}
+	}
+	for _, configType := range []string{"AWS::Example::Thing", "ec2:instance", "", "aws::ec2::instance"} {
+		if got, ok := ARNFormOf(configType); ok || got != "" {
+			t.Errorf("ARNFormOf(%q) = %q, %v; want no form", configType, got, ok)
+		}
+	}
+	// Every form the table gives can be written in a condition: it is the
+	// service, or the service and a type without blanks or colons.
+	condition := regexp.MustCompile(`^[a-z0-9-]+(:[^\s:]+)?$`)
+	for configType := range configToARNForm {
+		if form, _ := ARNFormOf(configType); !condition.MatchString(form) {
+			t.Errorf("%s gives %q, which a condition cannot use", configType, form)
+		}
 	}
 }

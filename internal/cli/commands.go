@@ -13,20 +13,52 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/rules"
 )
 
+// tagReaders is everything rules suggest may use to reach AWS: the account
+// and the tagged resources. It has no AWS Config, Resource Explorer or IAM
+// reader, so rules suggest cannot call them (U3 security design §1, NFR3.6).
+type tagReaders struct {
+	account awsaccess.AccountResolver
+	tags    awsaccess.TagReader
+}
+
 // readers is everything scan and plan may use to reach AWS. It only has
 // read-only interfaces: there is no way to hand them a writer (BR1.5, NFR3.1).
 type readers struct {
-	account  awsaccess.AccountResolver
-	tags     awsaccess.TagReader
+	tagReaders
 	policies awsaccess.PolicyReader
 	config   awsaccess.ConfigReader
 	explorer awsaccess.ExplorerReader
 }
 
-// connect builds the AWS session and identifies the account (BR1.1 to BR1.3).
-// The session's region is the first --region value, or the profile's region:
-// STS, EC2 and IAM are asked there.
-func (a *app) connect(ctx context.Context, profile string, regions []string) (readers, awsaccess.AccountContext, error) {
+func (t tagReaders) accountResolver() awsaccess.AccountResolver { return t.account }
+func (t tagReaders) tagReader() awsaccess.TagReader             { return t.tags }
+
+// readerSet is a set of readers built for one command; readers has the
+// methods of the tagReaders it embeds.
+type readerSet interface {
+	accountResolver() awsaccess.AccountResolver
+	tagReader() awsaccess.TagReader
+}
+
+// tagReadersOf is the first stage of connecting: the account and the tagged
+// resources only.
+func tagReadersOf(s *awsaccess.Session) tagReaders {
+	return tagReaders{account: s, tags: s}
+}
+
+// allReadersOf is the second stage: the first stage plus the policies, AWS
+// Config and Resource Explorer readers that scan and plan use.
+func allReadersOf(s *awsaccess.Session) readers {
+	return readers{tagReaders: tagReadersOf(s), policies: s, config: s, explorer: s}
+}
+
+// connect builds the AWS session and, through stage, the readers the command
+// may use, and identifies the account (BR1.1 to BR1.3). The session's region
+// is the first --region value, or the profile's region: STS, EC2 and IAM are
+// asked there.
+func connect[R readerSet](ctx context.Context, a *app, profile string, regions []string,
+	stage func(*awsaccess.Session) R) (R, awsaccess.AccountContext, error) {
+	var none R
 	opts := awsaccess.Options{
 		Profile:           profile,
 		Transport:         a.deps.Transport,
@@ -45,12 +77,12 @@ func (a *app) connect(ctx context.Context, profile string, regions []string) (re
 	}
 	session, err := awsaccess.NewSession(ctx, opts)
 	if err != nil {
-		return readers{}, awsaccess.AccountContext{}, err
+		return none, awsaccess.AccountContext{}, err
 	}
-	r := readers{account: session, tags: session, policies: session, config: session, explorer: session}
-	acc, err := r.account.Resolve(ctx)
+	r := stage(session)
+	acc, err := r.accountResolver().Resolve(ctx)
 	if err != nil {
-		return readers{}, awsaccess.AccountContext{}, err
+		return none, awsaccess.AccountContext{}, err
 	}
 	a.p.Account(acc)
 	return r, acc, nil
@@ -85,37 +117,69 @@ func regionsToRead(acc awsaccess.AccountContext, requested []string) ([]string, 
 	return slices.Compact(out), nil
 }
 
-// collect connects and reads the tagged resources of the regions, under one
-// cancellation shared by the whole run (reliability design §4).
-func (a *app) collect(ctx context.Context, profile string, requested []string) (readers, *inventory.Snapshot, error) {
+// collect connects with the readers of stage and reads the tagged resources
+// of the regions, under one cancellation shared by the whole run
+// (reliability design §4).
+func collect[R readerSet](ctx context.Context, a *app, profile string, requested []string,
+	stage func(*awsaccess.Session) R) (R, *inventory.Snapshot, error) {
+	var none R
 	if err := checkRegionNames(requested); err != nil {
-		return readers{}, nil, err
+		return none, nil, err
 	}
-	r, acc, err := a.connect(ctx, profile, requested)
+	r, acc, err := connect(ctx, a, profile, requested, stage)
 	if err != nil {
-		return readers{}, nil, err
+		return none, nil, err
 	}
 	regions, err := regionsToRead(acc, requested)
 	if err != nil {
-		return readers{}, nil, err
+		return none, nil, err
 	}
-	snap, err := inventory.Collect(ctx, r.tags, a.p, acc, regions, a.deps.Now())
+	snap, err := inventory.Collect(ctx, r.tagReader(), a.p, acc, regions, a.deps.Now())
 	if err != nil {
-		return readers{}, nil, err
+		return none, nil, err
 	}
 	return r, snap, nil
 }
 
-// requiredKeys returns the required keys scan counts. Keys starting with aws:
-// belong to AWS: they are left out with a warning (BR5.2).
-func (a *app) requiredKeys(rs *rules.RuleSet) []string {
-	keys := []string{}
-	for _, req := range rs.RequiredTags {
-		if inventory.IsAWSReservedKey(req.Key) {
-			a.p.FileWarning(rs.SourcePath, req.Line,
-				`the required key "`+req.Key+`" is ignored: keys that start with aws: belong to AWS`)
-			continue
+// collectAll is collect with every reader scan and plan use.
+func (a *app) collectAll(ctx context.Context, profile string, requested []string) (readers, *inventory.Snapshot, error) {
+	return collect(ctx, a, profile, requested, allReadersOf)
+}
+
+// loadRules reads the rule file before anything calls AWS, so a broken file
+// stops the command without a request (NFR3.7), and prints its warnings. The
+// inventory's type table names the form to write for a CloudFormation type
+// (U3 BR3.4).
+func (a *app) loadRules(path string) (*rules.RuleSet, error) {
+	rs, err := rules.Load(path, rules.Options{TypeHint: inventory.ARNFormOf})
+	if err != nil {
+		return nil, err
+	}
+	for _, w := range rs.Warnings {
+		a.p.FileWarning(path, w.Line, w.Message)
+	}
+	return rs, nil
+}
+
+// notAppliedYet reports whether the rule file has values, required tags or
+// removed keys, which plan reads but does not apply until U4.
+func notAppliedYet(rs *rules.RuleSet) bool {
+	if len(rs.RequiredTags) > 0 || len(rs.RemoveKeys) > 0 {
+		return true
+	}
+	for _, k := range rs.KeyRules {
+		if len(k.Values) > 0 {
+			return true
 		}
+	}
+	return false
+}
+
+// requiredKeys returns the required keys scan counts. The rule file reader
+// has already left out keys starting with aws:, with a warning (U3 BR5.1).
+func requiredKeys(rs *rules.RuleSet) []string {
+	keys := make([]string, 0, len(rs.RequiredTags))
+	for _, req := range rs.RequiredTags {
 		keys = append(keys, req.Key)
 	}
 	return keys
@@ -128,19 +192,13 @@ func (a *app) runScan(ctx context.Context, rulesPath, profile string, regions []
 	defer cancel()
 	var required []string
 	if rulesPath != "" {
-		rs, err := rules.Load(rulesPath)
+		rs, err := a.loadRules(rulesPath)
 		if err != nil {
 			return err
 		}
-		for _, w := range rs.Warnings {
-			// scan uses the required keys, so it does not say they are unused.
-			if w.Key != rules.RequiredNotUsedKey {
-				a.p.FileWarning(rulesPath, w.Line, w.Message)
-			}
-		}
-		required = a.requiredKeys(rs)
+		required = requiredKeys(rs)
 	}
-	r, snap, err := a.collect(ctx, profile, regions)
+	r, snap, err := a.collectAll(ctx, profile, regions)
 	if err != nil {
 		return err
 	}
@@ -169,14 +227,16 @@ func (a *app) runPlan(ctx context.Context, rulesPath, profile string, regions []
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage,
 			Detail: "plan needs a rule file", Hint: "pass it with --rules, for example: tag-refactor plan --rules tagrules.yaml"}
 	}
-	rs, err := rules.Load(rulesPath)
+	rs, err := a.loadRules(rulesPath)
 	if err != nil {
 		return err
 	}
-	for _, w := range rs.Warnings {
-		a.p.FileWarning(rulesPath, w.Line, w.Message)
+	if notAppliedYet(rs) {
+		// U4 applies values, required and remove to the plan; until then plan
+		// says it reads them only.
+		a.p.Warn("values / required / remove are read but not applied to the plan yet")
 	}
-	r, snap, err := a.collect(ctx, profile, regions)
+	r, snap, err := a.collectAll(ctx, profile, regions)
 	if err != nil {
 		return err
 	}

@@ -1,12 +1,16 @@
-// Package rules reads and validates the rule file (contracts C1 and C8). In U1
-// only the key aliases are used; the other items of the schema are checked
-// for shape and reported as not used.
+// Package rules reads and validates the rule file (contracts C1 and C8),
+// answers the questions U4's plan asks about it (the value of a required tag
+// for a resource, the canonical value of a tag value, whether a key is
+// removed), and builds the draft rule file of rules suggest.
 //
-// The file is read defensively: only regular files, at most 64 KiB, its
+// The file is read defensively: only regular files; UTF-8, or UTF-16 with a
+// byte order mark converted to UTF-8; at most 64 KiB once in UTF-8; its
 // nesting is bounded before the YAML parser reads it, and the YAML syntax tree
 // is checked before it is mapped, so anchors, aliases, merge keys, tags and
 // duplicate keys are rejected by the tool itself rather than by library
-// settings (NFR8.4).
+// settings (NFR8.4, NFR9.5). The package depends on errkind only: what it
+// needs from the inventory comes in as function values (Options.TypeHint,
+// SuggestInput.KeyGroup).
 package rules
 
 import (
@@ -24,23 +28,89 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
-// MaxFileSize is the largest rule file that is read (64 KiB). A rule file
-// lists tag keys and needs far less; a small limit also bounds the work of the
-// YAML parser.
+// MaxFileSize is the largest rule file that is read, measured in UTF-8
+// (64 KiB). A rule file lists tag keys and needs far less; a small limit also
+// bounds the work of the YAML parser.
 const MaxFileSize = 64 << 10
+
+// MaxInputSize is the largest input Parse accepts before decoding (128 KiB):
+// a UTF-16 file takes up to twice the bytes of its UTF-8 form (NFR9.5).
+const MaxInputSize = 128 << 10
 
 // SupportedVersion is the rule file version this tool reads.
 const SupportedVersion = 1
 
-// utf8BOM is the byte order mark some editors put at the start of a file.
-const utf8BOM = "\xef\xbb\xbf"
+// The AWS limits on tags, counted in characters (BR1.5).
+const (
+	MaxKeyLength   = 128
+	MaxValueLength = 256
+)
 
-// KeyRule is a canonical tag key and its aliases.
+// Options changes how a rule file is read.
+type Options struct {
+	// TypeHint returns the ARN form ("ec2:instance") of a CloudFormation
+	// resource type ("AWS::EC2::Instance"). It is used only in the fix of an
+	// error (BR3.4). Nil treats every CloudFormation type as one that cannot
+	// be used in a condition.
+	TypeHint func(cfnType string) (arnForm string, ok bool)
+}
+
+// KeyRule is a canonical tag key, its aliases and its canonical values.
 type KeyRule struct {
 	CanonicalKey string
-	// Aliases are in file order; aws: aliases are removed (BR3.3).
+	// Aliases are in file order; aws: aliases and repeats are removed.
 	Aliases []string
+	// Values are in file order (BR2.2).
+	Values []ValueRule
 	// Line is the line of the canonical key in the rule file.
+	Line int
+}
+
+// ValueRule is a canonical tag value and its other spellings (BR2.2).
+type ValueRule struct {
+	CanonicalValue string
+	// Spellings are in file order; repeats and the value itself are removed.
+	Spellings []string
+	// Line is the line of the canonical value; 0 in a draft.
+	Line int
+}
+
+// RequiredTag is a key listed under "required" and how its value is decided
+// (BR3.2).
+type RequiredTag struct {
+	Key string
+	// Default is the value for resources no condition matches; it is set
+	// when HasDefault is true.
+	Default     string
+	HasDefault  bool
+	DefaultLine int
+	// When are the conditions in file order; the first that matches wins.
+	When []RequiredCondition
+	// Line is the line of the key in the rule file.
+	Line int
+}
+
+// RequiredCondition is one entry of "when". Every field that is set must
+// match (BR3.2); at least one is set (BR3.3).
+type RequiredCondition struct {
+	// ResourceType is the type as scan shows it ("ec2:instance", "s3"), or "".
+	ResourceType string
+	// Region is a region name, or "".
+	Region string
+	// Tags are compared with the tags after aliases and value spellings are
+	// unified and removed keys are taken away. Keys starting with aws: are
+	// allowed here (BR5.1).
+	Tags  map[string]string
+	Value string
+	// Line is the line of the entry ("- match:").
+	Line int
+	// tagLines holds the line of each key of Tags.
+	tagLines map[string]int
+}
+
+// RemoveKey is a key listed under "remove".
+type RemoveKey struct {
+	Key  string
 	Line int
 }
 
@@ -51,36 +121,29 @@ type Warning struct {
 	Message string
 }
 
-// RequiredTag is a key listed under "required" (C8 requiredTagRules). Only
-// its name is used so far: scan counts the resources without it (U2 BR5.2);
-// its default and when are read for shape only.
-type RequiredTag struct {
-	Key string
-	// Line is the line of the key in the rule file.
-	Line int
-}
-
 // RuleSet is a loaded rule file.
 type RuleSet struct {
 	SourcePath string
 	Version    int
-	KeyRules   []KeyRule
-	// RequiredTags are in file order.
+	// KeyRules, RequiredTags and RemoveKeys are in file order.
+	KeyRules     []KeyRule
 	RequiredTags []RequiredTag
+	RemoveKeys   []RemoveKey
 	Warnings     []Warning
+	// idx holds the lookup tables of the queries; Parse builds it.
+	idx *index
 }
 
-// RequiredNotUsedKey is the Warning.Key of the warning that "required" is not
-// used. plan shows it; scan, which counts the required keys, leaves it out.
-const RequiredNotUsedKey = "required"
-
-// Load reads and validates the rule file at path (BR3.1 to BR3.3).
-func Load(path string) (*RuleSet, error) {
+// Load reads and validates the rule file at path (BR1.1 to BR5.1). It only
+// checks that the path is a regular file and reads at most MaxInputSize+1
+// bytes; Parse does everything else, so the fuzz test of Parse reaches every
+// check (security design §4).
+func Load(path string, opts Options) (*RuleSet, error) {
 	data, err := readLimited(path)
 	if err != nil {
 		return nil, err
 	}
-	return Parse(path, data)
+	return Parse(path, data, opts)
 }
 
 func readLimited(path string) ([]byte, error) {
@@ -103,13 +166,9 @@ func readLimited(path string) ([]byte, error) {
 	defer func() { _ = f.Close() }()
 	// Read at most one byte more than the limit, and judge by what was read,
 	// not by the size the file system reports.
-	data, err := io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+	data, err := io.ReadAll(io.LimitReader(f, MaxInputSize+1))
 	if err != nil {
 		return nil, storageError(path, err)
-	}
-	if len(data) > MaxFileSize {
-		return nil, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRuleFile, Subject: path,
-			Detail: "the rule file is larger than 64 KiB", Hint: "a rule file only lists tag keys; reduce it below 64 KiB"}
 	}
 	return data, nil
 }
@@ -120,10 +179,19 @@ func storageError(path string, err error) error {
 }
 
 // Parse validates the content of a rule file. path is used in messages.
-func Parse(path string, data []byte) (*RuleSet, error) {
-	text := normalizeNewlines(string(data))
-	text = strings.TrimPrefix(text, utf8BOM)
-	l := &loader{path: path, rs: &RuleSet{SourcePath: path, KeyRules: []KeyRule{}, Warnings: []Warning{}}}
+func Parse(path string, data []byte, opts Options) (*RuleSet, error) {
+	l := &loader{path: path, opts: opts, rs: &RuleSet{
+		SourcePath: path, KeyRules: []KeyRule{}, RequiredTags: []RequiredTag{}, RemoveKeys: []RemoveKey{}, Warnings: []Warning{},
+	}}
+	text, err := l.decode(data)
+	if err != nil {
+		return nil, err
+	}
+	text = normalizeNewlines(text)
+	l.lines = strings.Count(text, "\n") + 1
+	if err := l.checkUTF8(text); err != nil {
+		return nil, err
+	}
 	// The parser's cost grows with the square of the nesting depth, so deep
 	// nesting is rejected before it runs.
 	if err := l.checkNesting(text); err != nil {
@@ -154,9 +222,10 @@ func Parse(path string, data []byte) (*RuleSet, error) {
 	if err := l.loadRoot(docs[0].Body); err != nil {
 		return nil, err
 	}
-	if err := l.checkAliases(); err != nil {
+	if err := l.checkConsistency(); err != nil {
 		return nil, err
 	}
+	l.rs.idx = newIndex(l.rs)
 	return l.rs, nil
 }
 
@@ -169,12 +238,21 @@ func normalizeNewlines(s string) string {
 
 type loader struct {
 	path string
+	opts Options
 	rs   *RuleSet
+	// lines is the number of lines of the decoded text; 0 before decoding.
+	lines int
 	// aliasLines holds, for each entry of rs.KeyRules, the line of each alias.
 	aliasLines []map[string]int
 }
 
+// fail returns a rule file error. A line past the end of the file (a syntax
+// error at the end, for example) is reported as the last line, so the line
+// always exists (fuzz test invariant).
 func (l *loader) fail(kind errkind.Kind, line int, key, detail, hint string) error {
+	if l.lines > 0 && line > l.lines {
+		line = l.lines
+	}
 	return &errkind.Error{Kind: kind, Reason: errkind.ReasonRuleFile, Subject: l.path, Line: line, Key: key, Detail: detail, Hint: hint}
 }
 
@@ -194,15 +272,16 @@ func (l *loader) syntaxError(err error) error {
 			detail += ": " + msg
 		}
 	}
-	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonRuleFile, Subject: l.path, Line: line,
-		Detail: detail, Hint: "fix the YAML syntax at or just before this line", Cause: err}
+	e := l.fail(errkind.InvalidInput, line, "", detail, "fix the YAML syntax at or just before this line").(*errkind.Error)
+	e.Cause = err
+	return e
 }
 
 func lineOf(n ast.Node) int {
 	if n == nil {
 		return 1
 	}
-	if tok := n.GetToken(); tok != nil && tok.Position != nil {
+	if tok := n.GetToken(); tok != nil && tok.Position != nil && tok.Position.Line > 0 {
 		return tok.Position.Line
 	}
 	return 1
@@ -269,6 +348,9 @@ func (l *loader) checkMapping(entries []*ast.MappingValueNode, depth int) error 
 
 // scalarText returns the text of a scalar node as written.
 func scalarText(n ast.Node) string {
+	if n == nil {
+		return ""
+	}
 	if s, ok := n.(*ast.StringNode); ok {
 		return s.Value
 	}
