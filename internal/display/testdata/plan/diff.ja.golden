@@ -1,0 +1,29 @@
+! 結果が不完全です
+    eu-west-1: AccessDenied(tag:GetResources)
+
+! 影響分析が不完全です
+    IAM 管理ポリシー arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+
+arn:aws:ec2:us-east-1:123456789012:instance/i-0abc
+! - env         = "Prod"
+! + Environment = "prod"
+  + CostCenter  = "cc-1"
+  + Owner       = "compute-team"
+
+arn:aws:s3:::my-logs-bucket   [IaC: CloudFormation スタック "logging"]
+! ~ Env -> Environment = "dev"
+  + Owner = "platform"
+
+arn:aws:sqs:us-east-1:123456789012:qa
+  - tmp-owner = "a|b`c<d>&\u{1B}[2J\u{202E}e"
+  ! 衝突: env="dev"  Environment="test"
+  ! 必須タグの値が未指定: CostCenter
+
+arn:aws:sqs:us-east-1:123456789012:qb
+  - Environment = "Prod"
+  + Environment = "prod"
+  + Owner       = "platform"
+  - tmp-owner   = "y"
+
+変更: 4 リソース(キー名の変更 2 · 値の変更 2 · 追加 4 · 削除 2)
+要約: 変更 4 · 衝突 1 · 影響あり 1 · 判定できない 1 · 値が未指定 1 · 消す候補 2 · IaC 1

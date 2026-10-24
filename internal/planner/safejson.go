@@ -14,12 +14,12 @@ import (
 // although they can rewrite a terminal or hide text: DEL (U+007F), the C1
 // control characters (U+0080 to U+009F) and the format characters (Cf, the
 // bidirectional controls such as U+202E included). Each becomes a lowercase
-// \uxxxx escape; a format character outside the basic plane becomes a UTF-16
-// surrogate pair (󠀁). JSON's own syntax is ASCII, so these
-// characters only occur inside strings, where the escapes keep the JSON
-// valid and decode to the same string. encoding/json already escapes the
-// other control characters, <, >, &, U+2028 and U+2029, and replaces invalid
-// UTF-8 with U+FFFD.
+// \uxxxx escape; a format character outside the basic plane, such as
+// U+E0001, becomes the two escapes of its UTF-16 surrogate pair. JSON's own
+// syntax is ASCII, so these characters only occur inside strings, where the
+// escapes keep the JSON valid and decode to the same string. encoding/json
+// already escapes the other control characters, <, >, &, U+2028 and U+2029,
+// and replaces invalid UTF-8 with U+FFFD.
 //
 // A UTF-8 character split between two calls of Write is carried over to the
 // next call; Close writes what is left.

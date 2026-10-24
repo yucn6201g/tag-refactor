@@ -1,0 +1,22 @@
+! Results are incomplete
+    eu-west-1: AccessDenied (tag:GetResources)
+
+Tag key variants (candidates; confirm them in your rule file)
+  environment             3 resources
+    Env                     1
+    Environment             1
+    env                     1
+  costcenter              2 resources
+    cost-center             1
+    cost_center             1
+
+Required tags missing (from tagrules.yaml)
+  Owner           4 resources  (1 more on resource types that cannot be tagged)
+
+Resources with no user tags: 2
+Untagged-resource discovery: partial (not checked in ap-northeast-1: no Resource Explorer index)
+  Required tag counts are a lower bound.
+Resource types not supported for tag changes: 1 type, 1 resource
+  ssm:patch-compliance    1
+
+Summary: 5 resources scanned in 2 of 3 regions · 2 variant groups · 1 required tag missing

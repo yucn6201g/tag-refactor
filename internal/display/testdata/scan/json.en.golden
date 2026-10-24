@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "toolVersion": "v0.1.0",
+  "command": "scan",
+  "exitCode": 1,
+  "accountId": "123456789012",
+  "complete": {
+    "inventory": false,
+    "untaggedDiscovery": "awsConfig",
+    "untaggedDiscoveryReason": "partial (not checked in ap-northeast-1: no Resource Explorer index)"
+  },
+  "failedRegions": [
+    {"region":"eu-west-1","reason":"AccessDenied (tag:GetResources)"}
+  ],
+  "unsupportedResourceTypes": [
+    {"resourceType":"ssm:patch-compliance","count":1}
+  ],
+  "summary": {
+    "scannedResources": 5,
+    "variantGroups": 2,
+    "missingRequired": {"Owner":4}
+  },
+  "details": {
+    "variantGroups": [
+      {"target":"key","normalizedKey":"environment","abbreviationOnly":false,"variants":[{"spelling":"Env","resourceCount":1},{"spelling":"Environment","resourceCount":1},{"spelling":"env","resourceCount":1}]},
+      {"target":"key","normalizedKey":"costcenter","abbreviationOnly":false,"variants":[{"spelling":"cost-center","resourceCount":1},{"spelling":"cost_center","resourceCount":1}]}
+    ],
+    "missingRequired": [
+      {"key":"Owner","arns":["arn:a","arn:b","arn:c","arn:d"]}
+    ]
+  }
+}

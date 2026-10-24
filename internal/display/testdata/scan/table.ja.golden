@@ -1,0 +1,22 @@
+! 結果が不完全です
+    eu-west-1: AccessDenied(tag:GetResources)
+
+同じ意味で書き方が違うタグキー(候補です。ルールファイルで確定してください)
+  environment             3 リソース
+    Env                     1
+    Environment             1
+    env                     1
+  costcenter              2 リソース
+    cost-center             1
+    cost_center             1
+
+必須タグの欠落(tagrules.yaml から)
+  Owner           4 リソース  (ほかにタグを変更できない種類のリソースが 1)
+
+利用者のタグがないリソース: 2
+一度もタグが付いていないリソースの検出: 一部(ap-northeast-1: no Resource Explorer index では調べていません)
+  必須タグの件数は下限です。
+タグを変更できないリソースの種類: 1 種類、1 リソース
+  ssm:patch-compliance    1
+
+要約: 5 リソースを調べました(2 / 3 リージョン)· 表記ゆれ 2 グループ · 必須タグ 1 キーの欠落

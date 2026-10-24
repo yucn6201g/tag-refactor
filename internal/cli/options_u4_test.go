@@ -1,0 +1,139 @@
+package cli_test
+
+// Unit tests of the U4 options (NFR3.8, NFR8.19), written after the
+// implementation, with the fake AWS of the acceptance tests.
+
+import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+	"testing"
+
+	"github.com/yucn6201g/tag-refactor/internal/testutil"
+)
+
+// NFR3.8: --format, --lang and --out call the same AWS operations as plan
+// and scan without them, and only read operations.
+func TestTheU4OptionsCallTheSameOperations(t *testing.T) {
+	opsOf := func(args ...string) []string {
+		w := newWorld(t)
+		w.givenResources(fullResources()...)
+		w.givenAttachedPolicies(map[string]string{policyP1: policyEnvCondition})
+		rules := w.givenRuleFile(fullRules)
+		for i, a := range args {
+			if a == "RULES" {
+				args[i] = rules
+			}
+			if a == "OUT" {
+				args[i] = w.outputPath("plan.json")
+			}
+		}
+		r := w.run(args...)
+		if r.code == 1 {
+			t.Fatalf("%v failed:\n%s", args, r.stderr)
+		}
+		for _, op := range w.fake.Ops() {
+			if !testutil.IsReadOperation(op) {
+				t.Fatalf("%v called %s", args, op)
+			}
+		}
+		return w.fake.Ops()
+	}
+	plan := opsOf("plan", "--rules", "RULES", "--region", "us-east-1")
+	for _, format := range []string{"table", "diff", "json", "markdown"} {
+		for _, lang := range []string{"en", "ja"} {
+			for _, out := range []bool{false, true} {
+				args := []string{"plan", "--rules", "RULES", "--region", "us-east-1", "--format", format, "--lang", lang}
+				if out {
+					args = append(args, "--out", "OUT")
+				}
+				if got := opsOf(args...); !slices.Equal(got, plan) {
+					t.Errorf("%v called %v, plain plan calls %v", args, got, plan)
+				}
+			}
+		}
+	}
+	scan := opsOf("scan", "--region", "us-east-1")
+	for _, format := range []string{"table", "json", "markdown"} {
+		if got := opsOf("scan", "--region", "us-east-1", "--format", format, "--lang", "ja"); !slices.Equal(got, scan) {
+			t.Errorf("scan --format %s called %v, plain scan calls %v", format, got, scan)
+		}
+	}
+}
+
+// NFR3.8 and security design §1: a wrong option stops the command before any
+// AWS call, in the order --format and --lang, --out, the rule file.
+func TestOptionMistakesStopBeforeAWS(t *testing.T) {
+	w := newWorld(t)
+	rules := w.givenRuleFile(fullRules)
+	broken := w.givenRuleFile("version: 1\nkeys: [\n")
+	existing := w.outputPath("exists.json")
+	if err := os.WriteFile(existing, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		args []string
+		what string
+	}{
+		{[]string{"plan", "--rules", broken, "--format", "csv", "--out", existing}, `--format "csv"`},
+		{[]string{"plan", "--rules", broken, "--lang", "de", "--out", existing}, `--lang "de"`},
+		{[]string{"plan", "--rules", broken, "--out", existing}, "already exists"},
+		{[]string{"plan", "--rules", broken, "--out", w.outputPath("new.json")}, "tagrules.yaml"},
+		{[]string{"plan", "--rules", rules, "--out", filepath.Join(existing, "plan.json")}, "does not exist"},
+		{[]string{"scan", "--format", "diff"}, `--format "diff"`},
+		{[]string{"rules", "suggest", "--output", existing}, "already exists"},
+	}
+	for _, tc := range cases {
+		r := w.run(tc.args...)
+		r.requireExit(t, 1)
+		requireTwoLineError(t, r)
+		requireContains(t, "stderr", r.stderr, tc.what)
+	}
+	if calls := w.fake.Calls(); len(calls) != 0 {
+		t.Fatalf("AWS was called: %v", w.fake.Ops())
+	}
+}
+
+// NFR8.19: credentials in the environment never reach the saved plan, the
+// four formats or standard error; the rule file is saved as --rules gave
+// it, a relative path included.
+func TestCredentialsNeverReachThePlanOrTheOutput(t *testing.T) {
+	w := newWorld(t)
+	w.givenResources(fullResources()...)
+	w.givenAttachedPolicies(map[string]string{policyP1: policyEnvCondition})
+	secrets := []string{"AKIAENVIRONMENT00000", "environmentSecretDoNotPrint000000000000", "ENVSESSIONTOKENDONOTPRINT0000000"}
+	t.Setenv("AWS_ACCESS_KEY_ID", secrets[0])
+	t.Setenv("AWS_SECRET_ACCESS_KEY", secrets[1])
+	t.Setenv("AWS_SESSION_TOKEN", secrets[2])
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if err := os.WriteFile("tagrules.yaml", []byte(fullRules), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var outputs []string
+	for _, format := range []string{"table", "diff", "json", "markdown"} {
+		r := w.run("plan", "--rules", "tagrules.yaml", "--region", "us-east-1", "--format", format, "--debug", "--out", "plan-"+format+".json")
+		r.requireExit(t, 2)
+		saved, err := os.ReadFile("plan-" + format + ".json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(saved), `"ruleFile": "tagrules.yaml"`) {
+			t.Fatalf("the relative rule file must be saved as given:\n%s", saved)
+		}
+		outputs = append(outputs, r.stdout, r.stderr, string(saved))
+	}
+	// The environment credentials were really used to sign the calls.
+	if calls := w.fake.Calls(); len(calls) == 0 || calls[0].AccessKeyID != secrets[0] {
+		t.Fatalf("the calls were not signed with the environment credentials: %+v", calls)
+	}
+	for _, out := range outputs {
+		for _, s := range append(secrets, testutil.FakeAccessKeyID, testutil.FakeSecretAccessKey, testutil.FakeSessionToken) {
+			if strings.Contains(out, s) {
+				t.Fatalf("a credential reached the output:\n%s", out)
+			}
+		}
+	}
+}
