@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("version: 1\nkeys:\n  Environment:\n    aliases: [env]\n    values:\n      production: [prod]\nrequired:\n  Owner:\n    default: platform\n    when:\n      - match: {resourceType: ec2:instance, region: us-east-1, tags: {Environment: production}}\n        value: infra\nremove: [tmp-owner]\n")

@@ -2,3 +2,7 @@
 # sources and test data (expected output, rule files, JSON) are identical on
 # Linux, macOS and Windows runners. CRLF rule files are built inside tests.
 * text=auto eol=lf
+
+# Fuzzing seeds (go test fuzz v1) are kept byte for byte: no newline
+# conversion. "**/" makes the pattern match below the repository root too.
+**/testdata/fuzz/** -text
