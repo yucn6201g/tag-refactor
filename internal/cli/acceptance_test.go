@@ -52,6 +52,7 @@ type result struct {
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
+	fixLanguage(t)
 	env := testutil.IsolateAWSEnv(t)
 	env.UseFakeCredentials("us-east-1")
 	fake := testutil.NewFakeAWS(t)
