@@ -194,6 +194,14 @@ Resources:
                   - resource-explorer-2:GetDefaultView
                   - resource-explorer-2:GetView
                   - resource-explorer-2:Search
+                  - iam:ListUsers
+                  - iam:ListRoles
+                  - iam:ListGroups
+                  - s3:ListAllMyBuckets
+                  - kms:ListKeys
+                  - sqs:ListQueues
+                  - sns:ListTopics
+                  - secretsmanager:ListSecrets
                 Resource: "*"
               - Sid: TagRefactorReadCustomerPolicies
                 Effect: Allow
@@ -201,6 +209,59 @@ Resources:
                   - iam:GetPolicyVersion
                 Resource:
                   Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/*
+              - Sid: TagRefactorReadUserInlinePolicies
+                Effect: Allow
+                Action:
+                  - iam:ListUserPolicies
+                  - iam:GetUserPolicy
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:user/*
+              - Sid: TagRefactorReadRoleInlinePolicies
+                Effect: Allow
+                Action:
+                  - iam:ListRolePolicies
+                  - iam:GetRolePolicy
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
+              - Sid: TagRefactorReadGroupInlinePolicies
+                Effect: Allow
+                Action:
+                  - iam:ListGroupPolicies
+                  - iam:GetGroupPolicy
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:group/*
+              - Sid: TagRefactorReadBucketPolicies
+                Effect: Allow
+                Action:
+                  - s3:GetBucketPolicy
+                  - s3:GetBucketLocation
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:s3:::*
+              - Sid: TagRefactorReadKeyPolicies
+                Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:GetKeyPolicy
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:kms:*:${AWS::AccountId}:key/*
+              - Sid: TagRefactorReadQueuePolicies
+                Effect: Allow
+                Action:
+                  - sqs:GetQueueAttributes
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:sqs:*:${AWS::AccountId}:*
+              - Sid: TagRefactorReadTopicPolicies
+                Effect: Allow
+                Action:
+                  - sns:GetTopicAttributes
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:sns:*:${AWS::AccountId}:*
+              - Sid: TagRefactorReadSecretPolicies
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetResourcePolicy
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:secretsmanager:*:${AWS::AccountId}:secret:*
 
 Outputs:
   R1Arn:

@@ -1,0 +1,9 @@
+# Rule file for the U5 checkpoint in the sandbox account
+# (construction/u5-impact/infrastructure-design/cicd-pipeline.md): two key
+# renames, env -> Environment and team -> Team, whose impact plan reports.
+version: 1
+keys:
+  Environment:
+    aliases: [env]
+  Team:
+    aliases: [team]

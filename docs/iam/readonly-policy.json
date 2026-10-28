@@ -14,7 +14,15 @@
         "resource-explorer-2:ListIndexes",
         "resource-explorer-2:GetDefaultView",
         "resource-explorer-2:GetView",
-        "resource-explorer-2:Search"
+        "resource-explorer-2:Search",
+        "iam:ListUsers",
+        "iam:ListRoles",
+        "iam:ListGroups",
+        "s3:ListAllMyBuckets",
+        "kms:ListKeys",
+        "sqs:ListQueues",
+        "sns:ListTopics",
+        "secretsmanager:ListSecrets"
       ],
       "Resource": "*"
     },
@@ -25,6 +33,75 @@
         "iam:GetPolicyVersion"
       ],
       "Resource": "arn:aws:iam::<account-id>:policy/*"
+    },
+    {
+      "Sid": "TagRefactorReadUserInlinePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListUserPolicies",
+        "iam:GetUserPolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:user/*"
+    },
+    {
+      "Sid": "TagRefactorReadRoleInlinePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListRolePolicies",
+        "iam:GetRolePolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:role/*"
+    },
+    {
+      "Sid": "TagRefactorReadGroupInlinePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "iam:ListGroupPolicies",
+        "iam:GetGroupPolicy"
+      ],
+      "Resource": "arn:aws:iam::<account-id>:group/*"
+    },
+    {
+      "Sid": "TagRefactorReadBucketPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketPolicy",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::*"
+    },
+    {
+      "Sid": "TagRefactorReadKeyPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy"
+      ],
+      "Resource": "arn:aws:kms:*:<account-id>:key/*"
+    },
+    {
+      "Sid": "TagRefactorReadQueuePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:*:<account-id>:*"
+    },
+    {
+      "Sid": "TagRefactorReadTopicPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetTopicAttributes"
+      ],
+      "Resource": "arn:aws:sns:*:<account-id>:*"
+    },
+    {
+      "Sid": "TagRefactorReadSecretPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:<account-id>:secret:*"
     }
   ]
 }

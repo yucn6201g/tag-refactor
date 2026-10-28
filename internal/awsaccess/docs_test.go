@@ -2,6 +2,7 @@ package awsaccess
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -123,28 +124,101 @@ func TestReadOnlyPolicyExampleMatchesTheOperationsTable(t *testing.T) {
 // with the account ID.
 const accountPlaceholder = "<account-id>"
 
-// iam:GetPolicyVersion is limited to the customer managed policies of the
-// account (review R-06); the other actions cannot be limited to resources.
+// singleResourceReads are the actions that read one resource, with the
+// resource the example policy limits them to (review R-06 for
+// iam:GetPolicyVersion, U5 security design §1 for the others). Every other
+// action is a list, which AWS cannot limit to resources, so it stays in the
+// statement with the resource "*".
+var singleResourceReads = map[string]string{
+	OpGetPolicyVersion:   "arn:aws:iam::" + accountPlaceholder + ":policy/*",
+	OpListUserPolicies:   "arn:aws:iam::" + accountPlaceholder + ":user/*",
+	OpGetUserPolicy:      "arn:aws:iam::" + accountPlaceholder + ":user/*",
+	OpListRolePolicies:   "arn:aws:iam::" + accountPlaceholder + ":role/*",
+	OpGetRolePolicy:      "arn:aws:iam::" + accountPlaceholder + ":role/*",
+	OpListGroupPolicies:  "arn:aws:iam::" + accountPlaceholder + ":group/*",
+	OpGetGroupPolicy:     "arn:aws:iam::" + accountPlaceholder + ":group/*",
+	OpGetBucketPolicy:    "arn:aws:s3:::*",
+	OpGetBucketLocation:  "arn:aws:s3:::*",
+	OpDescribeKey:        "arn:aws:kms:*:" + accountPlaceholder + ":key/*",
+	OpGetKeyPolicy:       "arn:aws:kms:*:" + accountPlaceholder + ":key/*",
+	OpGetQueueAttributes: "arn:aws:sqs:*:" + accountPlaceholder + ":*",
+	OpGetTopicAttributes: "arn:aws:sns:*:" + accountPlaceholder + ":*",
+	OpGetResourcePolicy:  "arn:aws:secretsmanager:*:" + accountPlaceholder + ":secret:*",
+}
+
+// The actions that read one resource are limited to the resources of the
+// account they read (review R-06, U5 security design §1); the lists stay
+// with the resource "*".
 func TestReadOnlyPolicyExampleLimitsPolicyVersionsToTheAccount(t *testing.T) {
 	doc, _ := readPolicyExample(t)
-	found := false
+	seen := map[string]bool{}
 	for _, st := range doc.Statement {
-		if !slices.Contains(st.Action, OpGetPolicyVersion) {
-			if st.Resource != "*" {
-				t.Errorf("statement for %v has resource %q, want *", st.Action, st.Resource)
+		for _, action := range st.Action {
+			seen[action] = true
+			want, single := singleResourceReads[action]
+			if !single {
+				want = "*"
 			}
-			continue
-		}
-		found = true
-		if len(st.Action) != 1 {
-			t.Errorf("%s must have its own statement, got %v", OpGetPolicyVersion, st.Action)
-		}
-		if st.Resource != "arn:aws:iam::"+accountPlaceholder+":policy/*" {
-			t.Errorf("%s resource = %q", OpGetPolicyVersion, st.Resource)
+			if st.Resource != want {
+				t.Errorf("%s has the resource %q, want %q", action, st.Resource, want)
+			}
 		}
 	}
-	if !found {
-		t.Fatalf("no statement allows %s", OpGetPolicyVersion)
+	for action := range singleResourceReads {
+		if !seen[action] {
+			t.Errorf("no statement allows %s", action)
+		}
+	}
+	if !slices.Contains(RequiredPermissions(), OpGetPolicyVersion) {
+		t.Fatalf("%s is not in the table", OpGetPolicyVersion)
+	}
+}
+
+// U5 security design §1: every Resource of the example is "*" or an ARN of
+// the service of all the statement's actions, in the account (or, for S3,
+// whose ARNs have no account, any bucket).
+func TestReadOnlyPolicyExampleResourcesMatchTheService(t *testing.T) {
+	doc, _ := readPolicyExample(t)
+	for _, st := range doc.Statement {
+		if why := checkResourceShape(st.Action, st.Resource); why != "" {
+			t.Errorf("statement %v: %s", st.Action, why)
+		}
+	}
+}
+
+// checkResourceShape returns why resource does not fit the actions, or "".
+func checkResourceShape(actions []string, resource string) string {
+	if resource == "*" {
+		return ""
+	}
+	for _, action := range actions {
+		service := action[:strings.Index(action, ":")]
+		if !strings.HasPrefix(resource, "arn:aws:"+service+":") {
+			return fmt.Sprintf("resource %q is not an ARN of %s", resource, service)
+		}
+		if service != "s3" && !strings.Contains(resource, ":"+accountPlaceholder+":") {
+			return fmt.Sprintf("resource %q is not limited to the account", resource)
+		}
+	}
+	return ""
+}
+
+func TestCheckResourceShape(t *testing.T) {
+	for _, c := range []struct {
+		actions  []string
+		resource string
+		ok       bool
+	}{
+		{[]string{"kms:GetKeyPolicy"}, "arn:aws:kms:*:<account-id>:key/*", true},
+		{[]string{"s3:GetBucketPolicy"}, "arn:aws:s3:::*", true},
+		{[]string{"sqs:ListQueues", "sns:ListTopics"}, "*", true},
+		{[]string{"kms:GetKeyPolicy"}, "arn:aws:sqs:*:<account-id>:*", false},
+		{[]string{"sqs:GetQueueAttributes"}, "arn:aws:sqs:*:*:*", false},
+		{[]string{"sqs:GetQueueAttributes", "sns:GetTopicAttributes"}, "arn:aws:sqs:*:<account-id>:*", false},
+	} {
+		if got := checkResourceShape(c.actions, c.resource) == ""; got != c.ok {
+			t.Errorf("%v %s accepted = %v, want %v", c.actions, c.resource, got, c.ok)
+		}
 	}
 }
 
@@ -244,6 +318,54 @@ func TestSandboxU2TemplateHasALocalIndexAndAnUnfilteredDefaultView(t *testing.T)
 		if !strings.HasPrefix(r.Type, "AWS::ResourceExplorer2::") {
 			t.Errorf("%s (%s): the U2 stack holds only Resource Explorer resources", name, r.Type)
 		}
+	}
+}
+
+// The U5 template holds the ten resources and six outputs of the U5
+// infrastructure design, keeps the policy variable for IAM, and nothing in
+// it reads a secret's value.
+func TestSandboxU5TemplateHasTheTenFixturesAndSixOutputs(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "test", "sandbox", "u5-fixtures.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var template struct {
+		Parameters map[string]any `yaml:"Parameters"`
+		Resources  map[string]struct {
+			Type string `yaml:"Type"`
+		} `yaml:"Resources"`
+		Outputs map[string]any `yaml:"Outputs"`
+	}
+	if err := yaml.Unmarshal(raw, &template); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		"RU5": "AWS::IAM::Role", "BU5": "AWS::S3::Bucket", "BU5Policy": "AWS::S3::BucketPolicy", "KU5": "AWS::KMS::Key",
+		"QU5": "AWS::SQS::Queue", "QU5Policy": "AWS::SQS::QueuePolicy", "TU5": "AWS::SNS::Topic", "TU5Policy": "AWS::SNS::TopicPolicy",
+		"SU5": "AWS::SecretsManager::Secret", "SU5Policy": "AWS::SecretsManager::ResourcePolicy",
+	}
+	if len(template.Resources) != len(want) {
+		t.Errorf("the template has %d resources, want %d", len(template.Resources), len(want))
+	}
+	for name, typ := range want {
+		if got := template.Resources[name].Type; got != typ {
+			t.Errorf("%s has type %q, want %q", name, got, typ)
+		}
+	}
+	for _, out := range []string{"RoleArn", "BucketArn", "KeyArn", "QueueArn", "TopicArn", "SecretArn"} {
+		if _, ok := template.Outputs[out]; !ok {
+			t.Errorf("output %s is missing", out)
+		}
+	}
+	if _, ok := template.Parameters["SsoPermissionSetName"]; !ok || len(template.Parameters) != 1 {
+		t.Errorf("parameters = %v, want SsoPermissionSetName only", template.Parameters)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "${!aws:PrincipalTag/team}") || strings.Count(text, "aws:ResourceTag/env: dev") != 6 {
+		t.Error("the policies must keep ${aws:PrincipalTag/team} for IAM and use aws:ResourceTag/env in all six")
+	}
+	if strings.Contains(text, "GetSecretValue") {
+		t.Error("nothing may read the secret's value")
 	}
 }
 
