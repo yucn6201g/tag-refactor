@@ -7,6 +7,7 @@ package cli_test
 
 import (
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -114,6 +115,44 @@ func TestTwoCredentialErrorsAtOnceGiveOneMessage(t *testing.T) {
 	// Which of the two comes first may change from run to run; both are
 	// about the credentials.
 	requireMatch(t, "stderr", r.stderr, `(?m)^Error: (the AWS credentials have expired|AWS rejected the credentials)`)
+}
+
+// NFR8.20: a resource policy of 1 MiB + 1 byte is unread and plan exits 1
+// with the other findings; one of exactly 1 MiB is read.
+func TestPolicyDocumentsOverOneMiBAreUnread(t *testing.T) {
+	statement := conditionStatement("Big", "StringEquals", "aws:ResourceTag/env", `"dev"`)
+	pad := func(size int) string {
+		base := `{"Version":"2012-10-17","Statement":[` + statement + `],"Pad":""}`
+		return base[:len(base)-2] + strings.Repeat("a", size-len(base)) + `"}`
+	}
+	for name, sc := range map[string]struct {
+		size int
+		exit int
+	}{"exactly 1 MiB": {1 << 20, 2}, "1 MiB + 1 byte": {1<<20 + 1, 1}} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			queue := testutil.QueueARN("us-east-1", "big")
+			w.givenResources(testutil.TaggedResource{ARN: queue, Tags: map[string]string{"env": "dev"}})
+			w.fake.HandlePolicyAccount(&testutil.PolicyAccount{
+				Managed: []testutil.ManagedPolicyDoc{{Name: "DevAccess", Document: policyEnvCondition}},
+				Queues:  []testutil.RegionalPolicy{{Region: "us-east-1", Name: "big", Policy: pad(sc.size)}},
+			})
+			rules := w.givenRuleFile(aliasRules)
+
+			r, v := w.planImpact("--rules", rules, "--region", "us-east-1")
+
+			r.requireExit(t, sc.exit)
+			v.requireFinding(t, testutil.ManagedPolicyARN("DevAccess"), "aws:ResourceTag/env", "affected")
+			_, read := v.finding(queue, "aws:ResourceTag/env", "affected")
+			unread := []unreadPolicy{{SourceKind: "sqsQueue", PolicyRef: queue, Region: "us-east-1", Reason: "the policy document is larger than 1 MiB"}}
+			if sc.exit == 1 && (read || !slices.Equal(v.Details.UnreadPolicies, unread)) {
+				t.Fatalf("unread = %+v", v.Details.UnreadPolicies)
+			}
+			if sc.exit == 2 && (!read || len(v.Details.UnreadPolicies) != 0) {
+				t.Fatalf("a document of exactly 1 MiB must be read: %+v", v.Details.UnreadPolicies)
+			}
+		})
+	}
 }
 
 // NFR8.22: --debug names the calls but never shows a document, and the
