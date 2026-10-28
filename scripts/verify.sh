@@ -226,8 +226,6 @@ u5_output() {
 }
 u5_role="$(u5_output RoleArn)"
 u5_bucket="$(u5_output BucketArn)"
-u5_key="$(u5_output KeyArn)"
-u5_queue="$(u5_output QueueArn)"
 u5_topic="$(u5_output TopicArn)"
 u5_secret="$(u5_output SecretArn)"
 # R2 must carry the U5 reads of docs/iam/readonly-policy.json.
@@ -241,8 +239,8 @@ printf '%s\n' "$r2_policy" | grep -q '"iam:GetRolePolicy"' ||
 echo "verify: running the U5 sandbox test (profile $readonly_profile)"
 LAST_OUTPUT=""
 if ! TAG_REFACTOR_IT_PROFILE="$readonly_profile" \
-  TAG_REFACTOR_IT_U5_ROLE_ARN="$u5_role" TAG_REFACTOR_IT_U5_BUCKET_ARN="$u5_bucket" TAG_REFACTOR_IT_U5_KEY_ARN="$u5_key" \
-  TAG_REFACTOR_IT_U5_QUEUE_ARN="$u5_queue" TAG_REFACTOR_IT_U5_TOPIC_ARN="$u5_topic" TAG_REFACTOR_IT_U5_SECRET_ARN="$u5_secret" \
+  TAG_REFACTOR_IT_U5_ROLE_ARN="$u5_role" TAG_REFACTOR_IT_U5_BUCKET_ARN="$u5_bucket" \
+  TAG_REFACTOR_IT_U5_TOPIC_ARN="$u5_topic" TAG_REFACTOR_IT_U5_SECRET_ARN="$u5_secret" \
   run_go_test -mod=readonly -count=1 -tags integration -run '^TestIntegrationU5' -v ./internal/cli/...; then
   fail "the U5 sandbox test failed"
 fi

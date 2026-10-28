@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  tag-refactor U5 checkpoint fixtures - an IAM role with an inline policy and
-  an S3 bucket, a KMS key, an SQS queue, an SNS topic and a Secrets Manager
+  tag-refactor U5 checkpoint fixtures - an IAM role with an inline policy, an
+  SQS queue it reads, and an S3 bucket, an SNS topic and a Secrets Manager
   secret with resource policies that use aws:ResourceTag/env, used to check
   the impact analysis of plan. Deploy only to a personal sandbox account in
   ap-northeast-1 with the stack tag project=tag-refactor-fixture, and delete
@@ -106,36 +106,9 @@ Resources:
               StringEquals:
                 aws:ResourceTag/env: dev
 
-  # KU5: the standard root statement keeps the key manageable.
-  KU5:
-    Type: AWS::KMS::Key
-    Properties:
-      Description: tag-refactor U5 fixture KU5 - key policy with aws:ResourceTag/env
-      EnableKeyRotation: true
-      PendingWindowInDays: 7
-      KeyPolicy:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: EnableRootPermissions
-            Effect: Allow
-            Principal:
-              AWS:
-                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: kms:*
-            Resource: "*"
-          - Sid: DescribeWhileDev
-            Effect: Allow
-            Principal:
-              AWS:
-                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: kms:DescribeKey
-            Resource: "*"
-            Condition:
-              StringEquals:
-                aws:ResourceTag/env: dev
-      Tags:
-        - Key: env
-          Value: dev
+  # No KMS key: KMS refuses a key policy with aws:ResourceTag ("These
+  # condition keys are not permitted in a key policy"), so key policies are
+  # checked with the fake AWS only (NFR2.1).
 
   QU5:
     Type: AWS::SQS::Queue
@@ -145,25 +118,10 @@ Resources:
         - Key: env
           Value: dev
 
-  QU5Policy:
-    Type: AWS::SQS::QueuePolicy
-    Properties:
-      Queues:
-        - Ref: QU5
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: ReadAttributesWhileDev
-            Effect: Allow
-            Principal:
-              AWS:
-                Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:root
-            Action: sqs:GetQueueAttributes
-            Resource:
-              Fn::GetAtt: [QU5, Arn]
-            Condition:
-              StringEquals:
-                aws:ResourceTag/env: dev
+  # QU5 has no queue policy: SQS refuses aws:ResourceTag in a queue policy
+  # ("Conditions must be from Global context key list"), so queue policies
+  # are checked with the fake AWS only (NFR2.1). The queue stays for the
+  # inline policy of RU5.
 
   TU5:
     Type: AWS::SNS::Topic
@@ -233,14 +191,6 @@ Outputs:
     Description: Bucket with the bucket policy
     Value:
       Fn::GetAtt: [BU5, Arn]
-  KeyArn:
-    Description: KMS key with the key policy
-    Value:
-      Fn::GetAtt: [KU5, Arn]
-  QueueArn:
-    Description: Queue with the queue policy
-    Value:
-      Fn::GetAtt: [QU5, Arn]
   TopicArn:
     Description: Topic with the topic policy
     Value:

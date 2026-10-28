@@ -321,10 +321,11 @@ func TestSandboxU2TemplateHasALocalIndexAndAnUnfilteredDefaultView(t *testing.T)
 	}
 }
 
-// The U5 template holds the ten resources and six outputs of the U5
-// infrastructure design, keeps the policy variable for IAM, and nothing in
-// it reads a secret's value.
-func TestSandboxU5TemplateHasTheTenFixturesAndSixOutputs(t *testing.T) {
+// The U5 template holds the resources and outputs of the U5 infrastructure
+// design without the KMS key and the queue policy, which KMS and SQS refuse
+// (their policies may not use aws:ResourceTag), keeps the policy variable
+// for IAM, and nothing in it reads a secret's value.
+func TestSandboxU5TemplateHasTheEightFixturesAndFourOutputs(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "test", "sandbox", "u5-fixtures.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -340,8 +341,8 @@ func TestSandboxU5TemplateHasTheTenFixturesAndSixOutputs(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{
-		"RU5": "AWS::IAM::Role", "BU5": "AWS::S3::Bucket", "BU5Policy": "AWS::S3::BucketPolicy", "KU5": "AWS::KMS::Key",
-		"QU5": "AWS::SQS::Queue", "QU5Policy": "AWS::SQS::QueuePolicy", "TU5": "AWS::SNS::Topic", "TU5Policy": "AWS::SNS::TopicPolicy",
+		"RU5": "AWS::IAM::Role", "BU5": "AWS::S3::Bucket", "BU5Policy": "AWS::S3::BucketPolicy",
+		"QU5": "AWS::SQS::Queue", "TU5": "AWS::SNS::Topic", "TU5Policy": "AWS::SNS::TopicPolicy",
 		"SU5": "AWS::SecretsManager::Secret", "SU5Policy": "AWS::SecretsManager::ResourcePolicy",
 	}
 	if len(template.Resources) != len(want) {
@@ -352,7 +353,11 @@ func TestSandboxU5TemplateHasTheTenFixturesAndSixOutputs(t *testing.T) {
 			t.Errorf("%s has type %q, want %q", name, got, typ)
 		}
 	}
-	for _, out := range []string{"RoleArn", "BucketArn", "KeyArn", "QueueArn", "TopicArn", "SecretArn"} {
+	outputs := []string{"RoleArn", "BucketArn", "TopicArn", "SecretArn"}
+	if len(template.Outputs) != len(outputs) {
+		t.Errorf("the template has %d outputs, want %d", len(template.Outputs), len(outputs))
+	}
+	for _, out := range outputs {
 		if _, ok := template.Outputs[out]; !ok {
 			t.Errorf("output %s is missing", out)
 		}
@@ -361,8 +366,8 @@ func TestSandboxU5TemplateHasTheTenFixturesAndSixOutputs(t *testing.T) {
 		t.Errorf("parameters = %v, want SsoPermissionSetName only", template.Parameters)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "${!aws:PrincipalTag/team}") || strings.Count(text, "aws:ResourceTag/env: dev") != 6 {
-		t.Error("the policies must keep ${aws:PrincipalTag/team} for IAM and use aws:ResourceTag/env in all six")
+	if !strings.Contains(text, "${!aws:PrincipalTag/team}") || strings.Count(text, "aws:ResourceTag/env: dev") != 4 {
+		t.Error("the policies must keep ${aws:PrincipalTag/team} for IAM and use aws:ResourceTag/env in all four")
 	}
 	if strings.Contains(text, "GetSecretValue") {
 		t.Error("nothing may read the secret's value")

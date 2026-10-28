@@ -11,12 +11,13 @@ package cli_test
 //	TAG_REFACTOR_IT_PROFILE=tag-refactor-readonly \
 //	TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<sandbox account ID> \
 //	TAG_REFACTOR_IT_U5_ROLE_ARN=... TAG_REFACTOR_IT_U5_BUCKET_ARN=... \
-//	TAG_REFACTOR_IT_U5_KEY_ARN=... TAG_REFACTOR_IT_U5_QUEUE_ARN=... \
 //	TAG_REFACTOR_IT_U5_TOPIC_ARN=... TAG_REFACTOR_IT_U5_SECRET_ARN=... \
 //	go test -mod=readonly -tags integration -run '^TestIntegrationU5' ./internal/cli/...
 //
 // It assumes every policy of the sandbox account can be read with R2: the
 // account holds no customer resource policies besides the fixture stacks.
+// The stack has no key policy and no queue policy, since KMS and SQS refuse
+// aws:ResourceTag in them; those are checked with the fake AWS only.
 // It has no subtests, so verify.sh can count its one PASS line.
 
 import (
@@ -39,7 +40,6 @@ func TestIntegrationU5ImpactSandbox(t *testing.T) {
 	profile, account := os.Getenv("TAG_REFACTOR_IT_PROFILE"), os.Getenv("TAG_REFACTOR_SANDBOX_ACCOUNT_ID")
 	stack := map[string]string{
 		"role": os.Getenv("TAG_REFACTOR_IT_U5_ROLE_ARN"), "s3Bucket": os.Getenv("TAG_REFACTOR_IT_U5_BUCKET_ARN"),
-		"kmsKey": os.Getenv("TAG_REFACTOR_IT_U5_KEY_ARN"), "sqsQueue": os.Getenv("TAG_REFACTOR_IT_U5_QUEUE_ARN"),
 		"snsTopic": os.Getenv("TAG_REFACTOR_IT_U5_TOPIC_ARN"), "secretsManagerSecret": os.Getenv("TAG_REFACTOR_IT_U5_SECRET_ARN"),
 	}
 	if profile == "" || account == "" || slices.Contains(mapValues(stack), "") {
@@ -83,11 +83,11 @@ func TestIntegrationU5ImpactSandbox(t *testing.T) {
 	}
 	r.requireExit(t, 2)
 
-	// 5. The fixtures are found: the inline policy of RU5, the five
+	// 5. The fixtures are found: the inline policy of RU5, the three
 	// resource policies and P1 of the U1 stack.
 	v.requireFinding(t, stack["role"]+"#u5-inline", "aws:ResourceTag/env", "affected")
 	owner := changeOwners(v.impactView)
-	for _, kind := range []string{"s3Bucket", "kmsKey", "sqsQueue", "snsTopic", "secretsManagerSecret"} {
+	for _, kind := range []string{"s3Bucket", "snsTopic", "secretsManagerSecret"} {
 		f := v.requireFinding(t, stack[kind], "aws:ResourceTag/env", "affected")
 		if f.SourceKind != kind {
 			t.Errorf("%s has the kind %s, want %s", stack[kind], f.SourceKind, kind)
