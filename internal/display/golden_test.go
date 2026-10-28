@@ -71,7 +71,7 @@ func goldenPlan(t testing.TB) *planner.Plan {
 				ChangeIDs: []string{"c-000002"}},
 		},
 		UnreadPolicies: []planner.UnreadPolicy{{SourceKind: planner.SourceIAMManaged, PolicyRef: "arn:aws:iam::123456789012:policy/Hidden",
-			Reason: "access denied to iam:GetPolicyVersion"}},
+			Reason: "the default version has no document in iam:GetAccountAuthorizationDetails"}},
 	})
 	return p
 }

@@ -19,7 +19,8 @@
 #    It needs no queue or index either, so it also runs before the U2 wait.
 # U5. Checks with the admin profile that the U5 stack (test/sandbox/u5-fixtures.yaml)
 #    is complete and reads its six output ARNs, and that the role R2 of the
-#    U1 stack allows iam:GetRolePolicy (the U5 reads). Runs the U5 sandbox
+#    U1 stack allows iam:GetAccountAuthorizationDetails (the U5 IAM read).
+#    Runs the U5 sandbox
 #    test (internal/cli/integration_u5_test.go) with the read-only profile; a
 #    skipped test, or anything but exactly one PASS line of
 #    TestIntegrationU5ImpactSandbox, is a failure. Then runs the same plan
@@ -233,8 +234,8 @@ r2_arn="$(aws_admin cloudformation describe-stacks --stack-name "$u1_stack" \
   --query "Stacks[0].Outputs[?OutputKey=='R2Arn'].OutputValue" --output text)" || fail "cannot read the output R2Arn of $u1_stack"
 r2_policy="$(aws_admin iam get-role-policy --role-name "${r2_arn##*/}" --policy-name tag-refactor-readonly \
   --query PolicyDocument --output json)" || fail "cannot read the inline policy of R2"
-printf '%s\n' "$r2_policy" | grep -q '"iam:GetRolePolicy"' ||
-  fail "R2 does not allow iam:GetRolePolicy; update the role R2 of the U1 fixtures stack (test/sandbox/u1-fixtures.yaml) as cicd-pipeline.md describes"
+printf '%s\n' "$r2_policy" | grep -q '"iam:GetAccountAuthorizationDetails"' ||
+  fail "R2 does not allow iam:GetAccountAuthorizationDetails; update the role R2 of the U1 fixtures stack (test/sandbox/u1-fixtures.yaml) as cicd-pipeline.md describes"
 
 echo "verify: running the U5 sandbox test (profile $readonly_profile)"
 LAST_OUTPUT=""

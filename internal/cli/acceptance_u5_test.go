@@ -240,11 +240,13 @@ func TestAcceptanceU5_AC3_2_4_VariablesAreUndecidedAndWildcardsAreMatched(t *tes
 	requireContains(t, "stdout", r.stdout, "1 affected · 2 undecided")
 }
 
-// AC3.2.5: Given the inline policies of roles cannot be listed, When plan
-// runs, Then the kind that could not be read and the reason are shown, the
+// AC3.2.5: Given the IAM policies of the account cannot be read, When plan
+// runs, Then the kinds that could not be read and the reason are shown, the
 // impact analysis is reported as incomplete, the exit code is 1, and the
-// findings of the other policies are still shown. A list denied in one
-// region names that region; the other regions are read (BR1.5).
+// findings of the other policies are still shown. IAM is read in one go
+// (iam:GetAccountAuthorizationDetails), so a denied read leaves both IAM
+// kinds unread as whole lists and matches no IAM policy. A list denied in
+// one region names that region; the other regions are read (BR1.5).
 func TestAcceptanceU5_AC3_2_5_DeniedListsMakeTheAnalysisIncomplete(t *testing.T) {
 	w := newWorld(t)
 	queueEU := testutil.QueueARN("eu-west-1", "eu-queue")
@@ -252,14 +254,14 @@ func TestAcceptanceU5_AC3_2_5_DeniedListsMakeTheAnalysisIncomplete(t *testing.T)
 		"us-east-1": testutil.TagPages([]testutil.TaggedResource{{ARN: arnQA, Tags: map[string]string{"env": "dev"}}}),
 		"eu-west-1": testutil.TagPages([]testutil.TaggedResource{{ARN: queueEU, Tags: map[string]string{"env": "dev"}}}),
 	}, testutil.TagPages(nil)))
-	denied := testutil.QueryError(http.StatusForbidden, "AccessDenied", "User: tester is not authorized to perform: iam:ListRolePolicies")
+	denied := testutil.QueryError(http.StatusForbidden, "AccessDenied", "User: tester is not authorized to perform: iam:GetAccountAuthorizationDetails")
 	w.fake.HandlePolicyAccount(&testutil.PolicyAccount{
 		Managed: []testutil.ManagedPolicyDoc{{Name: "DevAccess", Document: policyEnvCondition}},
 		Roles:   []testutil.Principal{{Name: "app", Inline: map[string]string{"hidden": policyEnvCondition}}},
 		Queues: []testutil.RegionalPolicy{{Region: "us-east-1", Name: "qa",
 			Policy: policyDoc(conditionStatement("Q", "StringEquals", "aws:ResourceTag/env", `"dev"`))}},
 		Fail: map[string]testutil.Reply{
-			testutil.OpListRolePolicies: denied,
+			testutil.OpGetAccountAuthorizationDetails: denied,
 			testutil.OpListQueues + " eu-west-1": testutil.SQSError(http.StatusBadRequest, "AccessDenied", "AccessDenied",
 				"User: tester is not authorized to perform: sqs:ListQueues"),
 		},
@@ -274,14 +276,19 @@ func TestAcceptanceU5_AC3_2_5_DeniedListsMakeTheAnalysisIncomplete(t *testing.T)
 	if !strings.HasPrefix(r.stdout, "! Impact analysis is incomplete\n") {
 		t.Fatalf("stdout must start with the incomplete marker:\n%s", r.stdout)
 	}
-	requireMatch(t, "stdout", r.stdout, `(?m)^    IAM inline polic.*`+regexp.QuoteMeta(testutil.RoleARN("app"))+`.*: access denied to iam:ListRolePolicies$`)
+	requireMatch(t, "stdout", r.stdout, `(?m)^    IAM managed policies: access denied to iam:GetAccountAuthorizationDetails$`)
+	requireMatch(t, "stdout", r.stdout, `(?m)^    IAM inline policies: access denied to iam:GetAccountAuthorizationDetails$`)
 	requireMatch(t, "stdout", r.stdout, `(?m)^    SQS queue policies in eu-west-1: access denied to sqs:ListQueues$`)
-	requireMatch(t, "stdout", r.stdout, `(?m)^  ! IAM policy\s+`+regexp.QuoteMeta(testutil.ManagedPolicyARN("DevAccess"))+`$`)
 	requireMatch(t, "stdout", r.stdout, `(?m)^  ! SQS queue policy\s+`+regexp.QuoteMeta(testutil.QueueARN("us-east-1", "qa"))+`$`)
+	requireNotContains(t, "stdout", r.stdout, testutil.ManagedPolicyARN("DevAccess"))
 	requireNotContains(t, "stdout", r.stdout, "not authorized")
 	requireContains(t, "stderr", r.stderr, "Exit code: 1")
+	if len(v.Details.ImpactFindings) != 1 || v.Details.ImpactFindings[0].SourceKind != "sqsQueue" {
+		t.Fatalf("only the queue policy can be matched: %+v", v.Details.ImpactFindings)
+	}
 	want := []unreadPolicy{
-		{SourceKind: "iamInline", PolicyRef: testutil.RoleARN("app"), Reason: "access denied to iam:ListRolePolicies"},
+		{SourceKind: "iamManaged", Reason: "access denied to iam:GetAccountAuthorizationDetails"},
+		{SourceKind: "iamInline", Reason: "access denied to iam:GetAccountAuthorizationDetails"},
 		{SourceKind: "sqsQueue", Region: "eu-west-1", Reason: "access denied to sqs:ListQueues"},
 	}
 	if !slices.Equal(v.Details.UnreadPolicies, want) || *v.Complete.ImpactAnalysis {

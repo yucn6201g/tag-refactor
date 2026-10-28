@@ -414,13 +414,14 @@ func TestFindingsAndUnreadPoliciesAreOrdered(t *testing.T) {
 	cond := condStatement("StringEquals", "aws:ResourceTag/env", `"x"`)
 	a := &accountReader{
 		managed: map[string]string{"arn:aws:iam::123456789012:policy/b": doc(cond, `{"Resource":"${aws:ResourceTag/env}"}`),
-			"arn:aws:iam::123456789012:policy/a": doc(condStatement("StringLike", "aws:ResourceTag/env", `"x"`), cond)},
+			"arn:aws:iam::123456789012:policy/a": doc(condStatement("StringLike", "aws:ResourceTag/env", `"x"`), cond),
+			"arn:aws:iam::123456789012:policy/c": doc(cond)},
+		missing: map[string]bool{"arn:aws:iam::123456789012:policy/c": true},
 		queues:  map[string]map[string]string{"eu-west-1": {"arn:aws:sqs:eu-west-1:123456789012:q": doc(cond)}},
 		buckets: map[string]map[string]string{"us-east-1": {"arn:aws:s3:::b": doc(cond)}},
 		errs: map[string]error{
 			"ListTopics eu-west-1": &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpListTopics},
 			"ListTopics us-east-1": &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpListTopics},
-			"ListPrincipals group": &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpListGroups},
 			"GetKeyPolicy":         &errkind.Error{Kind: errkind.Transient, Op: awsaccess.OpGetKeyPolicy},
 		},
 		keys: map[string]map[string]string{"eu-west-1": {"arn:aws:kms:eu-west-1:123456789012:key/k": "{}"}},
@@ -449,7 +450,7 @@ func TestFindingsAndUnreadPoliciesAreOrdered(t *testing.T) {
 		unread = append(unread, u.SourceKind+"|"+u.Region+"|"+u.PolicyRef+"|"+u.Reason)
 	}
 	wantUnread := []string{
-		"iamInline|||access denied to iam:ListGroups",
+		"iamManaged||arn:aws:iam::123456789012:policy/c|" + reasonNoDefaultDocument,
 		"kmsKey|eu-west-1|arn:aws:kms:eu-west-1:123456789012:key/k|AWS did not answer kms:GetKeyPolicy (temporary failure)",
 		"snsTopic|eu-west-1||access denied to sns:ListTopics",
 		"snsTopic|us-east-1||access denied to sns:ListTopics",
@@ -459,22 +460,28 @@ func TestFindingsAndUnreadPoliciesAreOrdered(t *testing.T) {
 	}
 }
 
-// BR1.1, BR1.4: managed policies are read when attached or used as a
-// permissions boundary only; AWS managed KMS keys are not read.
+// BR1.1, BR1.4: managed policies are matched when attached or used as a
+// permissions boundary only, so one that is neither is never unread either;
+// AWS managed KMS keys are not read. The IAM policies are read once.
 func TestOnlyUsedManagedPoliciesAndCustomerKeysAreRead(t *testing.T) {
 	cond := doc(condStatement("StringEquals", "aws:ResourceTag/env", `"x"`))
 	key := "arn:aws:kms:us-east-1:123456789012:key/aws"
 	a := &accountReader{
 		boundary: map[string]string{"arn:aws:iam::123456789012:policy/boundary": cond},
-		detached: map[string]string{"arn:aws:iam::123456789012:policy/detached": cond},
-		keys:     map[string]map[string]string{testRegion: {key: cond}},
-		awsKeys:  map[string]bool{key: true},
+		detached: map[string]string{"arn:aws:iam::123456789012:policy/detached": cond,
+			"arn:aws:iam::123456789012:policy/detached-without-document": cond},
+		missing: map[string]bool{"arn:aws:iam::123456789012:policy/detached-without-document": true},
+		keys:    map[string]map[string]string{testRegion: {key: cond}},
+		awsKeys: map[string]bool{key: true},
 	}
 	res := runAnalysis(t, a, change("c-000001", key, planner.KindRemoveKey, "env", "", "x", ""))
 	if got := summary(res); got != "affected arn:aws:iam::123456789012:policy/boundary aws:ResourceTag/env c-000001" {
 		t.Fatalf("findings: %s", got)
 	}
-	if a.count("GetKeyPolicy") != 0 || a.count("GetPolicyDocument") != 1 {
+	if !res.Complete || len(res.UnreadPolicies) != 0 {
+		t.Fatalf("a policy that is not used is not unread: %+v", res.UnreadPolicies)
+	}
+	if a.count("GetKeyPolicy") != 0 || a.count("ReadIAMPolicies") != 1 {
 		t.Fatalf("calls = %v", a.calls)
 	}
 }
@@ -512,28 +519,68 @@ func TestResourcesWithoutPoliciesAndUnlocatedBuckets(t *testing.T) {
 	}
 }
 
-// BR1.5: an inline policy list or document that fails is unread with the
-// principal's reference; a principal deleted after the list is not.
-func TestInlinePolicyFailures(t *testing.T) {
-	a := &accountReader{
-		users: map[string]map[string]string{"gone": {"p": "{}"}, "denied": {"p": "{}"}, "ok": {"a": "{}", "b": "{}"}},
-		errs: map[string]error{
-			"ListInlinePolicyNames arn:aws:iam::123456789012:user/gone":   &errkind.Error{Kind: errkind.NotFound},
-			"ListInlinePolicyNames arn:aws:iam::123456789012:user/denied": errors.New("no kind"),
-			"GetInlinePolicyDocument arn:aws:iam::123456789012:user/ok#a": &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetUserPolicy},
-			"GetInlinePolicyDocument arn:aws:iam::123456789012:user/ok#b": &errkind.Error{Kind: errkind.NotFound},
-		},
-	}
-	res, err := New(a, nil).Analyze(context.Background(), []planner.TagChangeInput{change("c-000001", otherARN, planner.KindRemoveKey, "env", "", "x", "")})
+// analyzeIncomplete is runAnalysis for an account with unread policies.
+func analyzeIncomplete(t *testing.T, a *accountReader, changes ...planner.TagChangeInput) planner.ImpactResult {
+	t.Helper()
+	res, err := New(a, []string{testRegion}).Analyze(context.Background(), changes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []planner.UnreadPolicy{
-		{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:user/denied", Reason: "unexpected error (Internal) in iam:ListUserPolicies"},
-		{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:user/ok#a", Reason: "access denied to iam:GetUserPolicy"},
+	return res
+}
+
+// BR1.5: an inline policy the read gave without a document is unread with
+// its reference <principal ARN>#<name>; the other policies of the principal
+// are matched.
+func TestInlinePolicyWithoutDocumentIsUnread(t *testing.T) {
+	cond := doc(condStatement("StringEquals", "aws:ResourceTag/env", `"x"`))
+	a := &accountReader{
+		users:   map[string]map[string]string{"ok": {"a": cond, "b": cond}},
+		groups:  map[string]map[string]string{"g": {"p": cond}},
+		missing: map[string]bool{"arn:aws:iam::123456789012:user/ok#a": true},
 	}
-	if !slices.Equal(res.UnreadPolicies, want) {
+	res := analyzeIncomplete(t, a, change("c-000001", otherARN, planner.KindRemoveKey, "env", "", "x", ""))
+	want := []planner.UnreadPolicy{
+		{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:user/ok#a", Reason: reasonNoInlineDocument},
+	}
+	if !slices.Equal(res.UnreadPolicies, want) || res.Complete {
 		t.Fatalf("unread = %+v", res.UnreadPolicies)
+	}
+	if got := summary(res); got != "affected arn:aws:iam::123456789012:group/g#p aws:ResourceTag/env c-000001\n"+
+		"affected arn:aws:iam::123456789012:user/ok#b aws:ResourceTag/env c-000001" {
+		t.Fatalf("findings:\n%s", got)
+	}
+}
+
+// BR1.5: a read of the IAM policies that fails, on any page, leaves both
+// kinds of IAM policy unread as whole lists naming the operation, and
+// matches no IAM policy at all; the resource policies are still matched.
+func TestFailedIAMReadLeavesBothKindsUnreadAndMatchesNoIAMPolicy(t *testing.T) {
+	cond := doc(condStatement("StringEquals", "aws:ResourceTag/env", `"x"`))
+	topic := "arn:aws:sns:" + testRegion + ":123456789012:t"
+	for reason, err := range map[string]error{
+		"access denied to iam:GetAccountAuthorizationDetails": &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetAccountAuthorizationDetails},
+		"AWS did not answer iam:GetAccountAuthorizationDetails (temporary failure)": &errkind.Error{Kind: errkind.Transient,
+			Reason: errkind.ReasonRetriesExhausted, Op: awsaccess.OpGetAccountAuthorizationDetails},
+		"unexpected error (Internal) in iam:GetAccountAuthorizationDetails": errors.New("no kind"),
+	} {
+		a := &accountReader{
+			managed: map[string]string{"arn:aws:iam::123456789012:policy/p": cond},
+			roles:   map[string]map[string]string{"app": {"p": cond}},
+			topics:  map[string]map[string]string{testRegion: {topic: cond}},
+			errs:    map[string]error{"ReadIAMPolicies": err},
+		}
+		res := analyzeIncomplete(t, a, change("c-000001", topic, planner.KindRemoveKey, "env", "", "x", ""))
+		want := []planner.UnreadPolicy{
+			{SourceKind: planner.SourceIAMManaged, Reason: reason},
+			{SourceKind: planner.SourceIAMInline, Reason: reason},
+		}
+		if !slices.Equal(res.UnreadPolicies, want) || res.Complete {
+			t.Errorf("%s: unread = %+v", reason, res.UnreadPolicies)
+		}
+		if got := summary(res); got != "affected "+topic+" aws:ResourceTag/env c-000001" {
+			t.Errorf("%s: only the topic policy can be matched:\n%s", reason, got)
+		}
 	}
 }
 

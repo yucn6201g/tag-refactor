@@ -95,12 +95,6 @@ var errorCodes = map[string]kindReason{}
 // bucket without a policy.
 var opErrorCodes = map[string]map[string]kindReason{
 	OpListResources:      {"UnauthorizedException": {errkind.AccessDenied, errkind.ReasonNone}},
-	OpListUserPolicies:   notFound("NoSuchEntity"),
-	OpListRolePolicies:   notFound("NoSuchEntity"),
-	OpListGroupPolicies:  notFound("NoSuchEntity"),
-	OpGetUserPolicy:      notFound("NoSuchEntity"),
-	OpGetRolePolicy:      notFound("NoSuchEntity"),
-	OpGetGroupPolicy:     notFound("NoSuchEntity"),
 	OpGetBucketLocation:  notFound("NoSuchBucket"),
 	OpGetBucketPolicy:    notFound("NoSuchBucket"),
 	OpDescribeKey:        notFound("NotFoundException"),

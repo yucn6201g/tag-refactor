@@ -9,7 +9,7 @@
 ## ! 影響分析が不完全です
 | ポリシー | リージョン | 理由 |
 |---|---|---|
-| IAM 管理ポリシー ` arn:aws:iam::123456789012:policy/Hidden ` |  | ` access denied to iam:GetPolicyVersion ` |
+| IAM 管理ポリシー ` arn:aws:iam::123456789012:policy/Hidden ` |  | ` the default version has no document in iam:GetAccountAuthorizationDetails ` |
 
 ## 変更(4 リソース)
 | 種類 | 内容 | リソース |

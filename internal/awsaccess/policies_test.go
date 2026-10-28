@@ -33,72 +33,136 @@ func names(prefix string, n int) []testutil.Principal {
 	return out
 }
 
-func TestIAMPrincipalsAndInlinePoliciesAreReadPageByPage(t *testing.T) {
-	roles := names("r", 1001)
-	roles[1000].Inline = map[string]string{"b": `{"Statement":[]}`, "a": `{"x":"100%"}`}
-	s, fake, _ := policySession(t, &testutil.PolicyAccount{Users: names("u", 2), Roles: roles})
-	ctx := context.Background()
+// U5 BR1.1, BR1.2: one read gives every customer managed policy, used or
+// not, with its counts and its default version's document, and every inline
+// policy of the users, roles and groups. Each page asks for the users,
+// roles, groups and customer managed policies only, with the largest page
+// size; IAM giving fewer items than asked for while more follow is read to
+// the end.
+func TestReadIAMPoliciesReadsEveryPageWithCountsAndDefaultVersions(t *testing.T) {
+	current, older := `{"Statement":[{"Sid":"Current 1","Effect":"Allow"}]}`, `{"Statement":[{"Sid":"Older","Effect":"Deny"}]}`
+	s, fake, sink := policySession(t, &testutil.PolicyAccount{
+		Managed: []testutil.ManagedPolicyDoc{
+			{Name: "attached", Document: `{"a":1}`},
+			{Name: "boundary", NotAttached: true, Boundaries: 3, Document: current, OlderDocument: older},
+			{Name: "unused", NotAttached: true, Document: `{"u":1}`},
+		},
+		Users:            []testutil.Principal{{Name: "u1", Inline: map[string]string{"p": `{"x":"100%"}`}}, {Name: "u2"}},
+		Roles:            []testutil.Principal{{Name: "app", Inline: map[string]string{"b": `{"Statement":[]}`, "a": "{}"}}},
+		Groups:           []testutil.Principal{{Name: "g", Inline: map[string]string{"p": `{"g":1}`}}},
+		DetailsPageItems: 2,
+	})
 
-	got, err := s.ListPrincipals(ctx, PrincipalRole)
-	if err != nil || len(got) != 1001 || got[1000] != (IAMPrincipal{Kind: PrincipalRole, Name: "r1000", ARN: testutil.RoleARN("r1000")}) {
-		t.Fatalf("roles: %d %+v %v", len(got), got[len(got)-1], err)
+	got, err := s.ReadIAMPolicies(context.Background())
+	if err != nil {
+		t.Fatal(err)
 	}
-	if fake.Count(testutil.OpListRoles) != 2 {
-		t.Fatalf("ListRoles called %d times, want 2 pages of 1000", fake.Count(testutil.OpListRoles))
+	wantManaged := []ManagedPolicy{
+		{ARN: testutil.ManagedPolicyARN("attached"), AttachmentCount: 1, Document: testutil.EncodePolicyDocument(`{"a":1}`)},
+		{ARN: testutil.ManagedPolicyARN("boundary"), BoundaryCount: 3, Document: testutil.EncodePolicyDocument(current)},
+		{ARN: testutil.ManagedPolicyARN("unused"), Document: testutil.EncodePolicyDocument(`{"u":1}`)},
 	}
-	users, err := s.ListPrincipals(ctx, PrincipalUser)
-	if err != nil || len(users) != 2 || users[0].Kind != PrincipalUser {
-		t.Fatalf("users: %+v %v", users, err)
+	if !slices.Equal(got.Managed, wantManaged) {
+		t.Fatalf("managed:\n%+v\nwant:\n%+v", got.Managed, wantManaged)
 	}
-	if groups, err := s.ListPrincipals(ctx, PrincipalGroup); err != nil || len(groups) != 0 {
-		t.Fatalf("groups: %+v %v", groups, err)
+	user, role, group := IAMPrincipal{PrincipalUser, "u1", testutil.UserARN("u1")}, IAMPrincipal{PrincipalRole, "app", testutil.RoleARN("app")},
+		IAMPrincipal{PrincipalGroup, "g", testutil.GroupARN("g")}
+	wantInline := []InlinePolicy{
+		{Principal: user, Name: "p", Document: testutil.EncodePolicyDocument(`{"x":"100%"}`)},
+		{Principal: role, Name: "a", Document: "%7B%7D"},
+		{Principal: role, Name: "b", Document: testutil.EncodePolicyDocument(`{"Statement":[]}`)},
+		{Principal: group, Name: "p", Document: testutil.EncodePolicyDocument(`{"g":1}`)},
 	}
-	policyNames, err := s.ListInlinePolicyNames(ctx, got[1000])
-	if err != nil || strings.Join(policyNames, ",") != "a,b" {
-		t.Fatalf("names: %v %v", policyNames, err)
+	if !slices.Equal(got.Inline, wantInline) {
+		t.Fatalf("inline (the trust policy of a role is not one):\n%+v\nwant:\n%+v", got.Inline, wantInline)
 	}
-	doc, err := s.GetInlinePolicyDocument(ctx, got[1000], "a")
-	if err != nil || doc != testutil.EncodePolicyDocument(`{"x":"100%"}`) {
-		t.Fatalf("document %q %v", doc, err)
+	// 7 items in pages of 2 although 1,000 were asked for.
+	calls := fake.Calls()
+	if len(calls) != 4 {
+		t.Fatalf("%d calls, want 4 pages", len(calls))
 	}
-	for _, c := range fake.Calls() {
-		if strings.HasPrefix(c.Action, "List") && c.Form.Get("MaxItems") != "1000" {
-			t.Errorf("%s asked for %q items", c.Op, c.Form.Get("MaxItems"))
+	for i, c := range calls {
+		var filter []string
+		for n := 1; c.Form.Has(fmt.Sprintf("Filter.member.%d", n)); n++ {
+			filter = append(filter, c.Form.Get(fmt.Sprintf("Filter.member.%d", n)))
+		}
+		if c.Op != OpGetAccountAuthorizationDetails || c.Form.Get("MaxItems") != "1000" ||
+			strings.Join(filter, ",") != "User,Role,Group,LocalManagedPolicy" || (i == 0) != (c.Form.Get("Marker") == "") {
+			t.Errorf("call %d: %s %v", i, c.Op, c.Form)
 		}
 	}
-	if _, err := s.ListPrincipals(ctx, "service"); err == nil {
-		t.Fatal("an unknown kind must fail")
-	}
-	if _, err := s.ListInlinePolicyNames(ctx, IAMPrincipal{Kind: "x"}); err == nil {
-		t.Fatal("an unknown kind must fail")
-	}
-	if _, err := s.GetInlinePolicyDocument(ctx, IAMPrincipal{Kind: "x"}, "a"); err == nil {
-		t.Fatal("an unknown kind must fail")
+	if rec := sink.last(t); rec.Op != OpGetAccountAuthorizationDetails || rec.Region != "us-east-1" || rec.ErrorKind != "" {
+		t.Fatalf("debug record %+v", rec)
 	}
 }
 
-func TestEveryKindOfPrincipalHasItsInlinePolicyCalls(t *testing.T) {
-	inline := map[string]string{"p": "{}"}
+// Full pages: 1,000 items per page, and a policy on the second page.
+func TestReadIAMPoliciesFollowsFullPages(t *testing.T) {
 	s, fake, _ := policySession(t, &testutil.PolicyAccount{
-		Users: []testutil.Principal{{Name: "u", Inline: inline}}, Groups: []testutil.Principal{{Name: "g", Inline: inline}},
-		Roles: []testutil.Principal{{Name: "r", Inline: inline}}})
-	for _, kind := range PrincipalKinds {
-		list, err := s.ListPrincipals(context.Background(), kind)
-		if err != nil || len(list) != 1 {
-			t.Fatalf("%s: %+v %v", kind, list, err)
-		}
-		if names, err := s.ListInlinePolicyNames(context.Background(), list[0]); err != nil || len(names) != 1 {
-			t.Fatalf("%s names: %v %v", kind, names, err)
-		}
-		if doc, err := s.GetInlinePolicyDocument(context.Background(), list[0], "p"); err != nil || doc != "%7B%7D" {
-			t.Fatalf("%s doc: %q %v", kind, doc, err)
-		}
+		Roles: names("r", 1001), Managed: []testutil.ManagedPolicyDoc{{Name: "last", Document: "{}"}}})
+
+	got, err := s.ReadIAMPolicies(context.Background())
+	if err != nil || len(got.Managed) != 1 || got.Managed[0].ARN != testutil.ManagedPolicyARN("last") || len(got.Inline) != 0 {
+		t.Fatalf("%+v %v", got, err)
 	}
-	for _, op := range []string{testutil.OpListUserPolicies, testutil.OpListRolePolicies, testutil.OpListGroupPolicies,
-		testutil.OpGetUserPolicy, testutil.OpGetRolePolicy, testutil.OpGetGroupPolicy} {
-		if fake.Count(op) != 1 {
-			t.Errorf("%s called %d times", op, fake.Count(op))
-		}
+	if fake.Count(testutil.OpGetAccountAuthorizationDetails) != 2 {
+		t.Fatalf("%d calls, want 2 pages of 1000", fake.Count(testutil.OpGetAccountAuthorizationDetails))
+	}
+}
+
+// A policy whose default version, or an inline policy whose answer, has no
+// document is kept and marked, so the analysis reports it as unread.
+func TestIAMPoliciesWithoutADocumentAreMarked(t *testing.T) {
+	s, _, _ := policySession(t, &testutil.PolicyAccount{
+		Managed: []testutil.ManagedPolicyDoc{{Name: "empty", NoDocument: true, OlderDocument: `{"old":1}`}}})
+	got, err := s.ReadIAMPolicies(context.Background())
+	if err != nil || len(got.Managed) != 1 || !got.Managed[0].DocumentMissing || got.Managed[0].Document != "" {
+		t.Fatalf("an older version must not stand in for the default one: %+v %v", got, err)
+	}
+
+	fake := testutil.NewFakeAWS(t)
+	fake.Handle(testutil.OpGetAccountAuthorizationDetails, testutil.Static(testutil.Reply{Body: `<GetAccountAuthorizationDetailsResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
+		`<GetAccountAuthorizationDetailsResult><IsTruncated>false</IsTruncated><RoleDetailList><member><RoleName>app</RoleName>` +
+		`<Arn>arn:aws:iam::123456789012:role/app</Arn><RolePolicyList><member><PolicyName>p</PolicyName></member></RolePolicyList>` +
+		`</member></RoleDetailList><Policies><member><Arn>arn:aws:iam::123456789012:policy/v</Arn><AttachmentCount>1</AttachmentCount>` +
+		`<PolicyVersionList></PolicyVersionList></member></Policies></GetAccountAuthorizationDetailsResult></GetAccountAuthorizationDetailsResponse>`}))
+	s, _ = newSession(t, fake, nil)
+	got, err = s.ReadIAMPolicies(context.Background())
+	want := IAMPolicies{
+		Managed: []ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/v", AttachmentCount: 1, DocumentMissing: true}},
+		Inline:  []InlinePolicy{{Principal: IAMPrincipal{PrincipalRole, "app", "arn:aws:iam::123456789012:role/app"}, Name: "p", DocumentMissing: true}},
+	}
+	if err != nil || !slices.Equal(got.Managed, want.Managed) || !slices.Equal(got.Inline, want.Inline) {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+// The read fails as a whole: a denied, throttled or credential-rejected
+// page, the first or a later one, gives no policies at all and names the
+// operation; AWS's error text never reaches the error.
+func TestReadIAMPoliciesFailsAsAWhole(t *testing.T) {
+	op := testutil.OpGetAccountAuthorizationDetails
+	for name, sc := range map[string]struct {
+		fail   map[string]testutil.Reply
+		kind   errkind.Kind
+		reason errkind.Reason
+	}{
+		"denied":            {map[string]testutil.Reply{op: testutil.QueryError(http.StatusForbidden, "AccessDenied", "secret text")}, errkind.AccessDenied, errkind.ReasonNone},
+		"denied third page": {map[string]testutil.Reply{op + " page-4": testutil.QueryError(http.StatusForbidden, "AccessDenied", "secret text")}, errkind.AccessDenied, errkind.ReasonNone},
+		"throttled":         {map[string]testutil.Reply{op + " page-2": testutil.QueryError(http.StatusBadRequest, "Throttling", "secret text")}, errkind.Transient, errkind.ReasonRetriesExhausted},
+		"expired":           {map[string]testutil.Reply{op: testutil.QueryError(http.StatusForbidden, "ExpiredToken", "secret text")}, errkind.CredentialsMissing, errkind.ReasonCredentialsExpired},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _, _ := policySession(t, &testutil.PolicyAccount{Roles: names("r", 6), DetailsPageItems: 2, Fail: sc.fail})
+			got, err := s.ReadIAMPolicies(context.Background())
+			e := checkKind(t, err, sc.kind, sc.reason)
+			if e.Op != OpGetAccountAuthorizationDetails || strings.Contains(fmt.Sprint(e.Detail, e.Hint), "secret text") {
+				t.Fatalf("error %+v", e)
+			}
+			if got.Managed != nil || got.Inline != nil {
+				t.Fatalf("a failed read gives no policies: %+v", got)
+			}
+		})
 	}
 }
 
@@ -258,17 +322,16 @@ func TestKeysQueuesTopicsAndSecrets(t *testing.T) {
 }
 
 // Security design §1: each service's NotFound codes mean a deleted resource
-// for the reads of one resource only; IAM's NoSuchEntity keeps its U1 kind
-// for iam:GetPolicyVersion.
+// for the reads of one resource only; IAM's NoSuchEntity, which no read of
+// the impact analysis expects, stays an unexpected error.
 func TestNotFoundCodesOfTheSingleResourceReads(t *testing.T) {
 	region := "us-east-1"
-	s, _, _ := policySession(t, &testutil.PolicyAccount{})
+	s, _, _ := policySession(t, &testutil.PolicyAccount{Fail: map[string]testutil.Reply{
+		testutil.OpGetAccountAuthorizationDetails: testutil.QueryError(http.StatusNotFound, "NoSuchEntity", "no such entity"),
+	}})
 	ctx := context.Background()
-	gone := IAMPrincipal{Kind: PrincipalRole, Name: "gone", ARN: testutil.RoleARN("gone")}
-	_, err := s.ListInlinePolicyNames(ctx, gone)
-	requireKind(t, err, errkind.NotFound, errkind.ReasonNone)
-	_, err = s.GetInlinePolicyDocument(ctx, gone, "p")
-	requireKind(t, err, errkind.NotFound, errkind.ReasonNone)
+	_, err := s.ReadIAMPolicies(ctx)
+	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
 	_, err = s.IsCustomerManagedKey(ctx, region, KMSKey{ID: "gone"})
 	requireKind(t, err, errkind.NotFound, errkind.ReasonNone)
 	_, err = s.GetKeyPolicy(ctx, region, KMSKey{ID: "gone"})
@@ -279,8 +342,6 @@ func TestNotFoundCodesOfTheSingleResourceReads(t *testing.T) {
 	requireKind(t, err, errkind.NotFound, errkind.ReasonNone)
 	_, err = s.GetSecretPolicy(ctx, region, testutil.SecretARN(region, "gone"))
 	requireKind(t, err, errkind.NotFound, errkind.ReasonNone)
-	_, err = s.GetPolicyDocument(ctx, IAMPolicyRef{ARN: testutil.ManagedPolicyARN("gone"), DefaultVersionID: "v1"})
-	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
 }
 
 // Security design §1: the services' own names for access denied and for
@@ -293,7 +354,6 @@ func TestAccessDeniedAndTransientCodesOfTheNewServices(t *testing.T) {
 		testutil.OpListQueues:         testutil.SQSError(http.StatusForbidden, "AccessDenied", "AccessDenied", "secret text"),
 		testutil.OpListTopics:         testutil.QueryError(http.StatusForbidden, "AuthorizationError", "secret text"),
 		testutil.OpListSecrets:        testutil.JSONError(http.StatusBadRequest, "AccessDeniedException", "secret text"),
-		testutil.OpListUsers:          testutil.QueryError(http.StatusForbidden, "AccessDenied", "secret text"),
 		testutil.OpGetKeyPolicy:       testutil.JSONError(http.StatusBadRequest, "KMSInvalidStateException", "secret text"),
 		testutil.OpGetTopicAttributes: testutil.QueryError(http.StatusBadRequest, "Throttling", "secret text"),
 	}
@@ -317,8 +377,6 @@ func TestAccessDeniedAndTransientCodesOfTheNewServices(t *testing.T) {
 	check(err, errkind.AccessDenied, OpListTopics)
 	_, err = s.ListSecrets(ctx, region)
 	check(err, errkind.AccessDenied, OpListSecrets)
-	_, err = s.ListPrincipals(ctx, PrincipalUser)
-	check(err, errkind.AccessDenied, OpListUsers)
 	_, err = s.GetKeyPolicy(ctx, region, KMSKey{ID: "k"})
 	check(err, errkind.Internal, OpGetKeyPolicy)
 	_, err = s.GetTopicPolicy(ctx, region, testutil.TopicARN(region, "t"))
@@ -333,10 +391,13 @@ func TestListsThatRepeatTheirTokenStop(t *testing.T) {
 		ContentType: "application/x-amz-json-1.1"}))
 	fake.Handle(testutil.OpListKeys, testutil.Static(testutil.Reply{Body: `{"Keys":[],"Truncated":true}`,
 		ContentType: "application/x-amz-json-1.1"}))
-	fake.Handle(testutil.OpListUsers, testutil.Static(testutil.Reply{Body: `<ListUsersResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
-		`<ListUsersResult><IsTruncated>true</IsTruncated><Users></Users></ListUsersResult></ListUsersResponse>`}))
-	fake.Handle(testutil.OpGetUserPolicy, testutil.Static(testutil.Reply{Body: `<GetUserPolicyResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
-		`<GetUserPolicyResult></GetUserPolicyResult></GetUserPolicyResponse>`}))
+	// IAM: a truncated page without a marker, then one that repeats it.
+	details := func(marker string) testutil.Reply {
+		return testutil.Reply{Body: `<GetAccountAuthorizationDetailsResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
+			`<GetAccountAuthorizationDetailsResult><IsTruncated>true</IsTruncated>` + marker +
+			`</GetAccountAuthorizationDetailsResult></GetAccountAuthorizationDetailsResponse>`}
+	}
+	fake.Handle(testutil.OpGetAccountAuthorizationDetails, testutil.Sequence(details(""), details("<Marker>m</Marker>")))
 	fake.Handle(testutil.OpGetQueueAttributes, testutil.Static(testutil.Reply{Body: `{"Attributes":{}}`, ContentType: "application/x-amz-json-1.0"}))
 	fake.Handle(testutil.OpDescribeKey, testutil.Static(testutil.Reply{Body: `{}`, ContentType: "application/x-amz-json-1.1"}))
 	s, _ := newSession(t, fake, nil)
@@ -345,10 +406,13 @@ func TestListsThatRepeatTheirTokenStop(t *testing.T) {
 	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
 	_, err = s.ListKeys(ctx, "us-east-1")
 	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
-	_, err = s.ListPrincipals(ctx, PrincipalUser)
+	_, err = s.ReadIAMPolicies(ctx)
 	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
-	_, err = s.GetInlinePolicyDocument(ctx, IAMPrincipal{Kind: PrincipalUser, Name: "u"}, "p")
+	_, err = s.ReadIAMPolicies(ctx) // m, then m again
 	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
+	if n := fake.Count(testutil.OpGetAccountAuthorizationDetails); n != 3 {
+		t.Fatalf("%d IAM calls, want 1 and 2", n)
+	}
 	_, err = s.GetQueuePolicy(ctx, "us-east-1", "https://sqs.us-east-1.amazonaws.com/123456789012/q")
 	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
 	_, err = s.IsCustomerManagedKey(ctx, "us-east-1", KMSKey{ID: "k"})

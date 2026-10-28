@@ -1,9 +1,11 @@
 // Package impact finds the policies that the tag changes of a plan would
-// break (contract C9, U5). It reads customer managed IAM policies that are
-// attached or used as a permissions boundary, the inline policies of every
-// user, role and group, and the resource policies of S3 buckets, KMS keys,
-// SQS queues, SNS topics and Secrets Manager secrets, and matches every tag
-// condition key and policy variable against the four kinds of change.
+// break (contract C9, U5). It reads the IAM policies in one go
+// (iam:GetAccountAuthorizationDetails) and matches the customer managed
+// policies that are attached or used as a permissions boundary and the
+// inline policies of every user, role and group; it also reads and matches
+// the resource policies of S3 buckets, KMS keys, SQS queues, SNS topics and
+// Secrets Manager secrets. Every tag condition key and policy variable is
+// matched against the four kinds of change.
 package impact
 
 import (
@@ -21,14 +23,12 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/planner"
 )
 
-// How many reads run at once (U5 NFR1.18, logical-components.md). They are
-// fixed: no option or environment variable changes them. Tests replace them
-// to check that the analysis also finishes with one of each.
+// How many reads of the resource policies run at once (U5 NFR1.18,
+// logical-components.md). They are fixed: no option or environment variable
+// changes them. Tests replace them to check that the analysis also finishes
+// with one of each. IAM is read by one call at a time: the pages of
+// iam:GetAccountAuthorizationDetails follow each other.
 var (
-	// iamWorkers read IAM policies: a managed policy, or the inline
-	// policies of one user, role or group. 10 keeps the estimate of
-	// NFR1.19 within 10 minutes with the L95 of the sandbox account.
-	iamWorkers = 10
 	// locationWorkers read the regions of buckets the bucket list gave none.
 	locationWorkers = 4
 	// regionWorkers read regions; each lists its keys, queues, topics and
@@ -143,94 +143,54 @@ func (p *pool) wait() []*jobResult {
 	return p.results
 }
 
-// readIAM is the IAM column: the dispatcher lists the managed policies,
-// users, roles and groups in turn, then the jobs read the documents.
+// The reasons of IAM policies that the read gave without a document. They
+// are fixed texts, like the reasons of documents that cannot be parsed.
+const (
+	reasonNoDefaultDocument = "the default version has no document in " + awsaccess.OpGetAccountAuthorizationDetails
+	reasonNoInlineDocument  = "the policy has no document in " + awsaccess.OpGetAccountAuthorizationDetails
+)
+
+// readIAM is the IAM column: one read of every IAM policy, then the
+// matching, one policy after the other (it needs no AWS call). A read that
+// fails on any page leaves both kinds of IAM policy unread as whole lists
+// and matches nothing of IAM, so that part of the account never looks
+// complete (BR1.5). Managed policies are matched only when attached or used
+// as a permissions boundary (BR1.1).
 func (r *run) readIAM() []*jobResult {
-	lists := &jobResult{}
-	refs, err := r.reader.ListCustomerPolicies(r.ctx)
+	j := &jobResult{}
+	policies, err := r.reader.ReadIAMPolicies(r.ctx)
 	if err != nil {
-		lists.unreadable(planner.SourceIAMManaged, "", "", err, awsaccess.OpListPolicies)
+		j.unreadable(planner.SourceIAMManaged, "", "", err, awsaccess.OpGetAccountAuthorizationDetails)
+		j.unreadable(planner.SourceIAMInline, "", "", err, awsaccess.OpGetAccountAuthorizationDetails)
+		return []*jobResult{j}
 	}
-	var principals []awsaccess.IAMPrincipal
-	for _, kind := range awsaccess.PrincipalKinds {
+	for _, m := range policies.Managed {
 		if r.ctx.Err() != nil {
 			return nil
 		}
-		list, err := r.reader.ListPrincipals(r.ctx, kind)
-		if err != nil {
-			lists.unreadable(planner.SourceIAMInline, "", "", err, listOperation[kind])
+		if m.AttachmentCount == 0 && m.BoundaryCount == 0 {
 			continue
 		}
-		principals = append(principals, list...)
+		r.matchIAM(j, source{kind: planner.SourceIAMManaged, ref: m.ARN}, m.Document, m.DocumentMissing, reasonNoDefaultDocument)
 	}
-	p := newPool(r.ctx, iamWorkers)
-	for _, ref := range refs {
-		if ref.AttachmentCount > 0 || ref.BoundaryCount > 0 {
-			p.add(func(j *jobResult) { r.readManaged(j, ref) })
+	for _, p := range policies.Inline {
+		if r.ctx.Err() != nil {
+			return nil
 		}
+		src := source{kind: planner.SourceIAMInline, ref: p.Principal.ARN + "#" + p.Name}
+		r.matchIAM(j, src, p.Document, p.DocumentMissing, reasonNoInlineDocument)
 	}
-	for _, principal := range principals {
-		p.add(func(j *jobResult) { r.readInline(j, principal) })
-	}
-	return append(p.wait(), lists)
+	return []*jobResult{j}
 }
 
-// The APIs of each kind of principal, which name the operation of an
-// unread policy when the error does not.
-var (
-	listOperation = map[awsaccess.PrincipalKind]string{
-		awsaccess.PrincipalUser:  awsaccess.OpListUsers,
-		awsaccess.PrincipalRole:  awsaccess.OpListRoles,
-		awsaccess.PrincipalGroup: awsaccess.OpListGroups,
-	}
-	namesOperation = map[awsaccess.PrincipalKind]string{
-		awsaccess.PrincipalUser:  awsaccess.OpListUserPolicies,
-		awsaccess.PrincipalRole:  awsaccess.OpListRolePolicies,
-		awsaccess.PrincipalGroup: awsaccess.OpListGroupPolicies,
-	}
-	getOperation = map[awsaccess.PrincipalKind]string{
-		awsaccess.PrincipalUser:  awsaccess.OpGetUserPolicy,
-		awsaccess.PrincipalRole:  awsaccess.OpGetRolePolicy,
-		awsaccess.PrincipalGroup: awsaccess.OpGetGroupPolicy,
-	}
-)
-
-func (r *run) readManaged(j *jobResult, ref awsaccess.IAMPolicyRef) {
-	src := source{kind: planner.SourceIAMManaged, ref: ref.ARN}
-	doc, err := r.reader.GetPolicyDocument(r.ctx, ref)
-	if err != nil {
-		j.unreadable(src.kind, src.ref, "", err, awsaccess.OpGetPolicyVersion)
+// matchIAM matches one IAM policy, or records it as unread with reason when
+// the read gave no document for it.
+func (r *run) matchIAM(j *jobResult, src source, doc string, missing bool, reason string) {
+	if missing {
+		j.unread = append(j.unread, planner.UnreadPolicy{SourceKind: src.kind, PolicyRef: src.ref, Reason: reason})
 		return
 	}
 	r.matchDocument(j, src, doc, true)
-}
-
-// readInline reads the inline policies of one user, role or group. One
-// that was deleted after it was listed has none.
-func (r *run) readInline(j *jobResult, p awsaccess.IAMPrincipal) {
-	names, err := r.reader.ListInlinePolicyNames(r.ctx, p)
-	switch {
-	case errkind.KindOf(err) == errkind.NotFound:
-		return
-	case err != nil:
-		j.unreadable(planner.SourceIAMInline, p.ARN, "", err, namesOperation[p.Kind])
-		return
-	}
-	for _, name := range names {
-		if r.ctx.Err() != nil {
-			return
-		}
-		src := source{kind: planner.SourceIAMInline, ref: p.ARN + "#" + name}
-		doc, err := r.reader.GetInlinePolicyDocument(r.ctx, p, name)
-		switch {
-		case errkind.KindOf(err) == errkind.NotFound:
-			continue
-		case err != nil:
-			j.unreadable(src.kind, src.ref, "", err, getOperation[p.Kind])
-			continue
-		}
-		r.matchDocument(j, src, doc, true)
-	}
 }
 
 // readResources is the column of the resource policies: the bucket list,

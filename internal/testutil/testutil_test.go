@@ -149,26 +149,16 @@ func TestTagPagesFollowsTokensIncludingEmptyPages(t *testing.T) {
 	}
 }
 
-func TestPolicyPagesAndDocuments(t *testing.T) {
-	h := PolicyPages([]ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/A"}}, []ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/B", DefaultVersion: "v3"}})
-	first := h(Call{Form: url.Values{}})
-	if !strings.Contains(first.Body, "<IsTruncated>true</IsTruncated>") || !strings.Contains(first.Body, "<Marker>marker-1</Marker>") {
-		t.Fatalf("first page: %s", first.Body)
+func TestPolicyDocumentsAreEncodedAsIAMDoes(t *testing.T) {
+	if got := EncodePolicyDocument(`{"Statement":[{"Sid":"A B+C"}]}`); got != "%7B%22Statement%22%3A%5B%7B%22Sid%22%3A%22A%20B%2BC%22%7D%5D%7D" {
+		t.Fatalf("document not encoded as IAM does: %s", got)
 	}
-	second := h(Call{Form: url.Values{"Marker": {"marker-1"}}})
-	if !strings.Contains(second.Body, "<IsTruncated>false</IsTruncated>") || !strings.Contains(second.Body, "<DefaultVersionId>v3</DefaultVersionId>") {
-		t.Fatalf("second page: %s", second.Body)
-	}
-	if bad := h(Call{Form: url.Values{"Marker": {"x"}}}); bad.Status != http.StatusBadRequest {
-		t.Fatalf("bad marker accepted")
-	}
-
-	docs := PolicyDocuments(map[string]string{"arn:p": `{"Statement":[{"Sid":"A B+C"}]}`})
-	if got := docs(Call{Form: url.Values{"PolicyArn": {"arn:p"}}}); !strings.Contains(got.Body, "A%20B%2BC") {
-		t.Fatalf("document not encoded as IAM does: %s", got.Body)
-	}
-	if got := docs(Call{Form: url.Values{"PolicyArn": {"arn:missing"}}}); got.Status != http.StatusNotFound {
-		t.Fatalf("missing policy: %+v", got)
+	// A page with a marker that is not a page of the list is rejected.
+	fake := NewFakeAWS(t)
+	fake.HandlePolicyAccount(&PolicyAccount{Users: []Principal{{Name: "u"}}})
+	resp, err := fake.RoundTrip(queryRequest(t, "iam", url.Values{"Action": {"GetAccountAuthorizationDetails"}, "Marker": {"x"}}))
+	if err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad marker accepted: %v %v", resp, err)
 	}
 }
 

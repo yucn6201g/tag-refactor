@@ -14,20 +14,8 @@ import (
 // is empty. Test readers embed it and replace the reads they need.
 type emptyReader struct{}
 
-func (emptyReader) ListCustomerPolicies(context.Context) ([]awsaccess.IAMPolicyRef, error) {
-	return nil, nil
-}
-func (emptyReader) GetPolicyDocument(context.Context, awsaccess.IAMPolicyRef) (string, error) {
-	return "", nil
-}
-func (emptyReader) ListPrincipals(context.Context, awsaccess.PrincipalKind) ([]awsaccess.IAMPrincipal, error) {
-	return nil, nil
-}
-func (emptyReader) ListInlinePolicyNames(context.Context, awsaccess.IAMPrincipal) ([]string, error) {
-	return nil, nil
-}
-func (emptyReader) GetInlinePolicyDocument(context.Context, awsaccess.IAMPrincipal, string) (string, error) {
-	return "", nil
+func (emptyReader) ReadIAMPolicies(context.Context) (awsaccess.IAMPolicies, error) {
+	return awsaccess.IAMPolicies{}, nil
 }
 func (emptyReader) ListBuckets(context.Context) ([]awsaccess.Bucket, error) { return nil, nil }
 func (emptyReader) GetBucketRegion(context.Context, string) (string, error) { return "", nil }
@@ -58,7 +46,8 @@ func (emptyReader) GetSecretPolicy(context.Context, string, string) (awsaccess.R
 // given as JSON; IAM documents are URL-encoded on the way out like IAM does.
 // errs fails single reads: the key is "<method>", "<method> <region>" or
 // "<method> <target>", where the target is the policy reference of what is
-// read (the principal ARN for ListInlinePolicyNames).
+// read. ReadIAMPolicies reads every IAM policy at once, so it fails only as
+// a whole ("ReadIAMPolicies").
 type accountReader struct {
 	managed  map[string]string // ARN to document; attached
 	boundary map[string]string // ARN to document; only a permissions boundary
@@ -66,6 +55,10 @@ type accountReader struct {
 	users    map[string]map[string]string
 	roles    map[string]map[string]string
 	groups   map[string]map[string]string
+	// missing are the IAM policies (the ARN of a managed policy, or
+	// "<principal ARN>#<name>") that ReadIAMPolicies gives without a
+	// document.
+	missing map[string]bool
 	// resource policies by region and resource ARN; "" means none.
 	buckets map[string]map[string]string
 	keys    map[string]map[string]string
@@ -112,72 +105,45 @@ func sortedKeys[V any](m map[string]V) []string {
 	return keys
 }
 
-func (a *accountReader) ListCustomerPolicies(context.Context) ([]awsaccess.IAMPolicyRef, error) {
-	if err := a.record("ListCustomerPolicies"); err != nil {
-		return nil, err
+// ReadIAMPolicies gives the managed policies (attached, then boundaries,
+// then neither) and the inline policies of the users, roles and groups.
+func (a *accountReader) ReadIAMPolicies(context.Context) (awsaccess.IAMPolicies, error) {
+	if err := a.record("ReadIAMPolicies"); err != nil {
+		return awsaccess.IAMPolicies{}, err
 	}
-	var refs []awsaccess.IAMPolicyRef
-	for _, arn := range sortedKeys(a.managed) {
-		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1", AttachmentCount: 1})
-	}
-	for _, arn := range sortedKeys(a.boundary) {
-		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1", BoundaryCount: 1})
-	}
-	for _, arn := range sortedKeys(a.detached) {
-		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1"})
-	}
-	return refs, nil
-}
-
-func (a *accountReader) GetPolicyDocument(_ context.Context, ref awsaccess.IAMPolicyRef) (string, error) {
-	if err := a.record("GetPolicyDocument", ref.ARN); err != nil {
-		return "", err
-	}
-	for _, m := range []map[string]string{a.managed, a.boundary, a.detached} {
-		if doc, ok := m[ref.ARN]; ok {
-			return url.PathEscape(doc), nil
+	var out awsaccess.IAMPolicies
+	for _, set := range []struct {
+		docs                    map[string]string
+		attachments, boundaries int
+	}{{a.managed, 1, 0}, {a.boundary, 0, 1}, {a.detached, 0, 0}} {
+		for _, arn := range sortedKeys(set.docs) {
+			doc, missing := a.iamDocument(arn, set.docs[arn])
+			out.Managed = append(out.Managed, awsaccess.ManagedPolicy{ARN: arn, AttachmentCount: set.attachments,
+				BoundaryCount: set.boundaries, Document: doc, DocumentMissing: missing})
 		}
 	}
-	return "", nil
-}
-
-func (a *accountReader) principals(kind awsaccess.PrincipalKind) map[string]map[string]string {
-	switch kind {
-	case awsaccess.PrincipalUser:
-		return a.users
-	case awsaccess.PrincipalRole:
-		return a.roles
-	}
-	return a.groups
-}
-
-func principalARNOf(kind awsaccess.PrincipalKind, name string) string {
-	return "arn:aws:iam::123456789012:" + string(kind) + "/" + name
-}
-
-func (a *accountReader) ListPrincipals(_ context.Context, kind awsaccess.PrincipalKind) ([]awsaccess.IAMPrincipal, error) {
-	if err := a.record("ListPrincipals", string(kind)); err != nil {
-		return nil, err
-	}
-	var out []awsaccess.IAMPrincipal
-	for _, name := range sortedKeys(a.principals(kind)) {
-		out = append(out, awsaccess.IAMPrincipal{Kind: kind, Name: name, ARN: principalARNOf(kind, name)})
+	for _, set := range []struct {
+		kind       awsaccess.PrincipalKind
+		principals map[string]map[string]string
+	}{{awsaccess.PrincipalUser, a.users}, {awsaccess.PrincipalRole, a.roles}, {awsaccess.PrincipalGroup, a.groups}} {
+		for _, name := range sortedKeys(set.principals) {
+			p := awsaccess.IAMPrincipal{Kind: set.kind, Name: name, ARN: "arn:aws:iam::123456789012:" + string(set.kind) + "/" + name}
+			for _, policy := range sortedKeys(set.principals[name]) {
+				doc, missing := a.iamDocument(p.ARN+"#"+policy, set.principals[name][policy])
+				out.Inline = append(out.Inline, awsaccess.InlinePolicy{Principal: p, Name: policy, Document: doc, DocumentMissing: missing})
+			}
+		}
 	}
 	return out, nil
 }
 
-func (a *accountReader) ListInlinePolicyNames(_ context.Context, p awsaccess.IAMPrincipal) ([]string, error) {
-	if err := a.record("ListInlinePolicyNames", p.ARN); err != nil {
-		return nil, err
+// iamDocument is the document of an IAM policy as IAM gives it:
+// URL-encoded, or missing.
+func (a *accountReader) iamDocument(ref, doc string) (string, bool) {
+	if a.missing[ref] {
+		return "", true
 	}
-	return sortedKeys(a.principals(p.Kind)[p.Name]), nil
-}
-
-func (a *accountReader) GetInlinePolicyDocument(_ context.Context, p awsaccess.IAMPrincipal, name string) (string, error) {
-	if err := a.record("GetInlinePolicyDocument", p.ARN+"#"+name); err != nil {
-		return "", err
-	}
-	return url.PathEscape(a.principals(p.Kind)[p.Name][name]), nil
+	return url.PathEscape(doc), false
 }
 
 func (a *accountReader) ListBuckets(context.Context) ([]awsaccess.Bucket, error) {

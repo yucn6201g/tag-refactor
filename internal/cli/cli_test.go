@@ -231,7 +231,7 @@ func TestPlanWithoutChangesReadsNoPolicies(t *testing.T) {
 	}
 	requireContains(t, "stderr", r.stderr, "Exit code: 0 (no changes needed)")
 	requireContains(t, "stderr", r.stderr, "Checked: tagged resources in 1 of 3 regions (tagging API); no IAM policies were read: nothing to change\n")
-	if w.fake.Count("iam:ListPolicies") != 0 {
+	if w.fake.Count("iam:GetAccountAuthorizationDetails") != 0 {
 		t.Fatal("policies were read although nothing changes (BR4.4)")
 	}
 }
@@ -291,7 +291,7 @@ func TestPlanWithOnlyConflictsNeedsReviewWithoutImpactAnalysis(t *testing.T) {
 
 	r.requireExit(t, 2)
 	requireContains(t, "stdout", r.stdout, "Summary: 0 to change · 1 conflict · 0 affected · 0 undecided")
-	if w.fake.Count("iam:ListPolicies") != 0 {
+	if w.fake.Count("iam:GetAccountAuthorizationDetails") != 0 {
 		t.Fatal("no change, so no impact analysis")
 	}
 }

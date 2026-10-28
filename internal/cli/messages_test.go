@@ -40,7 +40,7 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 		{&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsExpired, Op: "sts:GetCallerIdentity", Subject: "dev"}, "credentials have expired", "aws sso login --profile dev"},
 		{&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsRejected, Op: "sts:GetCallerIdentity"}, "AWS rejected the credentials", "access key"},
 		{&errkind.Error{Kind: errkind.CredentialsMissing, Reason: errkind.ReasonCredentialsTimeout}, "could not be obtained in time", "network"},
-		{&errkind.Error{Kind: errkind.AccessDenied, Op: "iam:ListPolicies", Cause: secret}, "access denied for iam:ListPolicies", "docs/iam/readonly-policy.json"},
+		{&errkind.Error{Kind: errkind.AccessDenied, Op: "iam:GetAccountAuthorizationDetails", Cause: secret}, "access denied for iam:GetAccountAuthorizationDetails", "docs/iam/readonly-policy.json"},
 		// ListResources needs the IAM action resource-explorer-2:Search.
 		{&errkind.Error{Kind: errkind.AccessDenied, Op: "resource-explorer-2:ListResources", Region: "eu-west-1"},
 			"access denied for resource-explorer-2:Search (region eu-west-1)", "allow resource-explorer-2:Search"},

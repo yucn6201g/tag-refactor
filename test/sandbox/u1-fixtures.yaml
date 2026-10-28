@@ -117,7 +117,8 @@ Resources:
               StringEquals:
                 aws:ResourceTag/${aws:PrincipalTag/team}: dev
 
-  # P3: not attached; plan must not read it (BR5.1).
+  # P3: not attached; plan reads it with every IAM policy but must not match
+  # it (BR5.1).
   P3:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -186,7 +187,7 @@ Resources:
                 Action:
                   - ec2:DescribeRegions
                   - tag:GetResources
-                  - iam:ListPolicies
+                  - iam:GetAccountAuthorizationDetails
                   - config:DescribeConfigurationRecorders
                   - config:DescribeConfigurationRecorderStatus
                   - config:SelectResourceConfig
@@ -194,42 +195,12 @@ Resources:
                   - resource-explorer-2:GetDefaultView
                   - resource-explorer-2:GetView
                   - resource-explorer-2:Search
-                  - iam:ListUsers
-                  - iam:ListRoles
-                  - iam:ListGroups
                   - s3:ListAllMyBuckets
                   - kms:ListKeys
                   - sqs:ListQueues
                   - sns:ListTopics
                   - secretsmanager:ListSecrets
                 Resource: "*"
-              - Sid: TagRefactorReadCustomerPolicies
-                Effect: Allow
-                Action:
-                  - iam:GetPolicyVersion
-                Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/*
-              - Sid: TagRefactorReadUserInlinePolicies
-                Effect: Allow
-                Action:
-                  - iam:ListUserPolicies
-                  - iam:GetUserPolicy
-                Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:user/*
-              - Sid: TagRefactorReadRoleInlinePolicies
-                Effect: Allow
-                Action:
-                  - iam:ListRolePolicies
-                  - iam:GetRolePolicy
-                Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/*
-              - Sid: TagRefactorReadGroupInlinePolicies
-                Effect: Allow
-                Action:
-                  - iam:ListGroupPolicies
-                  - iam:GetGroupPolicy
-                Resource:
-                  Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:group/*
               - Sid: TagRefactorReadBucketPolicies
                 Effect: Allow
                 Action:

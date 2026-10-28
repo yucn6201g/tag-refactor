@@ -98,7 +98,7 @@ func NewFakeAWS(t testing.TB) *FakeAWS {
 	return &FakeAWS{t: t, handlers: map[string]Handler{}, counts: map[string]int{}}
 }
 
-// Handle registers the handler of op, for example "iam:ListPolicies".
+// Handle registers the handler of op, for example "tag:GetResources".
 func (f *FakeAWS) Handle(op string, h Handler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -40,7 +40,7 @@
       {"verdict":"undecided","policyRef":"arn:aws:iam::123456789012:policy/Teama|b`c\u003cd\u003e\u0026\u001b[2J\u202ee","sourceKind":"iamManaged","statementId":"#0","conditionOperator":"StringEquals","conditionKey":"aws:ResourceTag/${aws:PrincipalTag/team}","conditionValue":"yes","changeIds":["c-000002"]}
     ],
     "unreadPolicies": [
-      {"sourceKind":"iamManaged","policyRef":"arn:aws:iam::123456789012:policy/Hidden","reason":"access denied to iam:GetPolicyVersion"}
+      {"sourceKind":"iamManaged","policyRef":"arn:aws:iam::123456789012:policy/Hidden","reason":"the default version has no document in iam:GetAccountAuthorizationDetails"}
     ],
     "unsetRequiredTags": [
       {"key":"CostCenter","arns":["arn:aws:sqs:us-east-1:123456789012:qa"]}

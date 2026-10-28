@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,32 +16,30 @@ import (
 
 // memoryPolicies replaces the PolicyReader of contract C6 with in-memory
 // attached customer managed policies (ARN to JSON) and nothing else (U1).
-// docErr makes single documents unreadable.
+// readErr makes the read of the IAM policies fail; missing gives single
+// policies without a document.
 type memoryPolicies struct {
 	emptyReader
 	docs    map[string]string
-	listErr error
-	docErr  map[string]error
+	readErr error
+	missing map[string]bool
 	reads   int
 }
 
-func (m *memoryPolicies) ListCustomerPolicies(context.Context) ([]awsaccess.IAMPolicyRef, error) {
-	if m.listErr != nil {
-		return nil, m.listErr
-	}
-	var refs []awsaccess.IAMPolicyRef
-	for arn := range m.docs {
-		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1", AttachmentCount: 1})
-	}
-	return refs, nil
-}
-
-func (m *memoryPolicies) GetPolicyDocument(_ context.Context, ref awsaccess.IAMPolicyRef) (string, error) {
+func (m *memoryPolicies) ReadIAMPolicies(context.Context) (awsaccess.IAMPolicies, error) {
 	m.reads++
-	if err := m.docErr[ref.ARN]; err != nil {
-		return "", err
+	if m.readErr != nil {
+		return awsaccess.IAMPolicies{}, m.readErr
 	}
-	return url.PathEscape(m.docs[ref.ARN]), nil
+	var out awsaccess.IAMPolicies
+	for arn, doc := range m.docs {
+		p := awsaccess.ManagedPolicy{ARN: arn, AttachmentCount: 1, Document: url.PathEscape(doc), DocumentMissing: m.missing[arn]}
+		if p.DocumentMissing {
+			p.Document = ""
+		}
+		out.Managed = append(out.Managed, p)
+	}
+	return out, nil
 }
 
 func rename(id, from, to string) planner.TagChangeInput {
@@ -150,15 +149,12 @@ func TestPathologicalWildcardsStayFast(t *testing.T) {
 }
 
 func TestUnreadablePoliciesMakeTheResultIncomplete(t *testing.T) {
-	denied := &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetPolicyVersion}
-	reader := &memoryPolicies{
-		docs: map[string]string{
-			"p-denied":   policyWith("StringEquals", "aws:ResourceTag/env", "dev"),
-			"p-broken":   `{"Statement": "not a statement"}`,
-			"p-readable": policyWith("StringEquals", "aws:ResourceTag/env", "dev"),
-		},
-		docErr: map[string]error{"p-denied": denied},
+	docs := map[string]string{
+		"p-missing":  policyWith("StringEquals", "aws:ResourceTag/env", "dev"),
+		"p-broken":   `{"Statement": "not a statement"}`,
+		"p-readable": policyWith("StringEquals", "aws:ResourceTag/env", "dev"),
 	}
+	reader := &memoryPolicies{docs: docs, missing: map[string]bool{"p-missing": true}}
 	res, err := New(reader, nil).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "Environment")})
 	if err != nil {
 		t.Fatal(err)
@@ -169,27 +165,32 @@ func TestUnreadablePoliciesMakeTheResultIncomplete(t *testing.T) {
 	if u := res.UnreadPolicies[0]; u.PolicyRef != "p-broken" || !strings.Contains(u.Reason, "could not be parsed") {
 		t.Fatalf("unread = %+v", u)
 	}
-	if u := res.UnreadPolicies[1]; u.PolicyRef != "p-denied" || u.Reason != "access denied to iam:GetPolicyVersion" || u.SourceKind != planner.SourceIAMManaged {
+	if u := res.UnreadPolicies[1]; u.PolicyRef != "p-missing" || u.Reason != reasonNoDefaultDocument || u.SourceKind != planner.SourceIAMManaged {
 		t.Fatalf("unread = %+v", u)
 	}
 
-	listDenied := &memoryPolicies{listErr: &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpListPolicies}}
-	res, err = New(listDenied, nil).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "E")})
-	if err != nil || res.Complete || len(res.UnreadPolicies) != 1 || res.UnreadPolicies[0].PolicyRef != "" ||
-		res.UnreadPolicies[0].Reason != "access denied to iam:ListPolicies" {
+	// A read that fails leaves both IAM kinds unread as whole lists, and no
+	// policy of the account is matched.
+	readDenied := &memoryPolicies{docs: docs, readErr: &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpGetAccountAuthorizationDetails}}
+	res, err = New(readDenied, nil).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "E")})
+	want := []planner.UnreadPolicy{
+		{SourceKind: planner.SourceIAMManaged, Reason: "access denied to iam:GetAccountAuthorizationDetails"},
+		{SourceKind: planner.SourceIAMInline, Reason: "access denied to iam:GetAccountAuthorizationDetails"},
+	}
+	if err != nil || res.Complete || len(res.Findings) != 0 || !slices.Equal(res.UnreadPolicies, want) {
 		t.Fatalf("result = %+v, %v", res, err)
 	}
 }
 
 func TestUnreadReasonsNameTheKindAndOperationOnly(t *testing.T) {
 	cases := map[string]error{
-		"credentials were rejected for iam:ListPolicies":          &errkind.Error{Kind: errkind.CredentialsMissing},
-		"AWS did not answer iam:ListPolicies (temporary failure)": &errkind.Error{Kind: errkind.Transient, Op: awsaccess.OpListPolicies},
-		"unexpected error (Internal) in iam:ListPolicies":         fmt.Errorf("secret text AKIAFAKE"),
-		"unexpected error (InvalidInput) in iam:GetPolicyVersion": &errkind.Error{Kind: errkind.InvalidInput, Op: awsaccess.OpGetPolicyVersion},
+		"credentials were rejected for iam:GetAccountAuthorizationDetails":          &errkind.Error{Kind: errkind.CredentialsMissing},
+		"AWS did not answer iam:GetAccountAuthorizationDetails (temporary failure)": &errkind.Error{Kind: errkind.Transient, Op: awsaccess.OpGetAccountAuthorizationDetails},
+		"unexpected error (Internal) in iam:GetAccountAuthorizationDetails":         fmt.Errorf("secret text AKIAFAKE"),
+		"unexpected error (InvalidInput) in kms:GetKeyPolicy":                       &errkind.Error{Kind: errkind.InvalidInput, Op: awsaccess.OpGetKeyPolicy},
 	}
 	for want, err := range cases {
-		if got := unreadReason(err, awsaccess.OpListPolicies); got != want {
+		if got := unreadReason(err, awsaccess.OpGetAccountAuthorizationDetails); got != want {
 			t.Errorf("unreadReason = %q, want %q", got, want)
 		}
 	}
@@ -254,8 +255,8 @@ func TestNoChangesReadNoPoliciesAndCancellationStops(t *testing.T) {
 	if _, err := New(reader, nil).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
 		t.Fatal("a cancelled context must stop the analysis")
 	}
-	listFails := &memoryPolicies{listErr: context.Canceled}
-	if _, err := New(listFails, nil).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
-		t.Fatal("a cancelled list must stop the analysis")
+	readFails := &memoryPolicies{readErr: context.Canceled}
+	if _, err := New(readFails, nil).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
+		t.Fatal("a cancelled read must stop the analysis")
 	}
 }

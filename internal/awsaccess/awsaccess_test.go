@@ -88,12 +88,11 @@ func TestSessionUsesStandardRetriesAndNoSDKLogging(t *testing.T) {
 	if s.Region() != "us-east-1" {
 		t.Fatalf("Region() = %q", s.Region())
 	}
-	want := []string{OpDescribeRegions, OpGetResources, OpListPolicies, OpGetPolicyVersion,
+	want := []string{OpDescribeRegions, OpGetResources, "iam:GetAccountAuthorizationDetails",
 		OpDescribeConfigurationRecorders, OpDescribeConfigurationRecorderStatus, OpSelectResourceConfig,
 		OpListIndexes, OpGetDefaultView, OpGetView, "resource-explorer-2:Search",
-		// U5: the reads of the impact analysis.
-		OpListUsers, OpListRoles, OpListGroups, OpListUserPolicies, OpListRolePolicies, OpListGroupPolicies,
-		OpGetUserPolicy, OpGetRolePolicy, OpGetGroupPolicy, "s3:ListAllMyBuckets", OpGetBucketLocation, OpGetBucketPolicy,
+		// U5: the reads of the resource policies of the impact analysis.
+		"s3:ListAllMyBuckets", OpGetBucketLocation, OpGetBucketPolicy,
 		OpListKeys, OpDescribeKey, OpGetKeyPolicy, OpListQueues, OpGetQueueAttributes, OpListTopics, OpGetTopicAttributes,
 		OpListSecrets, OpGetResourcePolicy}
 	if got := RequiredPermissions(); strings.Join(got, ",") != strings.Join(want, ",") {
@@ -140,59 +139,6 @@ func TestListTaggedResourcesStopsOnARepeatedToken(t *testing.T) {
 	if fake.Count("tag:GetResources") != 2 {
 		t.Fatalf("%d calls, want 2", fake.Count("tag:GetResources"))
 	}
-}
-
-// U5 BR1.1: every customer managed policy is listed with its attachment and
-// permissions boundary counts; the attached-only filter would leave out the
-// policies used only as a boundary.
-func TestPolicyReaderListsCustomerPoliciesWithTheirCountsAndReadsDefaultVersions(t *testing.T) {
-	fake := testutil.NewFakeAWS(t)
-	fake.Handle("iam:ListPolicies", testutil.PolicyPages(
-		[]testutil.ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/A"}},
-		[]testutil.ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/B", DefaultVersion: "v4", NotAttached: true, Boundaries: 3}},
-	))
-	doc := `{"Statement":[{"Sid":"S 1","Effect":"Allow"}]}`
-	fake.Handle("iam:GetPolicyVersion", testutil.PolicyDocuments(map[string]string{"arn:aws:iam::123456789012:policy/B": doc}))
-	s, _ := newSession(t, fake, nil)
-
-	refs, err := s.ListCustomerPolicies(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(refs) != 2 || refs[1].DefaultVersionID != "v4" || refs[0].AttachmentCount != 1 || refs[0].BoundaryCount != 0 ||
-		refs[1].AttachmentCount != 0 || refs[1].BoundaryCount != 3 {
-		t.Fatalf("refs = %+v", refs)
-	}
-	for _, c := range fake.Calls() {
-		if c.Form.Get("Scope") != "Local" || c.Form.Has("OnlyAttached") || c.Form.Get("MaxItems") != "1000" {
-			t.Fatalf("ListPolicies parameters = %v", c.Form)
-		}
-	}
-	got, err := s.GetPolicyDocument(context.Background(), refs[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != testutil.EncodePolicyDocument(doc) {
-		t.Fatalf("document = %q", got)
-	}
-	last := fake.Calls()[len(fake.Calls())-1]
-	if last.Form.Get("VersionId") != "v4" {
-		t.Fatalf("GetPolicyVersion asked for %q", last.Form.Get("VersionId"))
-	}
-}
-
-func TestPolicyReaderRejectsMalformedIAMAnswers(t *testing.T) {
-	fake := testutil.NewFakeAWS(t)
-	fake.Handle("iam:ListPolicies", testutil.Static(testutil.Reply{Body: `<ListPoliciesResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
-		`<ListPoliciesResult><IsTruncated>true</IsTruncated><Policies></Policies></ListPoliciesResult></ListPoliciesResponse>`}))
-	fake.Handle("iam:GetPolicyVersion", testutil.Static(testutil.Reply{Body: `<GetPolicyVersionResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">` +
-		`<GetPolicyVersionResult></GetPolicyVersionResult></GetPolicyVersionResponse>`}))
-	s, _ := newSession(t, fake, nil)
-
-	_, err := s.ListCustomerPolicies(context.Background())
-	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
-	_, err = s.GetPolicyDocument(context.Background(), IAMPolicyRef{ARN: "arn:aws:iam::123456789012:policy/A", DefaultVersionID: "v1"})
-	requireKind(t, err, errkind.Internal, errkind.ReasonNone)
 }
 
 func TestTransientFailuresAreRetriedWithTheStandardRetryer(t *testing.T) {

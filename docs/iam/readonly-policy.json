@@ -7,7 +7,7 @@
       "Action": [
         "ec2:DescribeRegions",
         "tag:GetResources",
-        "iam:ListPolicies",
+        "iam:GetAccountAuthorizationDetails",
         "config:DescribeConfigurationRecorders",
         "config:DescribeConfigurationRecorderStatus",
         "config:SelectResourceConfig",
@@ -15,9 +15,6 @@
         "resource-explorer-2:GetDefaultView",
         "resource-explorer-2:GetView",
         "resource-explorer-2:Search",
-        "iam:ListUsers",
-        "iam:ListRoles",
-        "iam:ListGroups",
         "s3:ListAllMyBuckets",
         "kms:ListKeys",
         "sqs:ListQueues",
@@ -25,41 +22,6 @@
         "secretsmanager:ListSecrets"
       ],
       "Resource": "*"
-    },
-    {
-      "Sid": "TagRefactorReadCustomerPolicies",
-      "Effect": "Allow",
-      "Action": [
-        "iam:GetPolicyVersion"
-      ],
-      "Resource": "arn:aws:iam::<account-id>:policy/*"
-    },
-    {
-      "Sid": "TagRefactorReadUserInlinePolicies",
-      "Effect": "Allow",
-      "Action": [
-        "iam:ListUserPolicies",
-        "iam:GetUserPolicy"
-      ],
-      "Resource": "arn:aws:iam::<account-id>:user/*"
-    },
-    {
-      "Sid": "TagRefactorReadRoleInlinePolicies",
-      "Effect": "Allow",
-      "Action": [
-        "iam:ListRolePolicies",
-        "iam:GetRolePolicy"
-      ],
-      "Resource": "arn:aws:iam::<account-id>:role/*"
-    },
-    {
-      "Sid": "TagRefactorReadGroupInlinePolicies",
-      "Effect": "Allow",
-      "Action": [
-        "iam:ListGroupPolicies",
-        "iam:GetGroupPolicy"
-      ],
-      "Resource": "arn:aws:iam::<account-id>:group/*"
     },
     {
       "Sid": "TagRefactorReadBucketPolicies",

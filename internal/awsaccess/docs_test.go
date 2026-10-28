@@ -125,18 +125,11 @@ func TestReadOnlyPolicyExampleMatchesTheOperationsTable(t *testing.T) {
 const accountPlaceholder = "<account-id>"
 
 // singleResourceReads are the actions that read one resource, with the
-// resource the example policy limits them to (review R-06 for
-// iam:GetPolicyVersion, U5 security design §1 for the others). Every other
-// action is a list, which AWS cannot limit to resources, so it stays in the
-// statement with the resource "*".
+// resource the example policy limits them to (U5 security design §1). Every
+// other action is a list, or iam:GetAccountAuthorizationDetails, which reads
+// the whole account and has no resource-level permissions: AWS cannot limit
+// them to resources, so they stay in the statement with the resource "*".
 var singleResourceReads = map[string]string{
-	OpGetPolicyVersion:   "arn:aws:iam::" + accountPlaceholder + ":policy/*",
-	OpListUserPolicies:   "arn:aws:iam::" + accountPlaceholder + ":user/*",
-	OpGetUserPolicy:      "arn:aws:iam::" + accountPlaceholder + ":user/*",
-	OpListRolePolicies:   "arn:aws:iam::" + accountPlaceholder + ":role/*",
-	OpGetRolePolicy:      "arn:aws:iam::" + accountPlaceholder + ":role/*",
-	OpListGroupPolicies:  "arn:aws:iam::" + accountPlaceholder + ":group/*",
-	OpGetGroupPolicy:     "arn:aws:iam::" + accountPlaceholder + ":group/*",
 	OpGetBucketPolicy:    "arn:aws:s3:::*",
 	OpGetBucketLocation:  "arn:aws:s3:::*",
 	OpDescribeKey:        "arn:aws:kms:*:" + accountPlaceholder + ":key/*",
@@ -147,9 +140,9 @@ var singleResourceReads = map[string]string{
 }
 
 // The actions that read one resource are limited to the resources of the
-// account they read (review R-06, U5 security design §1); the lists stay
-// with the resource "*".
-func TestReadOnlyPolicyExampleLimitsPolicyVersionsToTheAccount(t *testing.T) {
+// account they read (U5 security design §1); the lists and the read of the
+// IAM policies stay with the resource "*".
+func TestReadOnlyPolicyExampleLimitsSingleResourceReadsToTheAccount(t *testing.T) {
 	doc, _ := readPolicyExample(t)
 	seen := map[string]bool{}
 	for _, st := range doc.Statement {
@@ -169,8 +162,13 @@ func TestReadOnlyPolicyExampleLimitsPolicyVersionsToTheAccount(t *testing.T) {
 			t.Errorf("no statement allows %s", action)
 		}
 	}
-	if !slices.Contains(RequiredPermissions(), OpGetPolicyVersion) {
-		t.Fatalf("%s is not in the table", OpGetPolicyVersion)
+	if !slices.Contains(RequiredPermissions(), OpGetAccountAuthorizationDetails) || !seen[OpGetAccountAuthorizationDetails] {
+		t.Fatalf("%s is not in the table or the example", OpGetAccountAuthorizationDetails)
+	}
+	for _, action := range RequiredPermissions() {
+		if strings.HasPrefix(action, "iam:") && action != OpGetAccountAuthorizationDetails {
+			t.Errorf("%s: the IAM policies are read with %s only", action, OpGetAccountAuthorizationDetails)
+		}
 	}
 }
 

@@ -16,34 +16,24 @@ import (
 
 // Operation names of the impact analysis calls, as the fake AWS records them.
 const (
-	OpListPolicies        = "iam:ListPolicies"
-	OpGetPolicyVersion    = "iam:GetPolicyVersion"
-	OpListUsers           = "iam:ListUsers"
-	OpListRoles           = "iam:ListRoles"
-	OpListGroups          = "iam:ListGroups"
-	OpListUserPolicies    = "iam:ListUserPolicies"
-	OpListRolePolicies    = "iam:ListRolePolicies"
-	OpListGroupPolicies   = "iam:ListGroupPolicies"
-	OpGetUserPolicy       = "iam:GetUserPolicy"
-	OpGetRolePolicy       = "iam:GetRolePolicy"
-	OpGetGroupPolicy      = "iam:GetGroupPolicy"
-	OpListBuckets         = "s3:ListBuckets"
-	OpGetBucketLocation   = "s3:GetBucketLocation"
-	OpGetBucketPolicy     = "s3:GetBucketPolicy"
-	OpListKeys            = "kms:ListKeys"
-	OpDescribeKey         = "kms:DescribeKey"
-	OpGetKeyPolicy        = "kms:GetKeyPolicy"
-	OpListQueues          = "sqs:ListQueues"
-	OpGetQueueAttributes  = "sqs:GetQueueAttributes"
-	OpListTopics          = "sns:ListTopics"
-	OpGetTopicAttributes  = "sns:GetTopicAttributes"
-	OpListSecrets         = "secretsmanager:ListSecrets"
-	OpGetResourcePolicy   = "secretsmanager:GetResourcePolicy"
-	sqsJSONContentType    = "application/x-amz-json-1.0"
-	s3XMLNamespace        = "http://s3.amazonaws.com/doc/2006-03-01/"
-	iamXMLNamespace       = "https://iam.amazonaws.com/doc/2010-05-08/"
-	snsXMLNamespace       = "http://sns.amazonaws.com/doc/2010-03-31/"
-	fakeRequestIDMetadata = `<ResponseMetadata><RequestId>fake-request-id</RequestId></ResponseMetadata>`
+	OpGetAccountAuthorizationDetails = "iam:GetAccountAuthorizationDetails"
+	OpListBuckets                    = "s3:ListBuckets"
+	OpGetBucketLocation              = "s3:GetBucketLocation"
+	OpGetBucketPolicy                = "s3:GetBucketPolicy"
+	OpListKeys                       = "kms:ListKeys"
+	OpDescribeKey                    = "kms:DescribeKey"
+	OpGetKeyPolicy                   = "kms:GetKeyPolicy"
+	OpListQueues                     = "sqs:ListQueues"
+	OpGetQueueAttributes             = "sqs:GetQueueAttributes"
+	OpListTopics                     = "sns:ListTopics"
+	OpGetTopicAttributes             = "sns:GetTopicAttributes"
+	OpListSecrets                    = "secretsmanager:ListSecrets"
+	OpGetResourcePolicy              = "secretsmanager:GetResourcePolicy"
+	sqsJSONContentType               = "application/x-amz-json-1.0"
+	s3XMLNamespace                   = "http://s3.amazonaws.com/doc/2006-03-01/"
+	iamXMLNamespace                  = "https://iam.amazonaws.com/doc/2010-05-08/"
+	snsXMLNamespace                  = "http://sns.amazonaws.com/doc/2010-03-31/"
+	fakeRequestIDMetadata            = `<ResponseMetadata><RequestId>fake-request-id</RequestId></ResponseMetadata>`
 )
 
 // PageSize is the largest page of a list API and the page it gives when the
@@ -51,20 +41,16 @@ const (
 type PageSize struct{ Max, Default int }
 
 // PageSizes are the page sizes of the list APIs of the impact analysis. A
-// request for more than Max is rejected like AWS does.
+// request for more than Max is rejected like AWS does. A page of
+// GetAccountAuthorizationDetails counts the users, roles, groups and
+// managed policies together.
 var PageSizes = map[string]PageSize{
-	OpListPolicies:      {1000, 100},
-	OpListUsers:         {1000, 100},
-	OpListRoles:         {1000, 100},
-	OpListGroups:        {1000, 100},
-	OpListUserPolicies:  {1000, 100},
-	OpListRolePolicies:  {1000, 100},
-	OpListGroupPolicies: {1000, 100},
-	OpListBuckets:       {10000, 10000},
-	OpListKeys:          {1000, 100},
-	OpListQueues:        {1000, 1000},
-	OpListTopics:        {100, 100},
-	OpListSecrets:       {100, 100},
+	OpGetAccountAuthorizationDetails: {1000, 100},
+	OpListBuckets:                    {10000, 10000},
+	OpListKeys:                       {1000, 100},
+	OpListQueues:                     {1000, 1000},
+	OpListTopics:                     {100, 100},
+	OpListSecrets:                    {100, 100},
 }
 
 // ManagedPolicyDoc is one customer managed policy and its default version's
@@ -76,6 +62,12 @@ type ManagedPolicyDoc struct {
 	NotAttached bool
 	// Boundaries is its PermissionsBoundaryUsageCount.
 	Boundaries int
+	// OlderDocument, when set, is the document of an older version v1 that
+	// is not the default; the default version is then v2. The older version
+	// comes first in PolicyVersionList.
+	OlderDocument string
+	// NoDocument leaves the Document out of the default version.
+	NoDocument bool
 }
 
 // Principal is an IAM user, role or group with its inline policies (policy
@@ -126,11 +118,15 @@ type PolicyAccount struct {
 	Queues  []RegionalPolicy
 	Topics  []RegionalPolicy
 	Secrets []RegionalPolicy
+	// DetailsPageItems, when above 0, gives at most this many items per page
+	// of GetAccountAuthorizationDetails, fewer than MaxItems asks for while
+	// more follow, as IAM may do.
+	DetailsPageItems int
 	// Fail replaces answers. The key is "<op> <target>", "<op> <region>" or
-	// "<op>", tried in that order. The target is the policy reference of what
-	// the call reads: the policy ARN, "<principal ARN>" for the list of a
-	// principal's inline policies, "<principal ARN>#<name>" for one inline
-	// policy, or the ARN of the bucket, key, queue, topic or secret.
+	// "<op>", tried in that order. The target is what the call reads: the
+	// page "page-<n>" of GetAccountAuthorizationDetails, n being the position
+	// of its first item ("page-0" for the first page), or the ARN of the
+	// bucket, key, queue, topic or secret.
 	Fail map[string]Reply
 }
 
@@ -197,26 +193,7 @@ func (f *FakeAWS) HandleNoPolicySources() {
 // analysis from a.
 func (f *FakeAWS) HandlePolicyAccount(a *PolicyAccount) {
 	x := newAccountIndex(a)
-	managed := make([]ManagedPolicy, 0, len(a.Managed))
-	docs := map[string]string{}
-	for _, m := range a.Managed {
-		arn := ManagedPolicyARN(m.Name)
-		managed = append(managed, ManagedPolicy{ARN: arn, NotAttached: m.NotAttached, Boundaries: m.Boundaries})
-		docs[arn] = m.Document
-	}
-	f.Handle(OpListPolicies, x.guard(OpListPolicies, func(c Call) Reply {
-		start, end, next, bad := pageOf(c, OpListPolicies, len(managed), c.Form.Get("MaxItems"), c.Form.Get("Marker"))
-		if bad != nil {
-			return *bad
-		}
-		return PolicyPage(next, managed[start:end]...)
-	}, nil))
-	f.Handle(OpGetPolicyVersion, x.guard(OpGetPolicyVersion, PolicyDocuments(docs), func(c Call) string {
-		return c.Form.Get("PolicyArn")
-	}))
-	for _, k := range principalKinds {
-		f.handlePrincipals(x, k.kind, k.arn, k.list(a))
-	}
+	f.handleAuthorizationDetails(x)
 	f.handleBuckets(x)
 	f.handleKeys(x)
 	f.handleQueues(x)
@@ -352,60 +329,169 @@ func jsonString(v any) string {
 	return s
 }
 
-// --- IAM users, roles and groups ---
+// --- IAM: GetAccountAuthorizationDetails ---
 
-func (f *FakeAWS) handlePrincipals(x *accountIndex, kind string, arnOf func(string) string, principals []Principal) {
-	byName := map[string]Principal{}
-	for _, p := range principals {
-		byName[p.Name] = p
-	}
-	listOp, namesOp, getOp := "iam:List"+kind+"s", "iam:List"+kind+"Policies", "iam:Get"+kind+"Policy"
-	f.Handle(listOp, x.guard(listOp, func(c Call) Reply {
-		start, end, next, bad := pageOf(c, listOp, len(principals), c.Form.Get("MaxItems"), c.Form.Get("Marker"))
-		if bad != nil {
-			return *bad
-		}
-		return principalPage(kind, arnOf, next, principals[start:end])
-	}, nil))
-	f.Handle(namesOp, x.guard(namesOp, func(c Call) Reply {
-		p, ok := byName[c.Form.Get(kind+"Name")]
-		if !ok {
-			return QueryError(http.StatusNotFound, "NoSuchEntity", "no such "+strings.ToLower(kind))
-		}
-		names := make([]string, 0, len(p.Inline))
-		for n := range p.Inline {
-			names = append(names, n)
-		}
-		sort.Strings(names)
-		start, end, next, bad := pageOf(c, namesOp, len(names), c.Form.Get("MaxItems"), c.Form.Get("Marker"))
-		if bad != nil {
-			return *bad
-		}
-		return inlineNamesPage(kind, next, names[start:end])
-	}, func(c Call) string { return arnOf(c.Form.Get(kind + "Name")) }))
-	f.Handle(getOp, x.guard(getOp, func(c Call) Reply {
-		p, ok := byName[c.Form.Get(kind+"Name")]
-		doc, found := p.Inline[c.Form.Get("PolicyName")]
-		if !ok || !found {
-			return QueryError(http.StatusNotFound, "NoSuchEntity", "no such policy")
-		}
-		return InlinePolicy(kind, p.Name, c.Form.Get("PolicyName"), doc)
-	}, func(c Call) string { return arnOf(c.Form.Get(kind+"Name")) + "#" + c.Form.Get("PolicyName") }))
+// The values of the Filter parameter of GetAccountAuthorizationDetails.
+const (
+	filterLocalManagedPolicy = "LocalManagedPolicy"
+	filterAWSManagedPolicy   = "AWSManagedPolicy"
+)
+
+// detailItem is one item of GetAccountAuthorizationDetails: a user, role or
+// group with its inline policies, or a customer managed policy.
+type detailItem struct {
+	// kind is "User", "Role" or "Group", or filterLocalManagedPolicy.
+	kind      string
+	principal Principal
+	managed   ManagedPolicyDoc
 }
 
-// principalPage is one iam:ListUsers, ListRoles or ListGroups answer.
-func principalPage(kind string, arnOf func(string) string, marker string, principals []Principal) Reply {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<List%ssResponse xmlns="%s"><List%ssResult>`, kind, iamXMLNamespace, kind)
-	writeMarker(&b, marker)
-	fmt.Fprintf(&b, `<%ss>`, kind)
-	for i, p := range principals {
-		fmt.Fprintf(&b, `<member><Path>/</Path><%sName>%s</%sName><%sId>AIDAFAKE%06d</%sId><Arn>%s</Arn>`+
-			`<CreateDate>2026-01-01T00:00:00Z</CreateDate></member>`,
-			kind, xmlText(p.Name), kind, kind, i, kind, xmlText(arnOf(p.Name)))
+// detailItems lists the items of the account in the order the pages give
+// them: users, roles, groups, then the customer managed policies. Only the
+// kinds in filter are given; the account has no AWS managed policies.
+func (x *accountIndex) detailItems(filter map[string]bool) []detailItem {
+	var items []detailItem
+	for _, k := range principalKinds {
+		if filter[k.kind] {
+			for _, p := range k.list(x.a) {
+				items = append(items, detailItem{kind: k.kind, principal: p})
+			}
+		}
 	}
-	fmt.Fprintf(&b, `</%ss></List%ssResult>%s</List%ssResponse>`, kind, kind, fakeRequestIDMetadata, kind)
+	if filter[filterLocalManagedPolicy] {
+		for _, m := range x.a.Managed {
+			items = append(items, detailItem{kind: filterLocalManagedPolicy, managed: m})
+		}
+	}
+	return items
+}
+
+// detailsFilter reads the Filter parameter (Filter.member.N); without one,
+// every kind is asked for. A value IAM does not know is rejected.
+func detailsFilter(c Call) (map[string]bool, *Reply) {
+	known := map[string]bool{"User": true, "Role": true, "Group": true, filterLocalManagedPolicy: true, filterAWSManagedPolicy: true}
+	filter := map[string]bool{}
+	for key, values := range c.Form {
+		if !strings.HasPrefix(key, "Filter.member.") {
+			continue
+		}
+		for _, v := range values {
+			if !known[v] {
+				r := pageError(c, "unknown filter "+v)
+				return nil, &r
+			}
+			filter[v] = true
+		}
+	}
+	if len(filter) == 0 {
+		return known, nil
+	}
+	return filter, nil
+}
+
+// handleAuthorizationDetails answers GetAccountAuthorizationDetails page by
+// page: MaxItems counts the users, roles, groups and managed policies
+// together, and DetailsPageItems can make the pages smaller.
+func (f *FakeAWS) handleAuthorizationDetails(x *accountIndex) {
+	op := OpGetAccountAuthorizationDetails
+	f.Handle(op, x.guard(op, func(c Call) Reply {
+		filter, bad := detailsFilter(c)
+		if bad != nil {
+			return *bad
+		}
+		items := x.detailItems(filter)
+		start, end, next, bad := pageOf(c, op, len(items), c.Form.Get("MaxItems"), c.Form.Get("Marker"))
+		if bad != nil {
+			return *bad
+		}
+		if limit := x.a.DetailsPageItems; limit > 0 && end-start > limit {
+			end = start + limit
+			next = "page-" + strconv.Itoa(end)
+		}
+		return authorizationDetailsPage(next, start, items[start:end])
+	}, func(c Call) string {
+		if m := c.Form.Get("Marker"); m != "" {
+			return m
+		}
+		return "page-0"
+	}))
+}
+
+// authorizationDetailsPage is one iam:GetAccountAuthorizationDetails answer;
+// a non-empty marker means more pages follow. first is the position of the
+// first item, which numbers the IDs. Every document is URL-encoded like IAM
+// does.
+func authorizationDetailsPage(marker string, first int, items []detailItem) Reply {
+	var b strings.Builder
+	fmt.Fprintf(&b, `<GetAccountAuthorizationDetailsResponse xmlns="%s"><GetAccountAuthorizationDetailsResult>`, iamXMLNamespace)
+	writeMarker(&b, marker)
+	for _, k := range principalKinds {
+		fmt.Fprintf(&b, `<%sDetailList>`, k.kind)
+		for i, it := range items {
+			if it.kind == k.kind {
+				writePrincipalDetail(&b, k.kind, k.arn(it.principal.Name), first+i, it.principal)
+			}
+		}
+		fmt.Fprintf(&b, `</%sDetailList>`, k.kind)
+	}
+	b.WriteString(`<Policies>`)
+	for i, it := range items {
+		if it.kind == filterLocalManagedPolicy {
+			writeManagedDetail(&b, first+i, it.managed)
+		}
+	}
+	fmt.Fprintf(&b, `</Policies></GetAccountAuthorizationDetailsResult>%s</GetAccountAuthorizationDetailsResponse>`, fakeRequestIDMetadata)
 	return Reply{Body: b.String()}
+}
+
+// writePrincipalDetail writes a UserDetail, RoleDetail or GroupDetail with
+// its inline policies sorted by name. A role also has a trust policy, which
+// the impact analysis must not read.
+func writePrincipalDetail(b *strings.Builder, kind, arn string, id int, p Principal) {
+	fmt.Fprintf(b, `<member><Path>/</Path><%sName>%s</%sName><%sId>AIDAFAKE%06d</%sId><Arn>%s</Arn>`+
+		`<CreateDate>2026-01-01T00:00:00Z</CreateDate>`, kind, xmlText(p.Name), kind, kind, id, kind, xmlText(arn))
+	if kind == "Role" {
+		trust := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},` +
+			`"Action":"sts:AssumeRole","Condition":{"StringEquals":{"aws:ResourceTag/env":"trust"}}}]}`
+		fmt.Fprintf(b, `<AssumeRolePolicyDocument>%s</AssumeRolePolicyDocument>`, xmlText(EncodePolicyDocument(trust)))
+	}
+	names := make([]string, 0, len(p.Inline))
+	for n := range p.Inline {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	fmt.Fprintf(b, `<%sPolicyList>`, kind)
+	for _, n := range names {
+		fmt.Fprintf(b, `<member><PolicyName>%s</PolicyName><PolicyDocument>%s</PolicyDocument></member>`,
+			xmlText(n), xmlText(EncodePolicyDocument(p.Inline[n])))
+	}
+	fmt.Fprintf(b, `</%sPolicyList></member>`, kind)
+}
+
+// writeManagedDetail writes a ManagedPolicyDetail with its versions.
+func writeManagedDetail(b *strings.Builder, id int, m ManagedPolicyDoc) {
+	attachments, defaultVersion := 1, "v1"
+	if m.NotAttached {
+		attachments = 0
+	}
+	if m.OlderDocument != "" {
+		defaultVersion = "v2"
+	}
+	fmt.Fprintf(b, `<member><PolicyName>%s</PolicyName><PolicyId>ANPAFAKE%06d</PolicyId><Arn>%s</Arn><Path>/</Path>`+
+		`<DefaultVersionId>%s</DefaultVersionId><AttachmentCount>%d</AttachmentCount>`+
+		`<PermissionsBoundaryUsageCount>%d</PermissionsBoundaryUsageCount><IsAttachable>true</IsAttachable>`+
+		`<CreateDate>2026-01-01T00:00:00Z</CreateDate><UpdateDate>2026-01-01T00:00:00Z</UpdateDate><PolicyVersionList>`,
+		xmlText(m.Name), id, xmlText(ManagedPolicyARN(m.Name)), defaultVersion, attachments, m.Boundaries)
+	if m.OlderDocument != "" {
+		fmt.Fprintf(b, `<member><Document>%s</Document><VersionId>v1</VersionId><IsDefaultVersion>false</IsDefaultVersion>`+
+			`<CreateDate>2026-01-01T00:00:00Z</CreateDate></member>`, xmlText(EncodePolicyDocument(m.OlderDocument)))
+	}
+	b.WriteString(`<member>`)
+	if !m.NoDocument {
+		fmt.Fprintf(b, `<Document>%s</Document>`, xmlText(EncodePolicyDocument(m.Document)))
+	}
+	fmt.Fprintf(b, `<VersionId>%s</VersionId><IsDefaultVersion>true</IsDefaultVersion>`+
+		`<CreateDate>2026-01-01T00:00:00Z</CreateDate></member></PolicyVersionList></member>`, defaultVersion)
 }
 
 func writeMarker(b *strings.Builder, marker string) {
@@ -413,29 +499,6 @@ func writeMarker(b *strings.Builder, marker string) {
 	if marker != "" {
 		fmt.Fprintf(b, `<Marker>%s</Marker>`, xmlText(marker))
 	}
-}
-
-// inlineNamesPage is one iam:ListUserPolicies, ListRolePolicies or
-// ListGroupPolicies answer.
-func inlineNamesPage(kind, marker string, names []string) Reply {
-	var b strings.Builder
-	fmt.Fprintf(&b, `<List%sPoliciesResponse xmlns="%s"><List%sPoliciesResult>`, kind, iamXMLNamespace, kind)
-	writeMarker(&b, marker)
-	b.WriteString(`<PolicyNames>`)
-	for _, n := range names {
-		fmt.Fprintf(&b, `<member>%s</member>`, xmlText(n))
-	}
-	fmt.Fprintf(&b, `</PolicyNames></List%sPoliciesResult>%s</List%sPoliciesResponse>`, kind, fakeRequestIDMetadata, kind)
-	return Reply{Body: b.String()}
-}
-
-// InlinePolicy is one iam:GetUserPolicy, GetRolePolicy or GetGroupPolicy
-// answer; the document is URL-encoded like IAM does.
-func InlinePolicy(kind, principal, name, doc string) Reply {
-	return Reply{Body: fmt.Sprintf(`<Get%sPolicyResponse xmlns="%s"><Get%sPolicyResult><%sName>%s</%sName>`+
-		`<PolicyName>%s</PolicyName><PolicyDocument>%s</PolicyDocument></Get%sPolicyResult>%s</Get%sPolicyResponse>`,
-		kind, iamXMLNamespace, kind, kind, xmlText(principal), kind, xmlText(name),
-		xmlText(EncodePolicyDocument(doc)), kind, fakeRequestIDMetadata, kind)}
 }
 
 // --- S3 ---

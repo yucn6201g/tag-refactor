@@ -40,10 +40,11 @@ func requireStoppedForCredentials(t *testing.T, w *world, r result) {
 }
 
 // expiredAccount has policies of every reader U5 adds, many regions and a
-// slow answer for every call, so a stop has calls left to cancel.
+// slow answer for every call, so a stop has calls left to cancel. The IAM
+// policies take four pages of five items.
 func expiredAccount(fail map[string]testutil.Reply) *testutil.PolicyAccount {
 	doc := policyDoc(conditionStatement("S", "StringEquals", "aws:ResourceTag/env", `"dev"`))
-	a := &testutil.PolicyAccount{Fail: fail}
+	a := &testutil.PolicyAccount{Fail: fail, DetailsPageItems: 5}
 	for i := 0; i < 20; i++ {
 		name := string(rune('a'+i)) + "x"
 		a.Roles = append(a.Roles, testutil.Principal{Name: name, Inline: map[string]string{"p": doc}})
@@ -64,17 +65,17 @@ func expiredReply(service string) testutil.Reply {
 	return testutil.QueryError(http.StatusForbidden, "ExpiredToken", "token "+testutil.FakeSessionToken+" expired")
 }
 
-// U5 security design §4 (1): expired credentials in an inline policy read
-// or in a resource policy read of one region stop the whole plan.
+// U5 security design §4 (1): expired credentials in the read of the IAM
+// policies (on its first or a later page) or in a resource policy read of
+// one region stop the whole plan.
 func TestExpiredCredentialsInTheU5ReadsStopPlan(t *testing.T) {
 	for name, fail := range map[string]map[string]testutil.Reply{
-		"inline policy of a role":   {testutil.OpGetRolePolicy + " " + testutil.RoleARN("cx") + "#p": expiredReply("iam")},
-		"list of inline policies":   {testutil.OpListRolePolicies: expiredReply("iam")},
+		"IAM policies, first page":  {testutil.OpGetAccountAuthorizationDetails: expiredReply("iam")},
+		"IAM policies, third page":  {testutil.OpGetAccountAuthorizationDetails + " page-10": expiredReply("iam")},
 		"queue policy of a region":  {testutil.OpGetQueueAttributes + " " + testutil.QueueARN("eu-west-1", "bx"): expiredReply("sqs")},
 		"key list of a region":      {testutil.OpListKeys + " sa-east-1": expiredReply("kms")},
 		"bucket list":               {testutil.OpListBuckets: testutil.S3Error(http.StatusBadRequest, "ExpiredToken", "expired")},
 		"secret policy everywhere":  {testutil.OpListSecrets: expiredReply("secretsmanager")},
-		"users list (IAM column)":   {testutil.OpListUsers: expiredReply("iam")},
 		"topics list of the region": {testutil.OpListTopics + " us-east-1": expiredReply("sns")},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -100,8 +101,8 @@ func TestTwoCredentialErrorsAtOnceGiveOneMessage(t *testing.T) {
 	w := newAccountWorld(t)
 	w.givenTaggedByRegion(map[string][]testutil.TaggedResource{"us-east-1": {{ARN: arnIn("us-east-1", "a"), Tags: map[string]string{"env": "dev"}}}})
 	w.fake.HandlePolicyAccount(expiredAccount(map[string]testutil.Reply{
-		testutil.OpListRoles: expiredReply("iam"),
-		testutil.OpListKeys:  testutil.JSONError(http.StatusBadRequest, "UnrecognizedClientException", "rejected"),
+		testutil.OpGetAccountAuthorizationDetails: expiredReply("iam"),
+		testutil.OpListKeys:                       testutil.JSONError(http.StatusBadRequest, "UnrecognizedClientException", "rejected"),
 	}))
 	rules := w.givenRuleFile(aliasRules)
 
@@ -172,7 +173,7 @@ func TestDebugAndReasonsNeverShowDocumentsOrAWSText(t *testing.T) {
 	r := w.run("plan", "--rules", rules, "--region", "us-east-1", "--debug")
 
 	r.requireExit(t, 1)
-	for _, op := range []string{"iam:GetRolePolicy", "sqs:GetQueueAttributes", "sns:ListTopics", "s3:ListBuckets", "kms:ListKeys", "secretsmanager:ListSecrets"} {
+	for _, op := range []string{"iam:GetAccountAuthorizationDetails", "sqs:GetQueueAttributes", "sns:ListTopics", "s3:ListBuckets", "kms:ListKeys", "secretsmanager:ListSecrets"} {
 		requireMatch(t, "stderr", r.stderr, `(?m)^debug: `+op+` us-east-1 \d+ms retries=\d+`)
 	}
 	requireNotContains(t, "stderr", r.stderr, marker)

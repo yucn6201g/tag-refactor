@@ -251,8 +251,10 @@ func TestIntegrationU2LatencyEstimate(t *testing.T) {
 		t.Fatal("no debug lines were found")
 	}
 	// Performance design §4, the most uneven case: 214 calls in one region,
-	// 101 IAM reads, 30 seconds of the tool's own work, safety factor 1.5.
-	estimate := 214*worst/1000*1.5 + 101*iam/1000 + 30
+	// the IAM reads, 30 seconds of the tool's own work, safety factor 1.5.
+	// Since U5 the 100 policies are read in one page of
+	// iam:GetAccountAuthorizationDetails instead of 101 IAM calls.
+	estimate := 214*worst/1000*1.5 + iam/1000 + 30
 	t.Logf("NFR1.8 estimate for 10,000 resources: %.0fs (limit 600s); the sandbox has few resources, so small pages may make L95 short", estimate)
 	if estimate > 600 {
 		t.Fatalf("the estimate %.0fs exceeds 10 minutes", estimate)

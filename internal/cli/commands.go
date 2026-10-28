@@ -317,28 +317,8 @@ func (s *stoppingPolicyReader) stopped() error {
 
 var _ awsaccess.PolicyReader = (*stoppingPolicyReader)(nil)
 
-func (s *stoppingPolicyReader) ListCustomerPolicies(ctx context.Context) ([]awsaccess.IAMPolicyRef, error) {
-	v, err := s.inner.ListCustomerPolicies(ctx)
-	return v, s.check(err)
-}
-
-func (s *stoppingPolicyReader) GetPolicyDocument(ctx context.Context, ref awsaccess.IAMPolicyRef) (string, error) {
-	v, err := s.inner.GetPolicyDocument(ctx, ref)
-	return v, s.check(err)
-}
-
-func (s *stoppingPolicyReader) ListPrincipals(ctx context.Context, kind awsaccess.PrincipalKind) ([]awsaccess.IAMPrincipal, error) {
-	v, err := s.inner.ListPrincipals(ctx, kind)
-	return v, s.check(err)
-}
-
-func (s *stoppingPolicyReader) ListInlinePolicyNames(ctx context.Context, p awsaccess.IAMPrincipal) ([]string, error) {
-	v, err := s.inner.ListInlinePolicyNames(ctx, p)
-	return v, s.check(err)
-}
-
-func (s *stoppingPolicyReader) GetInlinePolicyDocument(ctx context.Context, p awsaccess.IAMPrincipal, name string) (string, error) {
-	v, err := s.inner.GetInlinePolicyDocument(ctx, p, name)
+func (s *stoppingPolicyReader) ReadIAMPolicies(ctx context.Context) (awsaccess.IAMPolicies, error) {
+	v, err := s.inner.ReadIAMPolicies(ctx)
 	return v, s.check(err)
 }
 

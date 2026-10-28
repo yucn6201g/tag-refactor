@@ -22,7 +22,7 @@ func u5Plan(t testing.TB) *Plan {
 		SourceKind: SourceIAMInline, StatementID: "#1", ConditionKey: "Resource", ConditionValue: "arn:a, arn:${aws:PrincipalTag/t}",
 		ChangeIDs: []string{"c-000002"}})
 	p.UnreadPolicies = []UnreadPolicy{
-		{SourceKind: SourceIAMInline, Reason: "access denied to iam:ListRoles"},
+		{SourceKind: SourceIAMInline, Reason: "access denied to iam:GetAccountAuthorizationDetails"},
 		{SourceKind: SourceSQSQueue, Region: "eu-west-1", Reason: "access denied to sqs:ListQueues"},
 		{SourceKind: SourceKMSKey, PolicyRef: "arn:aws:kms:eu-west-1:123456789012:key/k", Region: "eu-west-1", Reason: "access denied to kms:GetKeyPolicy"},
 	}
@@ -54,7 +54,7 @@ func TestSavedPlanKeepsThePolicyRefAndRegionOfUnreadPolicies(t *testing.T) {
 	p := u5Plan(t)
 	data := encode(t, p)
 	for _, want := range []string{
-		`{"sourceKind":"iamInline","reason":"access denied to iam:ListRoles"}`,
+		`{"sourceKind":"iamInline","reason":"access denied to iam:GetAccountAuthorizationDetails"}`,
 		`{"sourceKind":"sqsQueue","region":"eu-west-1","reason":"access denied to sqs:ListQueues"}`,
 		`{"sourceKind":"kmsKey","policyRef":"arn:aws:kms:eu-west-1:123456789012:key/k","region":"eu-west-1","reason":"access denied to kms:GetKeyPolicy"}`,
 	} {
@@ -87,7 +87,7 @@ func TestAPlanSavedBeforeU5StillReads(t *testing.T) {
 		t.Fatal(err)
 	}
 	if loaded.ImpactFindings[0].ConditionOperator != "" || loaded.UnreadPolicies[0].PolicyRef != "" ||
-		loaded.UnreadPolicies[0].Reason != "access denied to iam:GetPolicyVersion" {
+		loaded.UnreadPolicies[0].Reason != "the default version has no document in iam:GetAccountAuthorizationDetails" {
 		t.Fatalf("loaded = %+v %+v", loaded.ImpactFindings[0], loaded.UnreadPolicies[0])
 	}
 }

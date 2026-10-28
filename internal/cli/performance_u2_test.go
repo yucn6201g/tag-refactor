@@ -106,10 +106,11 @@ func pages(n, size int) int { return max(1, (n+size-1)/size) }
 // callBound is the upper bound of performance design §3 for scan (with the
 // discovery) or plan (with the IAM reads). The two calls that identify the
 // account (sts:GetCallerIdentity, ec2:DescribeRegions) come on top. Since U5
-// plan also reads the policies of the impact analysis; this account has no
-// users, roles, groups or resources with policies, so the U5 call formula
-// (U5 logical-components.md) adds one page each of ListUsers, ListRoles,
-// ListGroups and ListBuckets, and of the four lists of every region.
+// plan reads every IAM policy with iam:GetAccountAuthorizationDetails, one
+// page per 1,000 users, roles, groups and customer managed policies; this
+// account has only the customer managed policies and no resources with
+// policies, so the U5 call formula (U5 logical-components.md) also adds one
+// page of ListBuckets and of the four lists of every region.
 func callBound(loads map[string]*regionLoad, scan bool, policies int) int {
 	bound := 2
 	for _, l := range loads {
@@ -131,7 +132,7 @@ func callBound(loads map[string]*regionLoad, scan bool, policies int) int {
 	if scan {
 		return bound + 1 // ListIndexes, one page for up to 100 indexes
 	}
-	return bound + pages(policies, 1000) + policies + 3*pages(0, 1000) + pages(0, 10000) + 4*len(loads)
+	return bound + pages(policies, 1000) + pages(0, 10000) + 4*len(loads)
 }
 
 // NFR1.6, NFR1.7: with 10,000 tagged and 1,000 never-tagged resources in 17
@@ -247,7 +248,7 @@ func TestCancelOnExpiredCredentialsInEveryStage(t *testing.T) {
 			"plan IAM reads": {
 				given: func(w *world) {
 					w.givenTaggedByRegion(everywhere)
-					w.fake.Handle("iam:ListPolicies", testutil.Static(testutil.QueryError(http.StatusForbidden, code, "expired")))
+					w.fake.Handle("iam:GetAccountAuthorizationDetails", testutil.Static(testutil.QueryError(http.StatusForbidden, code, "expired")))
 				},
 				args: func(rules string) []string { return []string{"plan", "--rules", rules} },
 			},

@@ -2,7 +2,7 @@
     eu-west-1: AccessDenied(tag:GetResources)
 
 ! 影響分析が不完全です
-    IAM 管理ポリシー arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+    IAM 管理ポリシー arn:aws:iam::123456789012:policy/Hidden: the default version has no document in iam:GetAccountAuthorizationDetails
 
 変更: 4 リソース
   ~ キー名の変更   Env -> Environment                 1 リソース

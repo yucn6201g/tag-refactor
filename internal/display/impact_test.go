@@ -20,10 +20,13 @@ func impactPlan(findings []planner.ImpactFinding, unread []planner.UnreadPolicy)
 	return p
 }
 
+// u5Unread has every form of unread policy. The IAM policies are read in one
+// go, so the inline policies of one principal (a reference without #) are
+// unread only in plans saved before that; such plans still load and show.
 var u5Unread = []planner.UnreadPolicy{
-	{SourceKind: planner.SourceIAMInline, Reason: "access denied to iam:ListRoles"},
+	{SourceKind: planner.SourceIAMInline, Reason: "access denied to iam:GetAccountAuthorizationDetails"},
 	{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:role/app", Reason: "access denied to iam:ListRolePolicies"},
-	{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:role/app#p", Reason: "access denied to iam:GetRolePolicy"},
+	{SourceKind: planner.SourceIAMInline, PolicyRef: "arn:aws:iam::123456789012:role/app#p", Reason: "the policy has no document in iam:GetAccountAuthorizationDetails"},
 	{SourceKind: planner.SourceSQSQueue, Region: "eu-west-1", Reason: "access denied to sqs:ListQueues"},
 	{SourceKind: planner.SourceKMSKey, PolicyRef: "arn:aws:kms:eu-west-1:123456789012:key/k", Region: "eu-west-1", Reason: "the policy document is larger than 1 MiB"},
 }
@@ -31,15 +34,15 @@ var u5Unread = []planner.UnreadPolicy{
 func TestUnreadPoliciesNameTheirKindRegionAndReference(t *testing.T) {
 	for lang, want := range map[Lang]string{
 		English: "! Impact analysis is incomplete\n" +
-			"    IAM inline policies: access denied to iam:ListRoles\n" +
+			"    IAM inline policies: access denied to iam:GetAccountAuthorizationDetails\n" +
 			"    IAM inline policies of arn:aws:iam::123456789012:role/app: access denied to iam:ListRolePolicies\n" +
-			"    IAM inline policy arn:aws:iam::123456789012:role/app#p: access denied to iam:GetRolePolicy\n" +
+			"    IAM inline policy arn:aws:iam::123456789012:role/app#p: the policy has no document in iam:GetAccountAuthorizationDetails\n" +
 			"    SQS queue policies in eu-west-1: access denied to sqs:ListQueues\n" +
 			"    KMS key policy arn:aws:kms:eu-west-1:123456789012:key/k in eu-west-1: the policy document is larger than 1 MiB\n",
 		Japanese: "! 影響分析が不完全です\n" +
-			"    IAM インラインポリシー: access denied to iam:ListRoles\n" +
+			"    IAM インラインポリシー: access denied to iam:GetAccountAuthorizationDetails\n" +
 			"    IAM インラインポリシーの一覧 arn:aws:iam::123456789012:role/app: access denied to iam:ListRolePolicies\n" +
-			"    IAM インラインポリシー arn:aws:iam::123456789012:role/app#p: access denied to iam:GetRolePolicy\n" +
+			"    IAM インラインポリシー arn:aws:iam::123456789012:role/app#p: the policy has no document in iam:GetAccountAuthorizationDetails\n" +
 			"    SQS キューポリシー(eu-west-1): access denied to sqs:ListQueues\n" +
 			"    KMS キーポリシー arn:aws:kms:eu-west-1:123456789012:key/k(eu-west-1): the policy document is larger than 1 MiB\n",
 	} {
@@ -103,7 +106,7 @@ func TestMarkdownUnreadPoliciesHaveTheirRegion(t *testing.T) {
 	md := render(t, English, func(p *Printer) { p.PlanResult(impactPlan(nil, unread), Output{Format: FormatMarkdown}) })
 	for _, want := range []string{
 		"| Policy | Region | Reason |\n|---|---|---|\n",
-		"| (the list of IAM inline policies) |  | ` access denied to iam:ListRoles ` |",
+		"| (the list of IAM inline policies) |  | ` access denied to iam:GetAccountAuthorizationDetails ` |",
 		"| IAM inline policies of ` arn:aws:iam::123456789012:role/app ` |  | ` access denied to iam:ListRolePolicies ` |",
 		"| (the list of SQS queue policies) | ` eu-west-1 ` | ` access denied to sqs:ListQueues ` |",
 		"| (the list of ` ## heading `) |  | ` x ` |",

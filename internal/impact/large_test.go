@@ -151,24 +151,13 @@ func largeAccount(scale int) (*testutil.PolicyAccount, []planner.TagChangeInput)
 func ceilDiv(n, size int) int { return max(1, (n+size-1)/size) }
 
 // callBounds is the call formula of logical-components.md per operation,
-// worked out from what the account holds (no number written by hand).
+// worked out from what the account holds (no number written by hand). IAM
+// is max(1, ⌈(U + R + G + P) ÷ 1,000⌉): the users, roles, groups and every
+// customer managed policy, used or not, share the pages of
+// GetAccountAuthorizationDetails.
 func callBounds(a *testutil.PolicyAccount, regions []string) map[string]int {
 	b := map[string]int{}
-	used := 0
-	for _, m := range a.Managed {
-		if !m.NotAttached || m.Boundaries > 0 {
-			used++
-		}
-	}
-	b[testutil.OpListPolicies] = ceilDiv(len(a.Managed), 1000)
-	b[testutil.OpGetPolicyVersion] = used
-	for op, list := range map[string][]testutil.Principal{"User": a.Users, "Role": a.Roles, "Group": a.Groups} {
-		b["iam:List"+op+"s"] = ceilDiv(len(list), 1000)
-		for _, p := range list {
-			b["iam:List"+op+"Policies"] += ceilDiv(len(p.Inline), 1000)
-			b["iam:Get"+op+"Policy"] += len(p.Inline)
-		}
-	}
+	b[testutil.OpGetAccountAuthorizationDetails] = ceilDiv(len(a.Users)+len(a.Roles)+len(a.Groups)+len(a.Managed), 1000)
 	b[testutil.OpListBuckets] = ceilDiv(len(a.Buckets), 10000)
 	inPlan := map[string]bool{}
 	for _, r := range regions {
@@ -274,6 +263,9 @@ func TestLargeAnalysisU5CallsAndTime(t *testing.T) {
 	if fake.Count(testutil.OpListTopics) < 3 {
 		t.Errorf("the skewed region's topics must take three pages")
 	}
+	if items := len(a.Users) + len(a.Roles) + len(a.Groups) + len(a.Managed); items > 1000 && fake.Count(testutil.OpGetAccountAuthorizationDetails) < 2 {
+		t.Errorf("%d IAM items must take two pages", items)
+	}
 	if limit := time.Duration(timeLimitFactor) * 10 * time.Second; elapsed > limit {
 		t.Errorf("the analysis took %v (limit %v)", elapsed, limit)
 	}
@@ -292,10 +284,12 @@ func TestLargeAnalysisU5CallsAndTime(t *testing.T) {
 		perfScale, len(changes), total, bound, elapsed, affected, undecided)
 }
 
-// NFR1.18: at most 10 IAM calls, 4 calls of one region and 8 regions at
-// once. A short delay lets the reads overlap.
+// NFR1.18: one IAM call, at most 4 calls of one region and 8 regions at
+// once. A short delay lets the reads overlap; the IAM pages are made small
+// so that several of them follow each other.
 func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 	a, changes := largeAccount(perfScale * 4)
+	a.DetailsPageItems = 50
 	fake, s := largeWorld(t, a)
 	fake.SetDelay(func(testutil.Call) time.Duration { return time.Millisecond })
 	fake.TrackConcurrency(concurrencyKeys)
@@ -303,8 +297,11 @@ func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 	if _, err := New(s, largeRegions).Analyze(context.Background(), changes); err != nil {
 		t.Fatal(err)
 	}
-	if got := fake.MaxConcurrent("iam"); got > 10 || got < 2 {
-		t.Errorf("%d IAM calls at once, want 2 to 10", got)
+	if got := fake.MaxConcurrent("iam"); got != 1 {
+		t.Errorf("%d IAM calls at once, want 1", got)
+	}
+	if got := fake.Count(testutil.OpGetAccountAuthorizationDetails); got < 2 {
+		t.Errorf("%d IAM pages, want several", got)
 	}
 	if got := fake.MaxConcurrent("s3list"); got > 4 {
 		t.Errorf("%d bucket location calls at once, limit 4", got)
@@ -323,10 +320,10 @@ func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 // setWorkers replaces the limits for one test.
 func setWorkers(t *testing.T, n int) {
 	t.Helper()
-	saved := [4]int{iamWorkers, locationWorkers, regionWorkers, regionJobWorkers}
-	iamWorkers, locationWorkers, regionWorkers, regionJobWorkers = n, n, n, n
+	saved := [3]int{locationWorkers, regionWorkers, regionJobWorkers}
+	locationWorkers, regionWorkers, regionJobWorkers = n, n, n
 	t.Cleanup(func() {
-		iamWorkers, locationWorkers, regionWorkers, regionJobWorkers = saved[0], saved[1], saved[2], saved[3]
+		locationWorkers, regionWorkers, regionJobWorkers = saved[0], saved[1], saved[2]
 	})
 }
 
@@ -405,17 +402,19 @@ func TestLargeAnalysisU5Deterministic(t *testing.T) {
 }
 
 // NFR5.10, BR5.4: a cancelled analysis returns the cancellation and no
-// partial result, and leaves no goroutine or request behind.
+// partial result, and leaves no goroutine or request behind. It is
+// cancelled while the second IAM page is read.
 func TestLargeAnalysisU5CancelledLeavesNothingRunning(t *testing.T) {
 	a, changes := largeAccount(perfScale * 10)
+	a.DetailsPageItems = 50
 	fake, s := largeWorld(t, a)
 	before := runtime.NumGoroutine()
 	ctx, cancel := context.WithCancel(context.Background())
 	fake.SetDelay(func(c testutil.Call) time.Duration {
-		if c.Op != testutil.OpGetUserPolicy {
+		if c.Op != testutil.OpGetAccountAuthorizationDetails || c.N < 2 {
 			return 0
 		}
-		if c.N == 3 {
+		if c.N == 2 {
 			cancel()
 		}
 		return time.Minute // a slow answer, stopped by the cancellation

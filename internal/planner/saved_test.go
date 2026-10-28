@@ -39,7 +39,7 @@ func samplePlan(t testing.TB) *Plan {
 			{Verdict: VerdictUndecided, PolicyRef: "arn:aws:iam::123456789012:policy/Q", SourceKind: SourceIAMManaged, StatementID: "#0",
 				ConditionKey: "aws:ResourceTag/${aws:PrincipalTag/t}", ChangeIDs: []string{"c-000001", "c-000002"}},
 		},
-		UnreadPolicies: []UnreadPolicy{{SourceKind: SourceIAMManaged, PolicyRef: "arn:x", Reason: "access denied to iam:GetPolicyVersion"}},
+		UnreadPolicies: []UnreadPolicy{{SourceKind: SourceIAMManaged, PolicyRef: "arn:x", Reason: "the default version has no document in iam:GetAccountAuthorizationDetails"}},
 	})
 	return p
 }
