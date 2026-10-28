@@ -1,6 +1,7 @@
 package display
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -276,11 +277,15 @@ func (r *results) planMarkdown(plan *planner.Plan, s planner.PlanSummary) {
 		r.mdLine("md.impactInc")
 		r.mdTable("md.unreadHead")
 		for _, u := range plan.UnreadPolicies {
-			var ref mdArg = mdTool(r.tr("md.allPolicies"))
+			var ref mdArg = mdTool(r.tr("md.allPolicies", mdKind(u.SourceKind, unreadListLabel(r.lang, u.SourceKind))))
 			if u.PolicyRef != "" {
-				ref = mdCell(u.PolicyRef)
+				ref = mdTool(mdKind(u.SourceKind, unreadLabel(r.lang, u)) + " " + mdCell(u.PolicyRef).mdText())
 			}
-			r.mdRow(ref, mdCell(u.Reason))
+			var region mdArg = mdTool("")
+			if u.Region != "" {
+				region = mdCell(u.Region)
+			}
+			r.mdRow(ref, region, mdCell(u.Reason))
 		}
 		r.blank()
 	}
@@ -445,12 +450,26 @@ func (r *results) mdFindings(plan *planner.Plan) {
 			condition += " = " + mdCell(f.ConditionValue).mdText()
 		}
 		var cause mdArg = mdTool(r.tr("md.undecided"))
-		if f.Verdict != planner.VerdictUndecided {
+		switch {
+		case f.Verdict != planner.VerdictUndecided:
 			cause = r.mdCauses(f.ChangeIDs, byID)
+		case !undecidedBecauseOfVariable(f):
+			cause = mdTool(r.tr("md.undecidedOp"))
 		}
-		r.mdRow(mdTool(symbol), mdCell(f.PolicyRef), mdCell(f.StatementID), mdTool(condition), cause)
+		policy := mdTool(mdKind(f.SourceKind, policyLabel(r.lang, f.SourceKind)) + " " + mdCell(f.PolicyRef).mdText())
+		r.mdRow(mdTool(symbol), policy, mdCell(f.StatementID), mdTool(condition), cause)
 	}
 	r.blank()
+}
+
+// mdKind is the label of a policy kind in Markdown: the words of the
+// catalog for a kind of contract C2, and a code span for any other kind a
+// saved plan may hold, so it cannot change the Markdown.
+func mdKind(kind, label string) string {
+	if slices.Contains(planner.SourceKinds, kind) {
+		return label
+	}
+	return mdCell(kind).mdText()
 }
 
 // mdCauses lists the distinct changes behind a finding.

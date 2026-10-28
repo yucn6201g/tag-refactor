@@ -250,7 +250,7 @@ func (a *app) runPlan(ctx context.Context, args planArgs) error {
 	plan := planner.Build(snap, rs, planner.Options{Now: a.deps.Now(), RuleFile: args.rules, ToolVersion: toolVersion()})
 	if plan.NeedsAnalysis() {
 		policies := &stoppingPolicyReader{inner: r.policies, cancel: cancel}
-		var analyzer planner.ImpactAnalyzer = impact.New(policies)
+		var analyzer planner.ImpactAnalyzer = impact.New(policies, plan.Regions)
 		result, err := analyzer.Analyze(ctx, plan.ImpactInputs())
 		if stop := policies.stopped(); stop != nil {
 			return stop
@@ -287,7 +287,9 @@ func (a *app) runPlan(ctx context.Context, args planArgs) error {
 // stoppingPolicyReader stops the run when reading a policy finds missing or
 // expired credentials: the impact analysis would otherwise report those
 // policies as unread and show a partial plan (NFR5.8, NFR8.11). It cancels
-// the run's context, which makes the analysis return, and keeps the error.
+// the run's context, which makes the analysis return, and keeps the first
+// such error. Every read of the policy reader goes through it (U5 security
+// design §4): it alone decides to stop.
 type stoppingPolicyReader struct {
 	inner  awsaccess.PolicyReader
 	cancel context.CancelFunc
@@ -313,12 +315,69 @@ func (s *stoppingPolicyReader) stopped() error {
 	return s.err
 }
 
-func (s *stoppingPolicyReader) ListAttachedCustomerPolicies(ctx context.Context) ([]awsaccess.IAMPolicyRef, error) {
-	refs, err := s.inner.ListAttachedCustomerPolicies(ctx)
-	return refs, s.check(err)
+var _ awsaccess.PolicyReader = (*stoppingPolicyReader)(nil)
+
+func (s *stoppingPolicyReader) ReadIAMPolicies(ctx context.Context) (awsaccess.IAMPolicies, error) {
+	v, err := s.inner.ReadIAMPolicies(ctx)
+	return v, s.check(err)
 }
 
-func (s *stoppingPolicyReader) GetPolicyDocument(ctx context.Context, ref awsaccess.IAMPolicyRef) (string, error) {
-	doc, err := s.inner.GetPolicyDocument(ctx, ref)
-	return doc, s.check(err)
+func (s *stoppingPolicyReader) ListBuckets(ctx context.Context) ([]awsaccess.Bucket, error) {
+	v, err := s.inner.ListBuckets(ctx)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetBucketRegion(ctx context.Context, bucket string) (string, error) {
+	v, err := s.inner.GetBucketRegion(ctx, bucket)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetBucketPolicy(ctx context.Context, region, bucket string) (awsaccess.ResourcePolicy, error) {
+	v, err := s.inner.GetBucketPolicy(ctx, region, bucket)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) ListKeys(ctx context.Context, region string) ([]awsaccess.KMSKey, error) {
+	v, err := s.inner.ListKeys(ctx, region)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) IsCustomerManagedKey(ctx context.Context, region string, key awsaccess.KMSKey) (bool, error) {
+	v, err := s.inner.IsCustomerManagedKey(ctx, region, key)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetKeyPolicy(ctx context.Context, region string, key awsaccess.KMSKey) (awsaccess.ResourcePolicy, error) {
+	v, err := s.inner.GetKeyPolicy(ctx, region, key)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) ListQueues(ctx context.Context, region string) ([]string, error) {
+	v, err := s.inner.ListQueues(ctx, region)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetQueuePolicy(ctx context.Context, region, queueURL string) (awsaccess.ResourcePolicy, error) {
+	v, err := s.inner.GetQueuePolicy(ctx, region, queueURL)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) ListTopics(ctx context.Context, region string) ([]string, error) {
+	v, err := s.inner.ListTopics(ctx, region)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetTopicPolicy(ctx context.Context, region, topicARN string) (awsaccess.ResourcePolicy, error) {
+	v, err := s.inner.GetTopicPolicy(ctx, region, topicARN)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) ListSecrets(ctx context.Context, region string) ([]string, error) {
+	v, err := s.inner.ListSecrets(ctx, region)
+	return v, s.check(err)
+}
+
+func (s *stoppingPolicyReader) GetSecretPolicy(ctx context.Context, region, secretARN string) (awsaccess.ResourcePolicy, error) {
+	v, err := s.inner.GetSecretPolicy(ctx, region, secretARN)
+	return v, s.check(err)
 }

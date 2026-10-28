@@ -46,9 +46,15 @@ func (w *interruptWorld) resources() {
 	w.fake.Handle("tag:GetResources", testutil.TagPages([]testutil.TaggedResource{{ARN: "arn:aws:sqs:us-east-1:123456789012:q", Tags: map[string]string{"env": "dev"}}}))
 }
 
+// policies gives the account a customer managed policy P. h, when not nil,
+// answers the read of the IAM policies instead.
 func (w *interruptWorld) policies(h testutil.Handler) {
-	w.fake.Handle("iam:ListPolicies", testutil.PolicyPages([]testutil.ManagedPolicy{{ARN: "arn:aws:iam::123456789012:policy/P"}}))
-	w.fake.Handle("iam:GetPolicyVersion", h)
+	w.fake.HandlePolicyAccount(&testutil.PolicyAccount{Managed: []testutil.ManagedPolicyDoc{
+		{Name: "P", Document: `{"Version":"2012-10-17","Statement":[]}`},
+	}})
+	if h != nil {
+		w.fake.Handle(testutil.OpGetAccountAuthorizationDetails, h)
+	}
 }
 
 type runResult struct {
@@ -135,7 +141,7 @@ func TestCtrlCWhileTheFileIsSaved(t *testing.T) {
 		t.Run(args[0], func(t *testing.T) {
 			w := newInterruptWorld(t)
 			w.resources()
-			w.policies(testutil.PolicyDocuments(map[string]string{"arn:aws:iam::123456789012:policy/P": `{"Version":"2012-10-17","Statement":[]}`}))
+			w.policies(nil)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if args[0] == "plan" {

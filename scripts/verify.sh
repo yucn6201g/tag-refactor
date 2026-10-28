@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# U2 (scan of every region), U3 (rules suggest) and U4 (plan formats and the
-# saved plan) checkpoint verification.
+# U2 (scan of every region), U3 (rules suggest), U4 (plan formats and the
+# saved plan) and U5 (impact analysis) checkpoint verification.
 # It calls the sandbox AWS account, so it only runs locally, never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
@@ -17,6 +17,18 @@
 #    and the saved plan reads back. A skipped test, or anything but exactly
 #    one PASS line of TestIntegrationU4PlanFormatsAndSavedPlan, is a failure.
 #    It needs no queue or index either, so it also runs before the U2 wait.
+# U5. Checks with the admin profile that the U5 stack (test/sandbox/u5-fixtures.yaml)
+#    is complete and reads its six output ARNs, and that the role R2 of the
+#    U1 stack allows iam:GetAccountAuthorizationDetails (the U5 IAM read).
+#    Runs the U5 sandbox
+#    test (internal/cli/integration_u5_test.go) with the read-only profile; a
+#    skipped test, or anything but exactly one PASS line of
+#    TestIntegrationU5ImpactSandbox, is a failure. Then runs the same plan
+#    with --debug five times and prints, per operation, the number of
+#    samples and the 95th percentile (L95), the largest L95 of the IAM and
+#    of the resource policy operations, and the number of calls that were
+#    retried (NFR1.19). It needs no queue or index, so it runs before the U2
+#    wait too.
 # 3. Checks the U2 stack and the Resource Explorer index of ap-northeast-1, and
 #    records the type of every index.
 # 4. Creates an SQS queue without tags in ap-northeast-1 and always deletes it
@@ -197,6 +209,91 @@ fi
 u4_passed="$(printf '%s\n' "$LAST_OUTPUT" | grep -c -- '^--- PASS: TestIntegrationU4PlanFormatsAndSavedPlan (' || true)"
 [ "$u4_passed" -eq 1 ] || fail "$u4_passed PASS lines of TestIntegrationU4PlanFormatsAndSavedPlan, want exactly 1"
 printf '%s\n' "$LAST_OUTPUT" | grep -E 'U4 counts:' | sed 's/^ *//' || true
+
+# U5. The impact analysis against the U5 stack and the U1 stack.
+u5_stack="tag-refactor-u5-fixtures"
+u5_status="$(aws_admin cloudformation describe-stacks --stack-name "$u5_stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||
+  fail "the stack $u5_stack does not exist; deploy test/sandbox/u5-fixtures.yaml as construction/u5-impact/infrastructure-design/cicd-pipeline.md describes"
+case "$u5_status" in
+  CREATE_COMPLETE | UPDATE_COMPLETE) ;;
+  *) fail "the stack $u5_stack is $u5_status; deploy test/sandbox/u5-fixtures.yaml as cicd-pipeline.md describes" ;;
+esac
+u5_output() {
+  local value
+  value="$(aws_admin cloudformation describe-stacks --stack-name "$u5_stack" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text)" || fail "cannot read the output $1 of $u5_stack"
+  { [ -n "$value" ] && [ "$value" != "None" ]; } || fail "the stack $u5_stack has no output $1; deploy test/sandbox/u5-fixtures.yaml again"
+  printf '%s' "$value"
+}
+u5_role="$(u5_output RoleArn)"
+u5_bucket="$(u5_output BucketArn)"
+u5_topic="$(u5_output TopicArn)"
+u5_secret="$(u5_output SecretArn)"
+# R2 must carry the U5 reads of docs/iam/readonly-policy.json.
+r2_arn="$(aws_admin cloudformation describe-stacks --stack-name "$u1_stack" \
+  --query "Stacks[0].Outputs[?OutputKey=='R2Arn'].OutputValue" --output text)" || fail "cannot read the output R2Arn of $u1_stack"
+r2_policy="$(aws_admin iam get-role-policy --role-name "${r2_arn##*/}" --policy-name tag-refactor-readonly \
+  --query PolicyDocument --output json)" || fail "cannot read the inline policy of R2"
+printf '%s\n' "$r2_policy" | grep -q '"iam:GetAccountAuthorizationDetails"' ||
+  fail "R2 does not allow iam:GetAccountAuthorizationDetails; update the role R2 of the U1 fixtures stack (test/sandbox/u1-fixtures.yaml) as cicd-pipeline.md describes"
+
+echo "verify: running the U5 sandbox test (profile $readonly_profile)"
+LAST_OUTPUT=""
+if ! TAG_REFACTOR_IT_PROFILE="$readonly_profile" \
+  TAG_REFACTOR_IT_U5_ROLE_ARN="$u5_role" TAG_REFACTOR_IT_U5_BUCKET_ARN="$u5_bucket" \
+  TAG_REFACTOR_IT_U5_TOPIC_ARN="$u5_topic" TAG_REFACTOR_IT_U5_SECRET_ARN="$u5_secret" \
+  run_go_test -mod=readonly -count=1 -tags integration -run '^TestIntegrationU5' -v ./internal/cli/...; then
+  fail "the U5 sandbox test failed"
+fi
+if printf '%s\n' "$LAST_OUTPUT" | grep -q -- '--- SKIP'; then
+  fail "the U5 sandbox test was skipped"
+fi
+u5_passed="$(printf '%s\n' "$LAST_OUTPUT" | grep -c -- '^--- PASS: TestIntegrationU5ImpactSandbox (' || true)"
+[ "$u5_passed" -eq 1 ] || fail "$u5_passed PASS lines of TestIntegrationU5ImpactSandbox, want exactly 1"
+printf '%s\n' "$LAST_OUTPUT" | grep -E 'RU5 was|U5 findings:' | sed 's/^ *//' || true
+
+# The latency of each call of plan, from five runs with --debug (the
+# account has few resources, so one run calls KMS, SNS and Secrets Manager a
+# few times only). The --debug lines name the operation, the region, the
+# time and the retries, never the documents (NFR8.22).
+echo "verify: measuring the calls of plan with --debug (5 runs)"
+debug_lines="$u3_dir/debug-lines"
+: >"$debug_lines"
+for run in 1 2 3 4 5; do
+  run_tool plan --lang en --profile "$readonly_profile" --region "$region" --rules test/sandbox/u5-rules.yaml --format json --debug
+  { [ "$TOOL_STATUS" -eq 2 ] || [ "$TOOL_STATUS" -eq 1 ]; } ||
+    { sed 's/^/  /' "$u3_dir/stderr" >&2; fail "plan --debug ended with exit code $TOOL_STATUS (run $run)"; }
+  grep -E '^debug: [a-z0-9-]+:[A-Za-z]+ ' "$u3_dir/stderr" >>"$debug_lines" || true
+done
+# Per operation: samples and L95 (the samples sorted by time, the one at
+# 95 percent). Under 20 samples the L95 is the largest, which the line says.
+awk '
+  {
+    op = $2; ms = $4; sub(/ms$/, "", ms)
+    n[op]++; t[op, n[op]] = ms + 0
+    retries = $5; sub(/^retries=/, "", retries)
+    if (retries + 0 >= 1) retried++
+  }
+  END {
+    for (op in n) {
+      for (i = 2; i <= n[op]; i++) {
+        v = t[op, i]
+        for (j = i - 1; j >= 1 && t[op, j] > v; j--) t[op, j + 1] = t[op, j]
+        t[op, j + 1] = v
+      }
+      k = int(0.95 * n[op] + 0.999999); if (k < 1) k = 1
+      l95 = t[op, k]
+      note = (n[op] < 20) ? " (few samples: the largest)" : ""
+      printf "  L95 %s: %d ms, %d samples%s\n", op, l95, n[op], note
+      if (op ~ /^iam:/ && l95 > iam) iam = l95
+      if (op ~ /^(s3|kms|sqs|sns|secretsmanager):/ && l95 > res) res = l95
+    }
+    printf "  L95(IAM): %d ms\n", iam
+    printf "  L95(resource policies): %d ms\n", res
+    printf "  retried calls: %d\n", retried
+  }
+' "$debug_lines" | sort
+echo "verify: apply these values to the 10-minute estimate of logical-components.md at the checkpoint"
 
 # 3. The U2 stack and the Resource Explorer index of ap-northeast-1.
 status="$(aws_admin cloudformation describe-stacks --stack-name "$stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||

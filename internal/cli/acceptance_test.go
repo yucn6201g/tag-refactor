@@ -64,20 +64,24 @@ func (w *world) givenResources(resources ...testutil.TaggedResource) {
 	w.fake.Handle("tag:GetResources", testutil.TagPages(resources))
 }
 
-// givenAttachedPolicies makes the given customer managed policies (ARN to
-// JSON document) attached and readable.
+// givenAttachedPolicies makes the given customer managed policies (ARN of
+// TestAccount to JSON document) attached and readable, in an account without
+// other policies.
 func (w *world) givenAttachedPolicies(docs map[string]string) {
 	arns := make([]string, 0, len(docs))
 	for arn := range docs {
 		arns = append(arns, arn)
 	}
 	sort.Strings(arns)
-	page := make([]testutil.ManagedPolicy, 0, len(arns))
+	a := &testutil.PolicyAccount{}
 	for _, arn := range arns {
-		page = append(page, testutil.ManagedPolicy{ARN: arn})
+		name := arn[strings.LastIndex(arn, "/")+1:]
+		if testutil.ManagedPolicyARN(name) != arn {
+			w.t.Fatalf("%s is not a policy of the test account", arn)
+		}
+		a.Managed = append(a.Managed, testutil.ManagedPolicyDoc{Name: name, Document: docs[arn]})
 	}
-	w.fake.Handle("iam:ListPolicies", testutil.PolicyPages(page))
-	w.fake.Handle("iam:GetPolicyVersion", testutil.PolicyDocuments(docs))
+	w.fake.HandlePolicyAccount(a)
 }
 
 func (w *world) givenRuleFile(content string) string {
@@ -196,9 +200,12 @@ func TestAcceptance_AC1_2_1_ScanAndPlanUseOnlyReadOperations(t *testing.T) {
 		}
 	}
 	// U2: scan also asks AWS Config and Resource Explorer whether they can
-	// find never-tagged resources (none of them can in this account).
-	want := []string{"config:DescribeConfigurationRecorders", "ec2:DescribeRegions", "iam:GetPolicyVersion", "iam:ListPolicies",
-		"resource-explorer-2:ListIndexes", "sts:GetCallerIdentity", "tag:GetResources"}
+	// find never-tagged resources (none of them can in this account). U5:
+	// plan reads the IAM policies in one go and lists the resources with
+	// resource policies (none in this account).
+	want := []string{"config:DescribeConfigurationRecorders", "ec2:DescribeRegions", "iam:GetAccountAuthorizationDetails",
+		"kms:ListKeys", "resource-explorer-2:ListIndexes", "s3:ListBuckets",
+		"secretsmanager:ListSecrets", "sns:ListTopics", "sqs:ListQueues", "sts:GetCallerIdentity", "tag:GetResources"}
 	if got := w.fake.Ops(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("operations = %v, want %v", got, want)
 	}
@@ -412,8 +419,8 @@ func TestAcceptance_AC3_2_4_PolicyVariableIsUndecidedAndWildcardIsMatched(t *tes
 func TestAcceptance_AC3_2_5_UnreadablePoliciesMakeImpactIncomplete(t *testing.T) {
 	w := newWorld(t)
 	w.givenResources(testutil.TaggedResource{ARN: arnQA, Tags: map[string]string{"env": "dev"}})
-	w.fake.Handle("iam:ListPolicies", testutil.Static(testutil.QueryError(http.StatusForbidden, "AccessDenied",
-		"User: arn:aws:iam::123456789012:user/tester is not authorized to perform: iam:ListPolicies")))
+	w.fake.Handle("iam:GetAccountAuthorizationDetails", testutil.Static(testutil.QueryError(http.StatusForbidden, "AccessDenied",
+		"User: arn:aws:iam::123456789012:user/tester is not authorized to perform: iam:GetAccountAuthorizationDetails")))
 	rules := w.givenRuleFile(aliasRules)
 
 	r := w.run("plan", "--rules", rules, "--region", "us-east-1")
@@ -422,7 +429,7 @@ func TestAcceptance_AC3_2_5_UnreadablePoliciesMakeImpactIncomplete(t *testing.T)
 	if !strings.HasPrefix(r.stdout, "! Impact analysis is incomplete\n") {
 		t.Fatalf("stdout must start with the incomplete marker:\n%s", r.stdout)
 	}
-	requireMatch(t, "stdout", r.stdout, `(?m)IAM managed polic.*iam:ListPolicies`)
+	requireMatch(t, "stdout", r.stdout, `(?m)IAM managed polic.*iam:GetAccountAuthorizationDetails`)
 	requireMatch(t, "stdout", r.stdout, `(?m)^  ~ rename key\s+env -> Environment`)
 	requireContains(t, "stderr", r.stderr, "Exit code: 1")
 }

@@ -2,7 +2,7 @@
     eu-west-1: AccessDenied (tag:GetResources)
 
 ! Impact analysis is incomplete
-    IAM managed policy arn:aws:iam::123456789012:policy/Hidden: access denied to iam:GetPolicyVersion
+    IAM managed policy arn:aws:iam::123456789012:policy/Hidden: the default version has no document in iam:GetAccountAuthorizationDetails
 
 Changes: 4 resources
   ~ rename key   Env -> Environment                 1 resource

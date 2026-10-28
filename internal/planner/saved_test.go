@@ -39,7 +39,7 @@ func samplePlan(t testing.TB) *Plan {
 			{Verdict: VerdictUndecided, PolicyRef: "arn:aws:iam::123456789012:policy/Q", SourceKind: SourceIAMManaged, StatementID: "#0",
 				ConditionKey: "aws:ResourceTag/${aws:PrincipalTag/t}", ChangeIDs: []string{"c-000001", "c-000002"}},
 		},
-		UnreadPolicies: []UnreadPolicy{{SourceKind: SourceIAMManaged, PolicyRef: "arn:x", Reason: "access denied to iam:GetPolicyVersion"}},
+		UnreadPolicies: []UnreadPolicy{{SourceKind: SourceIAMManaged, PolicyRef: "arn:x", Reason: "the default version has no document in iam:GetAccountAuthorizationDetails"}},
 	})
 	return p
 }
@@ -81,16 +81,8 @@ func loadedForm(p *Plan) *Plan {
 	for _, c := range p.RemoveCandidates {
 		q.RemoveCandidates = append(q.RemoveCandidates, RemoveCandidate{Key: c.Key})
 	}
-	q.ImpactFindings = nil
-	for _, f := range p.ImpactFindings {
-		f.ConditionOperator = ""
-		q.ImpactFindings = append(q.ImpactFindings, f)
-	}
-	q.UnreadPolicies = nil
-	for _, u := range p.UnreadPolicies {
-		u.PolicyRef = ""
-		q.UnreadPolicies = append(q.UnreadPolicies, u)
-	}
+	// Since U5 the condition operator and the policyRef and region of an
+	// unread policy are kept (contract C2).
 	return &q
 }
 
@@ -149,7 +141,7 @@ func TestWritePlanWritesOnlyTheFieldsOfTheContract(t *testing.T) {
 		t.Fatalf("a rename has the fields %v", mapKeys(change))
 	}
 	finding := doc["impactFindings"].([]any)[0].(map[string]any)
-	if strings.Join(sortedKeys(mapKeys(finding)), ",") != "changeIds,conditionKey,conditionValue,policyRef,sourceKind,statementId,verdict" {
+	if strings.Join(sortedKeys(mapKeys(finding)), ",") != "changeIds,conditionKey,conditionOperator,conditionValue,policyRef,sourceKind,statementId,verdict" {
 		t.Fatalf("a finding has the fields %v", mapKeys(finding))
 	}
 }

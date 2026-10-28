@@ -2,6 +2,7 @@ package display
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/yucn6201g/tag-refactor/internal/inventory"
@@ -295,13 +296,54 @@ func (r *results) planIncomplete(plan *planner.Plan) {
 	}
 	r.line(styleImpact, "plan.impactIncomplete")
 	for _, u := range plan.UnreadPolicies {
-		if u.PolicyRef == "" {
-			r.line(styleNone, "plan.unreadList", u.Reason)
-		} else {
-			r.line(styleNone, "plan.unreadPolicy", u.PolicyRef, u.Reason)
+		switch {
+		case u.PolicyRef == "" && u.Region == "":
+			r.line(styleNone, "plan.unreadList", rawString(unreadListLabel(r.lang, u.SourceKind)), u.Reason)
+		case u.PolicyRef == "":
+			r.line(styleNone, "plan.unreadListIn", rawString(unreadListLabel(r.lang, u.SourceKind)), u.Region, u.Reason)
+		case u.Region == "":
+			r.line(styleNone, "plan.unreadPolicy", rawString(unreadLabel(r.lang, u)), u.PolicyRef, u.Reason)
+		default:
+			r.line(styleNone, "plan.unreadPolicyIn", rawString(unreadLabel(r.lang, u)), u.PolicyRef, u.Region, u.Reason)
 		}
 	}
 	r.blank()
+}
+
+// policyLabel names the kind of the policy of a finding (U5), for example
+// "IAM inline policy". A kind outside contract C2 is shown as written.
+func policyLabel(lang Lang, kind string) string {
+	if slices.Contains(planner.SourceKinds, kind) {
+		return T(lang, "policy."+kind)
+	}
+	return Sanitize(kind)
+}
+
+// unreadLabel names the kind of one unread policy. A user, role or group
+// whose inline policies could not be listed is named with "of".
+func unreadLabel(lang Lang, u planner.UnreadPolicy) string {
+	switch {
+	case u.SourceKind == planner.SourceIAMManaged:
+		return T(lang, "unread.iamManaged")
+	case u.SourceKind == planner.SourceIAMInline && !strings.Contains(u.PolicyRef, "#"):
+		return T(lang, "unread.iamInlineOf")
+	}
+	return policyLabel(lang, u.SourceKind)
+}
+
+// unreadListLabel names the kind of a list that could not be read.
+func unreadListLabel(lang Lang, kind string) string {
+	if slices.Contains(planner.SourceKinds, kind) {
+		return T(lang, "unreadList."+kind)
+	}
+	return Sanitize(kind)
+}
+
+// undecidedBecauseOfVariable reports whether a finding cannot be decided
+// because of a policy variable; otherwise it is the condition operator (a
+// Null of TagKeys, or an operator that does not compare strings).
+func undecidedBecauseOfVariable(f planner.ImpactFinding) bool {
+	return strings.Contains(f.ConditionKey, "${") || strings.Contains(f.ConditionValue, "${")
 }
 
 // planNothing prints "No changes needed" (BR2.7), with the remove candidates
@@ -457,7 +499,7 @@ func (r *results) planFindings(plan *planner.Plan) {
 		if f.Verdict == planner.VerdictUndecided {
 			symbol, st = "?", styleUndecided
 		}
-		r.line(st, "plan.policy", rawString(symbol), f.PolicyRef)
+		r.line(st, "plan.policy", rawString(symbol), rawString(policyLabel(r.lang, f.SourceKind)), f.PolicyRef)
 		// A plan read from a file has no operator: the word and its space go.
 		switch {
 		case f.ConditionOperator == "" && f.ConditionValue != "":
@@ -470,7 +512,11 @@ func (r *results) planFindings(plan *planner.Plan) {
 			r.line(styleNone, "plan.statement", f.StatementID, f.ConditionOperator, f.ConditionKey)
 		}
 		if f.Verdict == planner.VerdictUndecided {
-			r.line(styleNone, "plan.cannotDecide")
+			if undecidedBecauseOfVariable(f) {
+				r.line(styleNone, "plan.cannotDecide")
+			} else {
+				r.line(styleNone, "plan.cannotDecideOp")
+			}
 			continue
 		}
 		r.line(styleNone, "plan.affectedBy", rawString(causes(r.lang, f.ChangeIDs, byID)))

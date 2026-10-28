@@ -649,12 +649,20 @@ const (
 	VerdictUndecided Verdict = "undecided"
 )
 
-// SourceIAMManaged is the policy source kind of customer managed IAM policies.
-const SourceIAMManaged = "iamManaged"
+// The policy source kinds of contract C2.
+const (
+	SourceIAMManaged = "iamManaged"
+	SourceIAMInline  = "iamInline"
+	SourceS3Bucket   = "s3Bucket"
+	SourceKMSKey     = "kmsKey"
+	SourceSQSQueue   = "sqsQueue"
+	SourceSNSTopic   = "snsTopic"
+	SourceSecret     = "secretsManagerSecret"
+)
 
-// SourceKinds are the policy source kinds of contract C2. U1 reads the first
-// only; U5 adds the others.
-var SourceKinds = []string{SourceIAMManaged, "iamInline", "s3Bucket", "kmsKey", "sqsQueue", "snsTopic", "secretsManagerSecret"}
+// SourceKinds are the policy source kinds of contract C2, in the order of
+// the impact findings (U5 BR5.2).
+var SourceKinds = []string{SourceIAMManaged, SourceIAMInline, SourceS3Bucket, SourceKMSKey, SourceSQSQueue, SourceSNSTopic, SourceSecret}
 
 // ImpactFinding is one condition affected by, or undecidable for, changes.
 type ImpactFinding struct {
@@ -672,9 +680,13 @@ type ImpactFinding struct {
 // UnreadPolicy is a policy, or a whole policy list, that could not be read.
 type UnreadPolicy struct {
 	SourceKind string
-	// PolicyRef is the ARN of one unreadable policy, empty when the list
-	// itself could not be read.
+	// PolicyRef refers to one unreadable policy (U5 BR1.6), or to the user,
+	// role or group whose inline policies could not be listed; it is empty
+	// when a whole list could not be read.
 	PolicyRef string
+	// Region is the region of a resource policy or of a list of them; empty
+	// for IAM and the S3 bucket list (U5).
+	Region string
 	// Reason names the error kind and the operation, never the error text.
 	Reason string
 }

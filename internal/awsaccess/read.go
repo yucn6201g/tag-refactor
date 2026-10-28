@@ -13,8 +13,8 @@ import (
 
 // Page sizes: the largest values the APIs accept (NFR1.3).
 const (
-	tagPageSize    = 100  // tag:GetResources ResourcesPerPage maximum
-	policyPageSize = 1000 // iam:ListPolicies MaxItems maximum
+	tagPageSize     = 100  // tag:GetResources ResourcesPerPage maximum
+	detailsPageSize = 1000 // iam:GetAccountAuthorizationDetails MaxItems maximum
 )
 
 // ListTaggedResources reads every tagged resource of the region. It keeps
@@ -58,63 +58,87 @@ func (s *Session) ListTaggedResources(ctx context.Context, region string) ([]Tag
 	}
 }
 
-// ListAttachedCustomerPolicies reads the customer managed policies attached
-// to a user, role or group (BR5.1). OnlyAttached makes a separate read of the
-// attachments unnecessary.
-func (s *Session) ListAttachedCustomerPolicies(ctx context.Context) ([]IAMPolicyRef, error) {
-	var refs []IAMPolicyRef
+// detailsFilter asks iam:GetAccountAuthorizationDetails for the users, roles
+// and groups with their inline policies and for the customer managed
+// policies, whether they are used or not: the caller chooses by the counts,
+// since a policy used only as a permissions boundary has no attachment (U5
+// BR1.1). AWS managed policies are not read.
+var detailsFilter = []iamtypes.EntityType{
+	iamtypes.EntityTypeUser, iamtypes.EntityTypeRole, iamtypes.EntityTypeGroup, iamtypes.EntityTypeLocalManagedPolicy,
+}
+
+// ReadIAMPolicies reads every customer managed policy and every inline
+// policy of the account with iam:GetAccountAuthorizationDetails (U5 BR1.1,
+// BR1.2). IAM may give fewer items than asked for while more follow, so it
+// reads until a page is not truncated. Every page goes through invoke, so
+// the time limits, the retries and the --debug lines apply.
+func (s *Session) ReadIAMPolicies(ctx context.Context) (IAMPolicies, error) {
+	var all IAMPolicies
 	marker := ""
 	for {
-		in := &iam.ListPoliciesInput{
-			Scope:        iamtypes.PolicyScopeTypeLocal,
-			OnlyAttached: true,
-			MaxItems:     aws.Int32(policyPageSize),
-		}
+		in := &iam.GetAccountAuthorizationDetailsInput{Filter: detailsFilter, MaxItems: aws.Int32(detailsPageSize)}
 		if marker != "" {
 			in.Marker = aws.String(marker)
 		}
-		var out *iam.ListPoliciesOutput
-		err := s.invoke(ctx, OpListPolicies, s.region, func(ctx context.Context, add apiOption) error {
+		var out *iam.GetAccountAuthorizationDetailsOutput
+		err := s.invoke(ctx, OpGetAccountAuthorizationDetails, s.region, func(ctx context.Context, add apiOption) error {
 			var err error
-			out, err = s.iam.ListPolicies(ctx, in, func(o *iam.Options) { o.APIOptions = append(o.APIOptions, add) })
+			out, err = s.iam.GetAccountAuthorizationDetails(ctx, in, func(o *iam.Options) { o.APIOptions = append(o.APIOptions, add) })
 			return err
 		})
 		if err != nil {
-			return nil, err
+			return IAMPolicies{}, err
 		}
-		for _, p := range out.Policies {
-			refs = append(refs, IAMPolicyRef{ARN: aws.ToString(p.Arn), DefaultVersionID: aws.ToString(p.DefaultVersionId)})
-		}
+		all.add(out)
 		if !out.IsTruncated {
-			return refs, nil
+			return all, nil
 		}
 		next := aws.ToString(out.Marker)
 		if next == "" || next == marker {
-			return nil, &errkind.Error{Kind: errkind.Internal, Op: OpListPolicies, Region: s.region,
-				Detail: "IAM returned a truncated policy list without a new marker"}
+			return IAMPolicies{}, &errkind.Error{Kind: errkind.Internal, Op: OpGetAccountAuthorizationDetails, Region: s.region,
+				Detail: "IAM returned a truncated page without a new marker"}
 		}
 		marker = next
 	}
 }
 
-// GetPolicyDocument reads the default version of a policy. The document is
-// returned as IAM sends it: URL-encoded JSON.
-func (s *Session) GetPolicyDocument(ctx context.Context, ref IAMPolicyRef) (string, error) {
-	var out *iam.GetPolicyVersionOutput
-	err := s.invoke(ctx, OpGetPolicyVersion, s.region, func(ctx context.Context, add apiOption) error {
-		var err error
-		out, err = s.iam.GetPolicyVersion(ctx, &iam.GetPolicyVersionInput{
-			PolicyArn: aws.String(ref.ARN),
-			VersionId: aws.String(ref.DefaultVersionID),
-		}, func(o *iam.Options) { o.APIOptions = append(o.APIOptions, add) })
-		return err
-	})
-	if err != nil {
-		return "", err
+// add appends the policies of one page.
+func (p *IAMPolicies) add(out *iam.GetAccountAuthorizationDetailsOutput) {
+	for _, m := range out.Policies {
+		p.Managed = append(p.Managed, managedPolicy(m))
 	}
-	if out.PolicyVersion == nil {
-		return "", &errkind.Error{Kind: errkind.Internal, Op: OpGetPolicyVersion, Region: s.region,
-			Detail: "IAM returned no policy version"}
+	for _, u := range out.UserDetailList {
+		p.addInline(IAMPrincipal{Kind: PrincipalUser, Name: aws.ToString(u.UserName), ARN: aws.ToString(u.Arn)}, u.UserPolicyList)
 	}
-	return aws.ToString(out.PolicyVersion.Document), nil
+	for _, r := range out.RoleDetailList {
+		p.addInline(IAMPrincipal{Kind: PrincipalRole, Name: aws.ToString(r.RoleName), ARN: aws.ToString(r.Arn)}, r.RolePolicyList)
+	}
+	for _, g := range out.GroupDetailList {
+		p.addInline(IAMPrincipal{Kind: PrincipalGroup, Name: aws.ToString(g.GroupName), ARN: aws.ToString(g.Arn)}, g.GroupPolicyList)
+	}
+}
+
+func (p *IAMPolicies) addInline(principal IAMPrincipal, policies []iamtypes.PolicyDetail) {
+	for _, d := range policies {
+		p.Inline = append(p.Inline, InlinePolicy{Principal: principal, Name: aws.ToString(d.PolicyName),
+			Document: aws.ToString(d.PolicyDocument), DocumentMissing: d.PolicyDocument == nil})
+	}
+}
+
+// managedPolicy takes the document of the default version from the
+// versions of the answer; the older versions are not read.
+func managedPolicy(m iamtypes.ManagedPolicyDetail) ManagedPolicy {
+	p := ManagedPolicy{
+		ARN:             aws.ToString(m.Arn),
+		AttachmentCount: int(aws.ToInt32(m.AttachmentCount)),
+		BoundaryCount:   int(aws.ToInt32(m.PermissionsBoundaryUsageCount)),
+		DocumentMissing: true,
+	}
+	for _, v := range m.PolicyVersionList {
+		if v.IsDefaultVersion && v.Document != nil {
+			p.Document, p.DocumentMissing = *v.Document, false
+			break
+		}
+	}
+	return p
 }

@@ -1,0 +1,19 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-impact",
+  "version": 1,
+  "writes": [
+    { "path": "README.md" },
+    { "path": "docs/iam/readonly-policy.json" },
+    { "path": "go.mod" },
+    { "path": "go.sum" },
+    { "path": "internal/awsaccess/" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/impact/" },
+    { "path": "internal/planner/" },
+    { "path": "internal/testutil/" },
+    { "path": "scripts/verify.sh" },
+    { "path": "test/sandbox/" }
+  ]
+}

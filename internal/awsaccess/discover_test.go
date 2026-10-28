@@ -16,7 +16,8 @@ import (
 )
 
 // Security design §1: API and IAM names live in one table; only ListResources
-// needs a differently named IAM action, and no API name repeats.
+// and, since U5, ListBuckets need a differently named IAM action, and no API
+// name repeats.
 func TestOperationsTableMapsAPIToIAMNames(t *testing.T) {
 	seen := map[string]bool{}
 	for _, op := range Operations {
@@ -24,12 +25,15 @@ func TestOperationsTableMapsAPIToIAMNames(t *testing.T) {
 			t.Errorf("API %s is listed twice", op.API)
 		}
 		seen[op.API] = true
-		if op.API != OpListResources && op.IAMAction != op.API {
-			t.Errorf("%s has IAM action %s; only ListResources may differ", op.API, op.IAMAction)
+		if op.API != OpListResources && op.API != OpListBuckets && op.IAMAction != op.API {
+			t.Errorf("%s has IAM action %s; only ListResources and ListBuckets may differ", op.API, op.IAMAction)
 		}
 	}
 	if got := IAMAction(OpListResources); got != "resource-explorer-2:Search" {
 		t.Fatalf("IAMAction(ListResources) = %q", got)
+	}
+	if got := IAMAction(OpListBuckets); got != "s3:ListAllMyBuckets" {
+		t.Fatalf("IAMAction(ListBuckets) = %q", got)
 	}
 	if got := IAMAction("x:Unknown"); got != "x:Unknown" {
 		t.Fatalf("an unknown name must stay as it is, got %q", got)

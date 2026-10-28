@@ -31,10 +31,14 @@ var allRegions = []string{
 // apiOperations are the AWS API operations scan and plan may call (security
 // design §1). The API Search of Resource Explorer is deliberately missing.
 var apiOperations = []string{
-	"sts:GetCallerIdentity", "ec2:DescribeRegions", "tag:GetResources", "iam:ListPolicies", "iam:GetPolicyVersion",
+	"sts:GetCallerIdentity", "ec2:DescribeRegions", "tag:GetResources", "iam:GetAccountAuthorizationDetails",
 	"config:DescribeConfigurationRecorders", "config:DescribeConfigurationRecorderStatus", "config:SelectResourceConfig",
 	"resource-explorer-2:ListIndexes", "resource-explorer-2:GetDefaultView", "resource-explorer-2:GetView",
 	"resource-explorer-2:ListResources",
+	// U5: the reads of the impact analysis.
+	"s3:ListBuckets", "s3:GetBucketLocation", "s3:GetBucketPolicy",
+	"kms:ListKeys", "kms:DescribeKey", "kms:GetKeyPolicy", "sqs:ListQueues", "sqs:GetQueueAttributes", "sns:ListTopics",
+	"sns:GetTopicAttributes", "secretsmanager:ListSecrets", "secretsmanager:GetResourcePolicy",
 }
 
 const requiredOwnerRules = "version: 1\nkeys:\n  Environment:\n    aliases: [env, Env]\nrequired:\n  Owner:\n    default: platform\n"
@@ -507,7 +511,7 @@ func TestAcceptanceU2_AC1_2_1_OnlyTheListedReadOperationsAreCalled(t *testing.T)
 	if w.fake.Count("resource-explorer-2:Search") != 0 {
 		t.Fatal("the API Search of Resource Explorer was called")
 	}
-	for _, op := range []string{testutil.OpSelectResourceConfig, testutil.OpListResources, testutil.OpGetView, "iam:GetPolicyVersion"} {
+	for _, op := range []string{testutil.OpSelectResourceConfig, testutil.OpListResources, testutil.OpGetView, "iam:GetAccountAuthorizationDetails"} {
 		if w.fake.Count(op) == 0 {
 			t.Errorf("%s was not exercised", op)
 		}
@@ -583,8 +587,7 @@ func TestAcceptanceU2_AC1_2_3_ExpiredCredentialsStopEverything(t *testing.T) {
 		"plan, IAM policies": {
 			given: func(w *world) {
 				w.givenTaggedByRegion(everywhere)
-				w.fake.Handle("iam:ListPolicies", testutil.PolicyPages([]testutil.ManagedPolicy{{ARN: policyP1}, {ARN: policyP2}}))
-				w.fake.Handle("iam:GetPolicyVersion", testutil.Static(testutil.QueryError(http.StatusForbidden, "ExpiredToken", "expired")))
+				w.fake.Handle("iam:GetAccountAuthorizationDetails", testutil.Static(testutil.QueryError(http.StatusForbidden, "ExpiredToken", "expired")))
 			},
 			args: func(rules string) []string { return []string{"plan", "--rules", rules} },
 		},

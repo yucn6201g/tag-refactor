@@ -5,6 +5,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -70,7 +71,7 @@ func goldenPlan(t testing.TB) *planner.Plan {
 				ChangeIDs: []string{"c-000002"}},
 		},
 		UnreadPolicies: []planner.UnreadPolicy{{SourceKind: planner.SourceIAMManaged, PolicyRef: "arn:aws:iam::123456789012:policy/Hidden",
-			Reason: "access denied to iam:GetPolicyVersion"}},
+			Reason: "the default version has no document in iam:GetAccountAuthorizationDetails"}},
 	})
 	return p
 }
@@ -168,9 +169,9 @@ func TestGoldenScanFormats(t *testing.T) {
 	}
 }
 
-// A plan saved and read back has no condition operator (contract C2 does not
-// keep it): the table, the diff and Markdown leave out the word and its
-// space instead of an empty word.
+// A plan saved before U5 has no condition operator (contract C2 kept none
+// until U5 added conditionOperator): the table, the diff and Markdown leave
+// out the word and its space instead of an empty word.
 func TestALoadedPlanShowsItsConditionsWithoutAnOperator(t *testing.T) {
 	var b bytes.Buffer
 	w := planner.NewSafeJSONWriter(&b)
@@ -180,7 +181,11 @@ func TestALoadedPlanShowsItsConditionsWithoutAnOperator(t *testing.T) {
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
 	}
-	loaded, err := planner.ParsePlan("plan.json", b.Bytes())
+	beforeU5 := regexp.MustCompile(`"conditionOperator":"[^"]*",`).ReplaceAll(b.Bytes(), nil)
+	if bytes.Equal(beforeU5, b.Bytes()) {
+		t.Fatal("the saved plan has no conditionOperator to take out")
+	}
+	loaded, err := planner.ParsePlan("plan.json", beforeU5)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,19 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u5-impact",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10", "NFR11", "NFR12"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "NFR1.16, NFR1.17, NFR1.18, NFR1.19" },
+    { "id": "NFR2", "status": "OK", "target": "NFR2.1, NFR2.2" },
+    { "id": "NFR3", "status": "OK", "target": "NFR3.9" },
+    { "id": "NFR4", "status": "N/A", "target": "U5 は書き換えも取り消しも行わない(U6・U7)" },
+    { "id": "NFR5", "status": "OK", "target": "NFR5.10, NFR5.11" },
+    { "id": "NFR6", "status": "N/A", "target": "U5 は書き換えの記録を作らない(U6)" },
+    { "id": "NFR7", "status": "N/A", "target": "U5 は apply と rollback を行わない(U6・U7)" },
+    { "id": "NFR8", "status": "OK", "target": "NFR8.20, NFR8.21, NFR8.22" },
+    { "id": "NFR9", "status": "N/A", "target": "U5 は OS に依存する処理を足さない。3つの OS の CI でのテストは U1〜U4 の仕組みのまま(NFR2.1、NFR1.17 も3つの OS で動く)" },
+    { "id": "NFR10", "status": "OK", "target": "NFR10.9" },
+    { "id": "NFR11", "status": "N/A", "target": "表示の形は U4 のまま。影響の印(! と ?)は U4 の NFR11.7 で記号と文字でも表す" },
+    { "id": "NFR12", "status": "N/A", "target": "配布の仕組みは作業単位に含めず、別の作業で行う" }
+  ]
+}

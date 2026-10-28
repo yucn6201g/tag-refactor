@@ -133,14 +133,14 @@ func samplePlan() *planner.Plan {
 		Conflicts: []planner.KeyConflict{{ResourceARN: "arn:c", CanonicalKey: "Environment",
 			PresentTags: map[string]string{"env": "dev\x1b[2J", "Environment": `pr\od`}, KeyOrder: []string{"env", "Environment"}}},
 		ImpactFindings: []planner.ImpactFinding{
-			{Verdict: planner.VerdictAffected, PolicyRef: "arn:p1", StatementID: "AllowDev", ConditionOperator: "StringEquals",
+			{Verdict: planner.VerdictAffected, PolicyRef: "arn:p1", SourceKind: planner.SourceIAMManaged, StatementID: "AllowDev", ConditionOperator: "StringEquals",
 				ConditionKey: "aws:ResourceTag/env", ConditionValue: "dev", ChangeIDs: []string{"c-000001", "c-000002", "c-000003"}},
-			{Verdict: planner.VerdictUndecided, PolicyRef: "arn:p2", StatementID: "#0", ConditionOperator: "Null",
+			{Verdict: planner.VerdictUndecided, PolicyRef: "arn:p2", SourceKind: planner.SourceIAMManaged, StatementID: "#0", ConditionOperator: "Null",
 				ConditionKey: "aws:ResourceTag/${aws:PrincipalTag/team}", ChangeIDs: []string{"c-000001"}},
 		},
 		UnreadPolicies: []planner.UnreadPolicy{
-			{SourceKind: planner.SourceIAMManaged, PolicyRef: "arn:p3", Reason: "access denied to iam:GetPolicyVersion"},
-			{SourceKind: planner.SourceIAMManaged, Reason: "access denied to iam:ListPolicies"},
+			{SourceKind: planner.SourceIAMManaged, PolicyRef: "arn:p3", Reason: "the default version has no document in iam:GetAccountAuthorizationDetails"},
+			{SourceKind: planner.SourceIAMManaged, Reason: "access denied to iam:GetAccountAuthorizationDetails"},
 		},
 		ImpactAnalysisComplete: false,
 	}
@@ -154,8 +154,8 @@ func TestPlanResultShowsIncompleteChangesConflictsImpactAndSummary(t *testing.T)
 	// Since U4 renames are grouped by their keys only (BR2.1), so "(merge
 	// into existing)" is gone, and the summary has the U4 counts.
 	want := "! Impact analysis is incomplete\n" +
-		"    IAM managed policy arn:p3: access denied to iam:GetPolicyVersion\n" +
-		"    IAM managed policies: access denied to iam:ListPolicies\n" +
+		"    IAM managed policy arn:p3: the default version has no document in iam:GetAccountAuthorizationDetails\n" +
+		"    IAM managed policies: access denied to iam:GetAccountAuthorizationDetails\n" +
 		"\n" +
 		"Changes: 2 resources\n" +
 		"  ~ rename key   env -> Environment                 2 resources\n" +
@@ -231,7 +231,7 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 	p.Warn("careful\x1b")
 	p.FileWarning("rules.yaml", 8, `"required" is not used in this version`)
 	p.APICall(awsaccess.CallRecord{Op: "tag:GetResources", Region: "us-east-1", Duration: 132 * time.Millisecond, Retries: 0})
-	p.APICall(awsaccess.CallRecord{Op: "iam:ListPolicies", Region: "us-east-1", Duration: time.Second, Retries: -1, ErrorKind: "Internal", CauseType: "*url.Error"})
+	p.APICall(awsaccess.CallRecord{Op: "iam:GetAccountAuthorizationDetails", Region: "us-east-1", Duration: time.Second, Retries: -1, ErrorKind: "Internal", CauseType: "*url.Error"})
 	p.Error("access denied for tag:GetResources", "allow it")
 	p.Fatal("stopped")
 	p.Done(12*time.Second, 412)
@@ -247,7 +247,7 @@ func TestMessagesProgressAndDebugGoToStandardError(t *testing.T) {
 		"warning: careful\\u{1B}\n" +
 		"warning: rules.yaml line 8: \"required\" is not used in this version\n" +
 		"debug: tag:GetResources us-east-1 132ms retries=0\n" +
-		"debug: iam:ListPolicies us-east-1 1000ms retries=n/a error=Internal cause=*url.Error\n" +
+		"debug: iam:GetAccountAuthorizationDetails us-east-1 1000ms retries=n/a error=Internal cause=*url.Error\n" +
 		"Error: access denied for tag:GetResources\n" +
 		"  Fix: allow it\n" +
 		"Error: stopped\n" +

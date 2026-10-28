@@ -26,12 +26,14 @@ func xmlText(s string) string {
 }
 
 // HandleDefaults registers the answers every connected command needs: the
-// caller identity (account TestAccount), the enabled regions, and an account
-// without AWS Config recording or Resource Explorer (HandleNoDiscovery).
+// caller identity (account TestAccount), the enabled regions, an account
+// without AWS Config recording or Resource Explorer (HandleNoDiscovery), and
+// an account without policies (HandleNoPolicySources).
 func (f *FakeAWS) HandleDefaults(regions ...string) {
 	f.Handle("sts:GetCallerIdentity", Static(CallerIdentity(TestAccount, TestCallerARN)))
 	f.Handle("ec2:DescribeRegions", Static(Regions(regions...)))
 	f.HandleNoDiscovery()
+	f.HandleNoPolicySources()
 }
 
 // Static returns a handler that always gives r.
@@ -134,84 +136,10 @@ func TagPages(pages ...[]TaggedResource) Handler {
 	}
 }
 
-// ManagedPolicy is one entry of an iam:ListPolicies page.
-type ManagedPolicy struct {
-	ARN            string
-	DefaultVersion string
-}
-
-// PolicyPage is one iam:ListPolicies answer. A non-empty marker means more
-// pages follow.
-func PolicyPage(marker string, policies ...ManagedPolicy) Reply {
-	var b strings.Builder
-	b.WriteString(`<ListPoliciesResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/"><ListPoliciesResult>`)
-	fmt.Fprintf(&b, `<IsTruncated>%t</IsTruncated>`, marker != "")
-	if marker != "" {
-		fmt.Fprintf(&b, `<Marker>%s</Marker>`, xmlText(marker))
-	}
-	b.WriteString(`<Policies>`)
-	for i, p := range policies {
-		version := p.DefaultVersion
-		if version == "" {
-			version = "v1"
-		}
-		name := p.ARN[strings.LastIndex(p.ARN, "/")+1:]
-		fmt.Fprintf(&b, `<member><PolicyName>%s</PolicyName><PolicyId>ANPAFAKE%04d</PolicyId><Arn>%s</Arn><Path>/</Path>`+
-			`<DefaultVersionId>%s</DefaultVersionId><AttachmentCount>1</AttachmentCount><IsAttachable>true</IsAttachable></member>`,
-			xmlText(name), i, xmlText(p.ARN), xmlText(version))
-	}
-	b.WriteString(`</Policies></ListPoliciesResult><ResponseMetadata><RequestId>fake-request-id</RequestId></ResponseMetadata></ListPoliciesResponse>`)
-	return Reply{Body: b.String()}
-}
-
-// PolicyPages returns an iam:ListPolicies handler that serves the pages in
-// order, following the Marker of each request.
-func PolicyPages(pages ...[]ManagedPolicy) Handler {
-	return func(c Call) Reply {
-		index := 0
-		if m := c.Form.Get("Marker"); m != "" {
-			n, err := strconv.Atoi(strings.TrimPrefix(m, "marker-"))
-			if err != nil || n <= 0 || n >= len(pages) {
-				return QueryError(http.StatusBadRequest, "InvalidInput", "bad marker")
-			}
-			index = n
-		}
-		marker := ""
-		if index+1 < len(pages) {
-			marker = "marker-" + strconv.Itoa(index+1)
-		}
-		var page []ManagedPolicy
-		if index < len(pages) {
-			page = pages[index]
-		}
-		return PolicyPage(marker, page...)
-	}
-}
-
 // EncodePolicyDocument URL-encodes a policy document the way IAM returns it
 // (RFC 3986 percent-encoding).
 func EncodePolicyDocument(doc string) string {
 	return strings.ReplaceAll(url.QueryEscape(doc), "+", "%20")
-}
-
-// PolicyVersion is one iam:GetPolicyVersion answer with the given document.
-func PolicyVersion(doc string) Reply {
-	return Reply{Body: fmt.Sprintf(`<GetPolicyVersionResponse xmlns="https://iam.amazonaws.com/doc/2010-05-08/">`+
-		`<GetPolicyVersionResult><PolicyVersion><Document>%s</Document><VersionId>v1</VersionId><IsDefaultVersion>true</IsDefaultVersion></PolicyVersion></GetPolicyVersionResult>`+
-		`<ResponseMetadata><RequestId>fake-request-id</RequestId></ResponseMetadata></GetPolicyVersionResponse>`,
-		xmlText(EncodePolicyDocument(doc)))}
-}
-
-// PolicyDocuments returns an iam:GetPolicyVersion handler that answers with
-// the document of the requested policy ARN, or NoSuchEntity.
-func PolicyDocuments(docs map[string]string) Handler {
-	return func(c Call) Reply {
-		doc, ok := docs[c.Form.Get("PolicyArn")]
-		if !ok {
-			return QueryError(http.StatusNotFound, "NoSuchEntity", "policy not found")
-		}
-		return PolicyVersion(doc)
-	}
 }
 
 // QueryError is an error answer of the query protocol (STS, IAM).
