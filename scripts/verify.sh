@@ -37,7 +37,8 @@
 #    the queue under tag:none.
 # 6. Runs the U2 sandbox tests (internal/cli/integration_u2_test.go) with the
 #    read-only profile; a skipped test is a failure.
-# 7. Prints the 95th percentile of each call and the 10-minute estimate.
+# 7. Prints the 95th percentile of each call (from five scans and plans of
+#    every region), the number of retried calls and the 10-minute estimate.
 #
 # The temporary folder of U3 and the queue of U2 are removed by one cleanup on
 # every exit; it is defined before the first of them is made.
@@ -361,5 +362,5 @@ passed="$(printf '%s\n' "$LAST_OUTPUT" | grep -c -- '--- PASS: TestIntegrationU2
 
 # 7. The 95th percentile of each call and the estimate (NFR1.8).
 echo "verify: call latencies and the 10-minute estimate"
-printf '%s\n' "$LAST_OUTPUT" | grep -E 'L95 |NFR1\.8 estimate|took ' | sed 's/^ *//'
+printf '%s\n' "$LAST_OUTPUT" | grep -E 'L95 |NFR1\.8 (estimate|retried)|took ' | sed 's/^ *//'
 echo "verify: OK"
