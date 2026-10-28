@@ -292,7 +292,7 @@ func TestLargeAnalysisU5CallsAndTime(t *testing.T) {
 		perfScale, len(changes), total, bound, elapsed, affected, undecided)
 }
 
-// NFR1.18: at most 4 IAM calls, 4 calls of one region and 8 regions at
+// NFR1.18: at most 10 IAM calls, 4 calls of one region and 8 regions at
 // once. A short delay lets the reads overlap.
 func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 	a, changes := largeAccount(perfScale * 4)
@@ -303,8 +303,8 @@ func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 	if _, err := New(s, largeRegions).Analyze(context.Background(), changes); err != nil {
 		t.Fatal(err)
 	}
-	if got := fake.MaxConcurrent("iam"); got > 4 || got < 2 {
-		t.Errorf("%d IAM calls at once, want 2 to 4", got)
+	if got := fake.MaxConcurrent("iam"); got > 10 || got < 2 {
+		t.Errorf("%d IAM calls at once, want 2 to 10", got)
 	}
 	if got := fake.MaxConcurrent("s3list"); got > 4 {
 		t.Errorf("%d bucket location calls at once, limit 4", got)

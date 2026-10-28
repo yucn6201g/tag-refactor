@@ -26,8 +26,9 @@ import (
 // to check that the analysis also finishes with one of each.
 var (
 	// iamWorkers read IAM policies: a managed policy, or the inline
-	// policies of one user, role or group.
-	iamWorkers = 4
+	// policies of one user, role or group. 10 keeps the estimate of
+	// NFR1.19 within 10 minutes with the L95 of the sandbox account.
+	iamWorkers = 10
 	// locationWorkers read the regions of buckets the bucket list gave none.
 	locationWorkers = 4
 	// regionWorkers read regions; each lists its keys, queues, topics and
