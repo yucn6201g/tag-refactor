@@ -41,9 +41,14 @@ type Call struct {
 	Path string
 	// Form holds the parameters of query-protocol requests (STS, IAM, EC2).
 	Form url.Values
-	// JSON holds the body of JSON-protocol requests (tagging API, AWS Config)
-	// and of REST-JSON requests (Resource Explorer).
+	// JSON holds the body of JSON-protocol requests (tagging API, AWS Config,
+	// KMS, SQS, Secrets Manager) and of REST-JSON requests (Resource
+	// Explorer).
 	JSON map[string]any
+	// Query holds the URL query of REST-XML requests (S3).
+	Query url.Values
+	// Bucket is the bucket an S3 request names, empty for ListBuckets.
+	Bucket string
 	// N counts the calls of the same Op so far, starting at 1.
 	N int
 }
@@ -61,6 +66,9 @@ type Reply struct {
 	Delay time.Duration
 	// Err, when set, is returned as a transport error instead of a response.
 	Err error
+	// Header holds extra response headers, for example the
+	// X-Amzn-Query-Error header of SQS errors.
+	Header map[string]string
 }
 
 // Handler answers the calls of one operation.
@@ -78,6 +86,11 @@ type FakeAWS struct {
 	counts   map[string]int
 	delay    func(Call) time.Duration
 	inFlight atomic.Int64
+	// keysOf, running and maxRunning count the requests in flight per key
+	// (TrackConcurrency).
+	keysOf     func(Call) []string
+	running    map[string]int
+	maxRunning map[string]int
 }
 
 // NewFakeAWS returns a fake AWS that reports unexpected calls to t.
@@ -133,6 +146,82 @@ func (f *FakeAWS) SetDelay(delay func(Call) time.Duration) {
 	f.delay = delay
 }
 
+// TrackConcurrency makes the fake count the requests in flight under the keys
+// keysOf gives each call, and remember the highest count of each key
+// (MaxConcurrent) and the highest number of keys with the same prefix in
+// flight at once (MaxDistinct). Tests use it to check the limits of the
+// parallel reads (U5 NFR1.18).
+func (f *FakeAWS) TrackConcurrency(keysOf func(Call) []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.keysOf = keysOf
+	f.running = map[string]int{}
+	f.maxRunning = map[string]int{}
+}
+
+// MaxConcurrent returns the highest number of requests in flight at once
+// under key.
+func (f *FakeAWS) MaxConcurrent(key string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxRunning[key]
+}
+
+// MaxDistinct returns the highest number of keys starting with prefix that
+// had requests in flight at the same time.
+func (f *FakeAWS) MaxDistinct(prefix string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.maxRunning["distinct:"+prefix]
+}
+
+// enter counts a call as in flight under its keys; the returned function
+// counts it out again.
+func (f *FakeAWS) enter(c Call) func() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.keysOf == nil {
+		return func() {}
+	}
+	keys := f.keysOf(c)
+	for _, k := range keys {
+		f.running[k]++
+		f.maxRunning[k] = max(f.maxRunning[k], f.running[k])
+	}
+	for _, k := range keys {
+		prefix := k
+		if i := strings.Index(k, ":"); i >= 0 {
+			prefix = k[:i+1]
+		}
+		n := 0
+		for other, count := range f.running {
+			if count > 0 && strings.HasPrefix(other, prefix) {
+				n++
+			}
+		}
+		f.maxRunning["distinct:"+prefix] = max(f.maxRunning["distinct:"+prefix], n)
+	}
+	return func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, k := range keys {
+			f.running[k]--
+		}
+	}
+}
+
+// ServiceRegionDelays returns a delay function that gives each pair of
+// service and region a fixed pseudo-random delay below max, chosen by seed
+// (U5 NFR5.11: the kinds of policies and the regions finish in a different
+// order for each seed).
+func ServiceRegionDelays(seed int64, max time.Duration) func(Call) time.Duration {
+	return func(c Call) time.Duration {
+		h := fnv.New64a()
+		_, _ = fmt.Fprintf(h, "%d/%s/%s", seed, c.Service, c.Region)
+		return time.Duration(h.Sum64() % uint64(max))
+	}
+}
+
 // RegionDelays returns a delay function that gives each region a fixed
 // pseudo-random delay below max, chosen by seed. The same seed always gives
 // the same delays; different seeds give different finishing orders.
@@ -180,6 +269,8 @@ func (f *FakeAWS) RoundTrip(req *http.Request) (*http.Response, error) {
 	h, ok := f.handlers[call.Op]
 	delay := f.delay
 	f.mu.Unlock()
+	leave := f.enter(call)
+	defer leave()
 
 	if !IsReadOperation(call.Op) {
 		f.t.Errorf("fake AWS: non-read operation %s was called", call.Op)
@@ -220,6 +311,9 @@ func newResponse(req *http.Request, r Reply) *http.Response {
 	header := http.Header{}
 	header.Set("Content-Type", contentType)
 	header.Set("X-Amzn-Requestid", "fake-request-id")
+	for k, v := range r.Header {
+		header.Set(k, v)
+	}
 	return &http.Response{
 		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
 		StatusCode:    status,
@@ -254,6 +348,11 @@ func parseCall(req *http.Request) (Call, error) {
 	}
 	c := Call{Service: service, Region: region, AccessKeyID: accessKey, Host: req.URL.Host, Path: req.URL.Path}
 	switch {
+	case service == "s3":
+		// REST-XML (S3): the operation follows from the bucket and the
+		// query.
+		c.Query = req.URL.Query()
+		c.Bucket, c.Action = s3Operation(req.URL.Host, req.URL.Path, c.Query)
 	case req.Header.Get("X-Amz-Target") != "":
 		// JSON 1.1 (tagging API, AWS Config): the operation is in the header.
 		target := req.Header.Get("X-Amz-Target")
@@ -282,6 +381,29 @@ func parseCall(req *http.Request) (Call, error) {
 	}
 	c.Op = c.Service + ":" + c.Action
 	return c, nil
+}
+
+// s3Operation names the bucket and the operation of an S3 request. The bucket
+// is the first part of the host (virtual-hosted style) or of the path (path
+// style); the operation is the x-id parameter the SDK adds, or follows from
+// the subresource in the query.
+func s3Operation(host, path string, query url.Values) (bucket, action string) {
+	if i := strings.Index(host, ".s3."); i > 0 {
+		bucket = host[:i]
+	} else if p := strings.Trim(path, "/"); p != "" {
+		bucket, _, _ = strings.Cut(p, "/")
+	}
+	switch {
+	case query.Get("x-id") != "":
+		action = query.Get("x-id")
+	case bucket == "":
+		action = "ListBuckets"
+	case query.Has("policy"):
+		action = "GetBucketPolicy"
+	case query.Has("location"):
+		action = "GetBucketLocation"
+	}
+	return bucket, action
 }
 
 // isRESTJSON reports whether a request without X-Amz-Target uses REST-JSON:

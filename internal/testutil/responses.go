@@ -26,12 +26,14 @@ func xmlText(s string) string {
 }
 
 // HandleDefaults registers the answers every connected command needs: the
-// caller identity (account TestAccount), the enabled regions, and an account
-// without AWS Config recording or Resource Explorer (HandleNoDiscovery).
+// caller identity (account TestAccount), the enabled regions, an account
+// without AWS Config recording or Resource Explorer (HandleNoDiscovery), and
+// an account without policies (HandleNoPolicySources).
 func (f *FakeAWS) HandleDefaults(regions ...string) {
 	f.Handle("sts:GetCallerIdentity", Static(CallerIdentity(TestAccount, TestCallerARN)))
 	f.Handle("ec2:DescribeRegions", Static(Regions(regions...)))
 	f.HandleNoDiscovery()
+	f.HandleNoPolicySources()
 }
 
 // Static returns a handler that always gives r.
@@ -134,10 +136,15 @@ func TagPages(pages ...[]TaggedResource) Handler {
 	}
 }
 
-// ManagedPolicy is one entry of an iam:ListPolicies page.
+// ManagedPolicy is one entry of an iam:ListPolicies page. A policy is
+// attached to one user, role or group unless NotAttached is set.
 type ManagedPolicy struct {
 	ARN            string
 	DefaultVersion string
+	// NotAttached gives the policy an AttachmentCount of 0.
+	NotAttached bool
+	// Boundaries is its PermissionsBoundaryUsageCount.
+	Boundaries int
 }
 
 // PolicyPage is one iam:ListPolicies answer. A non-empty marker means more
@@ -156,9 +163,14 @@ func PolicyPage(marker string, policies ...ManagedPolicy) Reply {
 			version = "v1"
 		}
 		name := p.ARN[strings.LastIndex(p.ARN, "/")+1:]
+		attachments := 1
+		if p.NotAttached {
+			attachments = 0
+		}
 		fmt.Fprintf(&b, `<member><PolicyName>%s</PolicyName><PolicyId>ANPAFAKE%04d</PolicyId><Arn>%s</Arn><Path>/</Path>`+
-			`<DefaultVersionId>%s</DefaultVersionId><AttachmentCount>1</AttachmentCount><IsAttachable>true</IsAttachable></member>`,
-			xmlText(name), i, xmlText(p.ARN), xmlText(version))
+			`<DefaultVersionId>%s</DefaultVersionId><AttachmentCount>%d</AttachmentCount>`+
+			`<PermissionsBoundaryUsageCount>%d</PermissionsBoundaryUsageCount><IsAttachable>true</IsAttachable></member>`,
+			xmlText(name), i, xmlText(p.ARN), xmlText(version), attachments, p.Boundaries)
 	}
 	b.WriteString(`</Policies></ListPoliciesResult><ResponseMetadata><RequestId>fake-request-id</RequestId></ResponseMetadata></ListPoliciesResponse>`)
 	return Reply{Body: b.String()}
