@@ -1,0 +1,314 @@
+{
+  "stage": "code-generation",
+  "unit": "u5-impact",
+  "upstream_ids": [
+    "AC3.2.1",
+    "AC3.2.2",
+    "AC3.2.3",
+    "AC3.2.4",
+    "AC3.2.5",
+    "AC3.2.6",
+    "BR1.1",
+    "BR1.2",
+    "BR1.3",
+    "BR1.4",
+    "BR1.5",
+    "BR1.6",
+    "BR1.7",
+    "BR2.1",
+    "BR2.2",
+    "BR2.3",
+    "BR2.4",
+    "BR3.1",
+    "BR3.2",
+    "BR3.3",
+    "BR4.1",
+    "BR4.2",
+    "BR4.3",
+    "BR4.4",
+    "BR4.5",
+    "BR4.6",
+    "BR4.7",
+    "BR5.1",
+    "BR5.2",
+    "BR5.3",
+    "BR5.4",
+    "NFR1.16",
+    "NFR1.17",
+    "NFR1.18",
+    "NFR1.19",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR3.9",
+    "NFR5.10",
+    "NFR5.11",
+    "NFR8.20",
+    "NFR8.21",
+    "NFR8.22",
+    "NFR10.9",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR5.7",
+    "NFR8.15",
+    "NFR8.16"
+  ],
+  "coverage": [
+    {
+      "id": "AC3.2.1",
+      "status": "OK",
+      "target": "internal/cli/acceptance_u5_test.go"
+    },
+    {
+      "id": "AC3.2.2",
+      "status": "OK",
+      "target": "internal/cli/acceptance_u5_test.go"
+    },
+    {
+      "id": "AC3.2.3",
+      "status": "OK",
+      "target": "internal/cli/acceptance_u5_test.go"
+    },
+    {
+      "id": "AC3.2.4",
+      "status": "OK",
+      "target": "internal/cli/acceptance_u5_test.go"
+    },
+    {
+      "id": "AC3.2.5",
+      "status": "OK",
+      "target": "internal/cli/acceptance_u5_test.go"
+    },
+    {
+      "id": "AC3.2.6",
+      "status": "OK",
+      "target": "internal/impact/detection_test.go"
+    },
+    {
+      "id": "BR1.1",
+      "status": "OK",
+      "target": "internal/awsaccess/read.go"
+    },
+    {
+      "id": "BR1.2",
+      "status": "OK",
+      "target": "internal/awsaccess/inline.go"
+    },
+    {
+      "id": "BR1.3",
+      "status": "OK",
+      "target": "internal/awsaccess/resourcepolicies.go"
+    },
+    {
+      "id": "BR1.4",
+      "status": "OK",
+      "target": "README.md"
+    },
+    {
+      "id": "BR1.5",
+      "status": "OK",
+      "target": "internal/impact/impact.go"
+    },
+    {
+      "id": "BR1.6",
+      "status": "OK",
+      "target": "internal/impact/impact.go"
+    },
+    {
+      "id": "BR1.7",
+      "status": "OK",
+      "target": "internal/impact/policy.go"
+    },
+    {
+      "id": "BR2.1",
+      "status": "OK",
+      "target": "internal/impact/policy.go"
+    },
+    {
+      "id": "BR2.2",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR2.3",
+      "status": "OK",
+      "target": "internal/impact/policy.go"
+    },
+    {
+      "id": "BR2.4",
+      "status": "OK",
+      "target": "internal/impact/policy.go"
+    },
+    {
+      "id": "BR3.1",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR3.2",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR3.3",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.1",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.2",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.3",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.4",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.5",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.6",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR4.7",
+      "status": "OK",
+      "target": "internal/impact/match.go"
+    },
+    {
+      "id": "BR5.1",
+      "status": "OK",
+      "target": "internal/impact/findings.go"
+    },
+    {
+      "id": "BR5.2",
+      "status": "OK",
+      "target": "internal/impact/findings.go"
+    },
+    {
+      "id": "BR5.3",
+      "status": "OK",
+      "target": "docs/iam/readonly-policy.json"
+    },
+    {
+      "id": "BR5.4",
+      "status": "OK",
+      "target": "internal/impact/impact.go"
+    },
+    {
+      "id": "NFR1.16",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR1.18",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR1.19",
+      "status": "OK",
+      "target": "scripts/verify.sh"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "internal/impact/detection_test.go"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "internal/cli/integration_u5_test.go"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "internal/awsaccess/docs_test.go"
+    },
+    {
+      "id": "NFR5.10",
+      "status": "OK",
+      "target": "internal/cli/impact_u5_test.go"
+    },
+    {
+      "id": "NFR5.11",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR8.20",
+      "status": "OK",
+      "target": "internal/impact/policy.go"
+    },
+    {
+      "id": "NFR8.21",
+      "status": "OK",
+      "target": "internal/impact/fuzz_test.go"
+    },
+    {
+      "id": "NFR8.22",
+      "status": "OK",
+      "target": "internal/cli/impact_u5_test.go"
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": ".github/workflows/ci.yml"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "internal/cli/performance_u2_test.go"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "scripts/verify.sh"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "internal/impact/impact.go"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "internal/impact/large_test.go"
+    },
+    {
+      "id": "NFR8.15",
+      "status": "OK",
+      "target": "internal/display/impact_test.go"
+    },
+    {
+      "id": "NFR8.16",
+      "status": "OK",
+      "target": "internal/display/impact_test.go"
+    }
+  ]
+}

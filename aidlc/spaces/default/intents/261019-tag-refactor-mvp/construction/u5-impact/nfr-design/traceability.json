@@ -1,0 +1,128 @@
+{
+  "stage": "nfr-design",
+  "unit": "u5-impact",
+  "upstream_ids": [
+    "NFR1.16",
+    "NFR1.17",
+    "NFR1.18",
+    "NFR1.19",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR3.9",
+    "NFR5.10",
+    "NFR5.11",
+    "NFR8.20",
+    "NFR8.21",
+    "NFR8.22",
+    "NFR10.9",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR5.7",
+    "NFR8.15",
+    "NFR8.16"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.16",
+      "status": "OK",
+      "target": "logical-components.md「1ページの件数」「呼び出しの回数の式」: API ごとの件数、段ごとの式、測る条件の分布と 4,913 回、テストは置いた件数から上限を計算"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "OK",
+      "target": "logical-components.md「テストの設計」の「ツール自身の処理の時間」: 遅れなしの偽の AWS で Analyze を測り、CI の各 OS で10秒以内(race のときは10分の1・10倍)"
+    },
+    {
+      "id": "NFR1.18",
+      "status": "OK",
+      "target": "logical-components.md「同時に読む作り」: 段ごとの表(IAM 4、S3 の場所 4、リージョン 8 × 4)、配り手だけが仕事を足す、枠を1にしても終わるテスト(Q1 A で改めた)"
+    },
+    {
+      "id": "NFR1.19",
+      "status": "OK",
+      "target": "logical-components.md「10分の見積もり」: 段に合わせた式、最も多いリージョンを下限にする、偏った分布と1つのリージョンに集まった場合の両方を記録"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "logical-components.md「テストの設計」: 252行と32行の期待する判定の表と、行の数の照合"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "logical-components.md「テストの設計」: internal/cli の結合テスト。リソースの置き方はインフラの設計"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "security-design.md §1: 読み取りの口の表、操作の表、例のポリシーの Resource の範囲、R2"
+    },
+    {
+      "id": "NFR5.10",
+      "status": "OK",
+      "target": "security-design.md §4: 失敗を集める、認証情報の誤りで止めるのは cli の包みだけ(足した口に広げる)、最初の1つを返す、取り消しと goroutine のテスト。§1 の誤りの表"
+    },
+    {
+      "id": "NFR5.11",
+      "status": "OK",
+      "target": "logical-components.md「結果の順と照合の作り」「テストの設計」の「同じ結果」: 終わってから BR5.2 の鍵で並べる、乱数の種を変えた10回の実行で標準出力と保存した変更案を比べる、Linux で -race"
+    },
+    {
+      "id": "NFR8.20",
+      "status": "OK",
+      "target": "security-design.md §2 の1・2: 1 MiB の比べ方と固定の理由"
+    },
+    {
+      "id": "NFR8.21",
+      "status": "OK",
+      "target": "security-design.md §2 の3〜5: 1つの読み取りの関数、FuzzParsePolicy、ワイルドカードの使い回しの入れ物(索引と分け、ロックで守り、1,024個まで)"
+    },
+    {
+      "id": "NFR8.22",
+      "status": "OK",
+      "target": "security-design.md §3: --debug、理由の文言、表示とエスケープ"
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": "logical-components.md「テストの設計」: 大きなテストを2分以内、カバレッジ80%以上"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "logical-components.md「同時に読む作り」と security-design.md §2 の5: U1 の要件(ポリシーの数に上限なく読み、照合の手間を条件の数と変更の数の積に比例する程度にする)を、変更の索引と長さに比例するワイルドカードの照合で守る"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "logical-components.md「1ページの件数と呼び出しの回数」: U2 の呼び出しの回数の上限の式の、plan の IAM の読み取りの分を、U5 の式に置き換える"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "logical-components.md「10分の見積もり」: U2 の見積もりの IAM の分を、U5 の影響分析の時間に置き換える"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "logical-components.md「同時に読む作り」: U2 と同じく、同時に読む数はツールが決めた固定の数で、利用者は変えられない"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "logical-components.md「結果の順と照合の作り」: U2 と同じく、同時に読んでも結果を決まった鍵で並べる"
+    },
+    {
+      "id": "NFR8.15",
+      "status": "OK",
+      "target": "security-design.md §3: U4 の一覧、差分、JSON の守りを、影響の指摘にも当てる"
+    },
+    {
+      "id": "NFR8.16",
+      "status": "OK",
+      "target": "security-design.md §3: U4 の Markdown のコードスパンを、影響の指摘にも当てる"
+    }
+  ]
+}

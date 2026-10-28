@@ -1,0 +1,146 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u5-impact",
+  "upstream_ids": [
+    "NFR1.16",
+    "NFR1.17",
+    "NFR1.18",
+    "NFR1.19",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR3.9",
+    "NFR5.10",
+    "NFR5.11",
+    "NFR8.20",
+    "NFR8.21",
+    "NFR8.22",
+    "NFR10.9",
+    "NFR1.5",
+    "NFR1.6",
+    "NFR1.8",
+    "NFR1.9",
+    "NFR5.7",
+    "NFR8.15",
+    "NFR8.16",
+    "NFR3.1",
+    "NFR5.4",
+    "NFR5.8"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.16",
+      "status": "OK",
+      "target": "cicd-pipeline.md test と race のジョブ(大きな偽の AWS の呼び出しの回数)"
+    },
+    {
+      "id": "NFR1.17",
+      "status": "OK",
+      "target": "cicd-pipeline.md test と race のジョブ(ツール自身の処理の時間10秒、race のときの件数と上限)"
+    },
+    {
+      "id": "NFR1.18",
+      "status": "OK",
+      "target": "cicd-pipeline.md test と race のジョブ(同時の数の上限、枠を1にしても終わる)"
+    },
+    {
+      "id": "NFR1.19",
+      "status": "OK",
+      "target": "cicd-pipeline.md「測る値の記録」(5回の --debug、操作ごとの L95 と標本の数、種類ごとの最大、上限に当たった回数)と、チェックポイントでの見積もりの記録"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "cicd-pipeline.md test、race、coverage のジョブ(期待する判定の表)"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "cicd-pipeline.md U5 の確認用のスタック(10個のリソース、ValidatePolicy)と、結合テスト TestIntegrationU5ImpactSandbox(読み取り用のプロファイル、指摘の確かめ)"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "cicd-pipeline.md U1 の確認用のスタックの R2、docs_test.go の照合、変更セットを示して人の許可を得てから実行する手順、verify.sh の R2 の確かめ"
+    },
+    {
+      "id": "NFR5.10",
+      "status": "OK",
+      "target": "cicd-pipeline.md test と race のジョブ(失敗を集める、認証情報の誤り、goroutine)"
+    },
+    {
+      "id": "NFR5.11",
+      "status": "OK",
+      "target": "cicd-pipeline.md race のジョブ(Linux、-race 付きの10回の実行)"
+    },
+    {
+      "id": "NFR8.20",
+      "status": "OK",
+      "target": "cicd-pipeline.md test のジョブの「文書の大きさの境目」の行(1 MiB + 1 バイトと、ちょうど 1 MiB)"
+    },
+    {
+      "id": "NFR8.21",
+      "status": "OK",
+      "target": "cicd-pipeline.md FuzzParsePolicy の種の入力(CI)と、チェックポイントの手元の5分"
+    },
+    {
+      "id": "NFR8.22",
+      "status": "OK",
+      "target": "cicd-pipeline.md test のジョブ(--debug と理由、出力の守り)と、検証のスクリプト(シークレットの値を読まない)"
+    },
+    {
+      "id": "NFR10.9",
+      "status": "OK",
+      "target": "cicd-pipeline.md 大きなテストを2分以内、coverage のジョブの80%"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "cicd-pipeline.md 大きな偽の AWS のテスト(U1 の照合の手間の要件を、ポリシーと変更を増やした条件で確かめる)"
+    },
+    {
+      "id": "NFR1.6",
+      "status": "OK",
+      "target": "cicd-pipeline.md 大きな偽の AWS の呼び出しの回数(U2 の式の IAM の分を U5 の式に置き換えたもの)"
+    },
+    {
+      "id": "NFR1.8",
+      "status": "OK",
+      "target": "cicd-pipeline.md 検証のスクリプトの「測る値の記録」(U2 の L95 の出し方)"
+    },
+    {
+      "id": "NFR1.9",
+      "status": "OK",
+      "target": "cicd-pipeline.md 同時の数の上限のテスト(固定の数。オプションで変えられない)"
+    },
+    {
+      "id": "NFR5.7",
+      "status": "OK",
+      "target": "cicd-pipeline.md race のジョブの同じ結果のテスト"
+    },
+    {
+      "id": "NFR8.15",
+      "status": "OK",
+      "target": "cicd-pipeline.md test のジョブ(U4 の出力の守りのテストに影響の指摘を足す)"
+    },
+    {
+      "id": "NFR8.16",
+      "status": "OK",
+      "target": "cicd-pipeline.md test のジョブ(U4 の Markdown のテストに影響の指摘を足す)"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "cicd-pipeline.md test のジョブ(U1 の書き込みの操作で失敗する差し替えに、足した読み取りの口を加えたテスト)"
+    },
+    {
+      "id": "NFR5.4",
+      "status": "OK",
+      "target": "cicd-pipeline.md 検証のスクリプトの「測る値の記録」とチェックポイントの見積もり(U2 の上限の待ち時間を足す)"
+    },
+    {
+      "id": "NFR5.8",
+      "status": "OK",
+      "target": "cicd-pipeline.md test と race のジョブ(U2 の認証情報の誤りで止める包みを、足した口に広げたテスト)"
+    }
+  ]
+}

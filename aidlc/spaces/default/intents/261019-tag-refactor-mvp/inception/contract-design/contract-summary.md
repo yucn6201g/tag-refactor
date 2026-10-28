@@ -152,6 +152,7 @@ properties:
         policyRef: { type: string }         # ポリシーの ARN、またはリソースの ARN とポリシーの種類
         sourceKind: { enum: [iamManaged, iamInline, s3Bucket, kmsKey, sqsQueue, snsTopic, secretsManagerSecret] }
         statementId: { type: string }
+        conditionOperator: { type: string } # U5 で足した。書いたままの演算子(Resource・NotResource の指摘では空)
         conditionKey: { type: string }
         conditionValue: { type: string }
         changeIds:                          # 原因になった変更(resources[].changes[].changeId)
@@ -163,6 +164,8 @@ properties:
       type: object
       properties:
         sourceKind: { type: string }
+        policyRef: { type: string }         # U5 で足した。1つのポリシーを読めなかったときだけ(一覧を読めなかったときは省く)
+        region: { type: string }            # U5 で足した。リソースポリシーのリージョン(IAM と S3 の一覧は省く)
         reason: { type: string }
   unsetRequiredTags:
     type: array
@@ -195,6 +198,13 @@ properties:
 - `resources[].changes[].mergesIntoExisting`(真偽値。`renameKey` で必須。意味は上の表)
 - `keyConflicts[]`: 変えなかった衝突のリソース。各項目は `arn`(必須)、`canonicalKey`(必須)、`presentTags`(必須。キーから収集したままの値への対応表)
 - `changeValue` の `fromKey` は、同じリソースの `renameKey` の `toKey`(変更後のキー名)になることがあります。変更はリソースの中で `changes` の順に行います。`renameKey` と `removeKey` にも、参考として `fromValue` を書きます。
+
+**U5 で足した項目(項目を足すだけなので `version` は 1 のまま):**
+
+- `unreadPolicies[].policyRef` と `unreadPolicies[].region`(上の形。U5 の機能設計 BR1.5、BR1.6)。C3 の plan の `details` の `unreadPolicies` にも同じ項目を書きます。
+- `impactFindings[].policyRef` は、管理ポリシーならポリシーの ARN、インラインポリシーなら `<ユーザー・ロール・グループの ARN>#<ポリシーの名前>`、リソースポリシーならポリシーが付いたリソースの ARN です。
+- `impactFindings[].conditionOperator`(書いたままの演算子。同じ条件キーで演算子だけが違う指摘を区別する)。
+- `impactFindings[].conditionKey` が `Resource` か `NotResource` のときは、その中のポリシー変数による参照です。`conditionOperator` は空で、`conditionValue` は `Resource`(または `NotResource`)のすべての値を文書の順に「, 」でつないだものです(U5 の機能設計 BR5.1)。
 
 - 影響のある変更は、`impactFindings[].changeIds` から `resources[].changes[].changeId` へたどれます。たどった先の `resources[].arn` が、影響を受けるリソースです。`impacted` はその結果を変更の側にも書いたもので、U6 は確認画面の強調と、`--yes` だけのときの停止の判定(FR5.4、FR5.5)に使います。
 - **グローバルなリソース:** `global: true` とし、`region` には、そのリソースのタグの API を呼ぶリージョンを入れます(例: `us-east-1`)。種類ごとの正しい値の確認は未決事項です。
@@ -440,10 +450,10 @@ ImpactAnalyzer:
 TagChangeInput:
   fields: [changeId, resourceArn, kind(renameKey|changeValue|addRequired|removeKey), fromKey, toKey, fromValue, toValue]
 ImpactResult:
-  fields: [findings(verdict, policyRef, sourceKind, statementId, conditionKey, conditionValue, changeIds), unreadPolicies, complete]
+  fields: [findings(verdict, policyRef, sourceKind, statementId, conditionOperator, conditionKey, conditionValue, changeIds), unreadPolicies(sourceKind, policyRef, region, reason), complete]   # U5 で conditionOperator と unreadPolicies の policyRef、region を足した
 rules:
   - changeId は C2 の changes[].changeId と同じ値を使う
-  - ワイルドカードやポリシー変数を含む条件は undecided とし、affected でも「影響なし」でもない
+  - ポリシー変数を含む条件や、文字列でない演算子など、機械的に判定できない条件は undecided とし、「影響なし」にしない。ワイルドカード(*、?)は IAM と同じパターンとして当てはめ、当てはまれば affected、当てはまらなければ影響なしとする(U5 の機能設計で改訂。U5 の機能設計の BR2.2 と functional-spec.md の Assumptions)
   - 読めなかったポリシーは unreadPolicies に入れ、complete を false にする
 ```
 

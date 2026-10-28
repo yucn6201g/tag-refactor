@@ -1,0 +1,28 @@
+## Review
+
+**Verdict:** NOT-READY
+**Reviewer:** aidlc-architecture-reviewer-agent
+**Date:** 2026-10-25T02:50:54Z
+**Iteration:** 1
+
+### Findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|---|---|---|---|---|---|
+| R-01 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > 検証用アカウントのリソース > RU5、結合テスト手順 4 | 結合テストは「RU5 の `team` の名前の変更が原因の `Resource` の指摘」を必須としているが、RU5(IAM のロール)のタグが `plan --region ap-northeast-1` の変更に出ることは、どこにも確かめられていない。IAM のロールは全リージョン共通のリソースで、scan の入口(タグ用 API、AWS Config、Resource Explorer)はリージョンごとに引く。これまでの確認用リソース(U1 の R1・R2、U2、U4 のテスト)は、タグ付きの IAM ロールを scan が拾うことを一度も使っていない。`team` の変更が無ければ、BR3.3 の「IAM のユーザーとロールの変更」が空になり、`PrincipalTag/team` と `Resource` の指摘は出ず、結合テストは必ず失敗する(検証コマンドが通らない)。 | コード生成の前に、既存のアカウントで読み取りだけの確認をして、RU5 相当のタグ付きロールが `--region ap-northeast-1` だけで変更に出るかを確かめ、結果をこの文書に書く。出ないなら、テストと検証スクリプトの plan の `--region` に IAM を引くリージョン(例: us-east-1)を足すか、`PrincipalTag`/`Resource` の期待を IAM のロールが確実に出る形に変える。どちらかをこの文書で決める。 | New |
+| R-02 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > 検証用アカウントのリソース(U5 の確認用のスタックの表) | テンプレートの書き方が、そのままでは作れない、または期待する指摘が出ない形になりうる。(1) バケットポリシー、キューポリシー、トピックポリシー、シークレットのリソースポリシーは CloudFormation では別のリソースの種類(`AWS::S3::BucketPolicy`、`AWS::SQS::QueuePolicy`、`AWS::SNS::TopicPolicy`、`AWS::SecretsManager::ResourcePolicy`)だが、表には6つのリソースしかなく、どの種類をどう足すか決まっていない。(2) RU5 の `Resource` の `${aws:PrincipalTag/team}` は、バケットの ARN を入れるために `Fn::Sub` を使うと CloudFormation の置き換えとして読まれ、`${!aws:PrincipalTag/team}` と書かないとスタックの作成が失敗するか、変数が消える。文書はこの書き方を決めていない。(3) S3、SQS、SNS、Secrets Manager のリソースポリシーの条件キーに `aws:ResourceTag/env` を使うことが、各サービスで受け付けられるか(S3 はバケットの ABAC の有効化に左右される)を確かめた根拠がない。受け付けられないと作成が失敗し、AWS への変更の手順の途中で止まる。 | 表に、ポリシーを付ける4つのリソースの種類と依存(ポリシー → 対象)を足す。RU5 の `Resource` は `Fn::Sub` の `${!...}` による書き方(または `Fn::Join`)を明記する。5つのポリシーが条件キーつきで作成できることを、`cfn-lint` と、人の許可を得た作成の前の確認(各サービスの文書か、変更セットの検証)で確かめ、受け付けられないサービスがあるときの代わりの形(例: 条件を `StringEquals` から別の形へ、またはそのサービスだけ偽の AWS のテストに任せる)を決めておく。 | New |
+| R-03 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > AWS への変更の手順(人の許可を得てから) | 人に示す手順が、そのまま実行できず、許可の意味も弱い。(1) IAM のロールを作る・更新するスタックには `--capabilities CAPABILITY_IAM` が要るが、書かれていない。(2) U1 のスタックの更新は、`SsoPermissionSetName` に既定値が無いため `aws cloudformation deploy` に `--parameter-overrides` が要る(`deploy` は前の値の再利用ができない)が、U5 のスタックの分しか触れていない。(3)「変更セットで先に確かめる」と「`aws cloudformation deploy` で行う」が両立しない。`deploy` は既定で変更セットを作ってすぐ実行するため、R2 のポリシーだけが変わることを確かめる機会が無い(`--no-execute-changeset` が要る)。人が許可する内容が、実行されるコマンドと変更セットの中身になっていない。 | 人に示す内容を、実際のコマンド(`--capabilities`、`--parameter-overrides`、`--tags`、`--no-execute-changeset` で変更セットを作って `describe-change-set` で R2 の `Policies` だけの変更とロールが置き換えにならないことを示す手順、許可のあとに `execute-change-set`)に書き換える。U5 のスタックの作成も同じ形にする。 | New |
+| R-04 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > 検証のスクリプト > 結合テスト手順 3 | `impactAnalysisComplete` が true であることを必須にしているが、アカウント全体(ap-northeast-1 のほかのキー、キュー、トピック、シークレット、バケットのポリシー、残った U2 のキューなど)がすべて R2 の権限で読めることが前提になる。前提の確認も、スタックの外の読めなかったものを許す設けも無い。KMS の状態によっては `KMSInvalidStateException` が Internal になり不完全になる(`security-design.md` §1)。 | 結合テストが、読めなかったものを出して失敗にする(今の案)のに加え、スタック外の読めなかったものだけが原因のときは、その旨を切り分けて表示する、または前提(アカウントに R2 で読めないポリシーが無いこと)を文書に書く。 | New |
+| R-05 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > 検証のスクリプト > 動かし方、結合テスト手順 2 | 手順 2 の plan のコマンドに `--profile` が無い。U4 のテストは `--profile` に `TAG_REFACTOR_IT_PROFILE` を渡している。渡さないと管理用の認証情報で動いて R2 の権限の不足(NFR3.9 の受け入れ条件)が見えなくなる。環境変数も `TAG_REFACTOR_IT_U5_ROLE など` と省略されていて、6つの名前と、スタックの出力のキー名が決まっていない。前の確かめは、スタックの状態だけで、R2 が更新済みかを見ない(未更新だとテストが読めなかったもので落ちるが、案内が出ない)。 | `--profile` を手順に明記する。6つの環境変数名と出力のキー名を表にする。前の確かめに、R2 のポリシーに足した操作(例: `iam:GetRolePolicy` の対象)が入っていることの確認か、失敗時の案内(「U1 のスタックの R2 を更新する」)を足す。 | New |
+| R-06 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > 検証のスクリプト > 測る値の記録、チェックポイントでの人の確認 | L95 の測り方が決まりきっていない。(1) 測る処理が Go のテストの中か `verify.sh` の中か、見積もりの式(`logical-components.md`)を誰が計算するかが書かれていない。(2) 検証用アカウントは1リージョンで数個のリソースしかなく、KMS、SNS、Secrets Manager の操作は標本が数件で、L95 が最大値と同じになる。(3) 式の L95(IAM)、L95(リソースポリシー)に、操作ごとの L95 をどう1つにまとめるか(最大値か)が無い。(4) 上限に当たった待ち時間の回数を数えることが書かれていない。 | 標本の最小数(足りないときは繰り返して集める)、まとめ方(例: 種類ごとの最大の L95)、出力する行の形、計算を人が行うか `verify.sh` が出すかを書く。 | New |
+| R-07 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md > `ci.yml` > 足すテスト、traceability.json NFR8.20 | `lint` ジョブの `cfn-lint test/sandbox/*-fixtures.yaml` が新しい `u5-fixtures.yaml` を自動で検査するのに、「`ci.yml` の変更なし」の説明がこれに触れていない(ポリシー変数や `Fn::Sub` の警告が CI を落としうる)。また NFR8.20 の受け入れ条件(1 MiB + 1 バイトで読めなかったものと終了コード1、ちょうど 1 MiB は読まれる)のテストが、足すテストの表に明示されていない。 | 表に cfn-lint の対象が増えることを書く。NFR8.20 の大きさの境界のテストを、表の行として足す。 | New |
+
+### Validation Tool Results
+
+| Tool | Result | Interpretation |
+|---|---|---|
+| sensor-traceability | PASS(`gaps`、`orphans`、`missing_from_table`、`invalid_targets` はすべて空) | 構造は通る。ただし NFR8.20 の境界のテストと NFR1.19 の測り方は、上の表のとおり対象の中身が薄い。 |
+
+### Summary
+
+AWS を呼ばない CI の部分(ジョブの再利用、`-race` と時間の配分、`govulncheck` と Dependabot、R2 と `docs_test.go` の照合の広げ方)は筋が通っている。しかし、検証用アカウントの結合テストが依存する RU5 の変更が scan に出る保証が無いこと、確認用のテンプレートの部品(ポリシー用のリソースの種類、`Fn::Sub` の逃がし方、条件キーの受け入れ)が決まっていないこと、人に示す AWS の変更の手順がそのまま実行できないことが、Major 3 件として残っているため NOT-READY とする。

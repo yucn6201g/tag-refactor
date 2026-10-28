@@ -1,0 +1,22 @@
+{
+  "stage": "functional-design",
+  "unit": "u5-impact",
+  "upstream_ids": ["AC3.2.1", "AC3.2.2", "AC3.2.3", "AC3.2.4", "AC3.2.5", "AC3.2.6"],
+  "coverage": [
+    { "id": "AC3.2.1", "status": "OK", "target": "BR1.1, BR1.2, BR1.6, BR2.1, BR3.1, BR4.2, BR5.1" },
+    { "id": "AC3.2.2", "status": "OK", "target": "BR1.3, BR3.2, BR4.3, BR4.7" },
+    { "id": "AC3.2.3", "status": "OK", "target": "BR4.2" },
+    { "id": "AC3.2.4", "status": "OK", "target": "BR2.2, BR2.4, BR4.6" },
+    { "id": "AC3.2.5", "status": "OK", "target": "BR1.5" },
+    { "id": "AC3.2.6", "status": "OK", "target": "BR2.1, BR2.4, BR3.3, BR4.4, BR4.5" }
+  ],
+  "reverse": [
+    { "id": "BR1.4", "status": "N/A", "target": "読まないポリシーの記録(CON3、Q2)。受け入れ条件はない" },
+    { "id": "BR1.7", "status": "N/A", "target": "文書の読み方(URL エンコード)の技術的な規則" },
+    { "id": "BR2.3", "status": "N/A", "target": "演算子の種類の分け方。BR4.7 の値の比べ方が使う技術的な規則" },
+    { "id": "BR4.1", "status": "N/A", "target": "変更のキーの決め方。BR4.2〜BR4.6 が使う技術的な規則" },
+    { "id": "BR5.2", "status": "N/A", "target": "結果の順を毎回同じにする規則(U4 BR1.8 と同じ考え方)" },
+    { "id": "BR5.3", "status": "N/A", "target": "読み取りの API だけを呼ぶ規則(NFR3、US1.2 の AC1.2.1 は U2 が持つ)" },
+    { "id": "BR5.4", "status": "N/A", "target": "止められたときの扱い(U1 BR5.5、U4 の NFR の設計)" }
+  ]
+}
