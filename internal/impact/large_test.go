@@ -289,7 +289,7 @@ func TestLargeAnalysisU5CallsAndTime(t *testing.T) {
 // so that several of them follow each other.
 func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 	a, changes := largeAccount(perfScale * 4)
-	a.DetailsPageItems = 50
+	a.DetailsPageItems = thirdOfIAM(a)
 	fake, s := largeWorld(t, a)
 	fake.SetDelay(func(testutil.Call) time.Duration { return time.Millisecond })
 	fake.TrackConcurrency(concurrencyKeys)
@@ -315,6 +315,13 @@ func TestLargeAnalysisU5StaysWithinItsConcurrency(t *testing.T) {
 		t.Errorf("%d regions at once, want 2 to 8", got)
 	}
 	t.Logf("at once: IAM %d, skewed region %d, regions %d", fake.MaxConcurrent("iam"), fake.MaxConcurrent("region:"+skewedRegion), fake.MaxDistinct("region:"))
+}
+
+// thirdOfIAM is a page size that splits the IAM items of a into at least
+// three pages of iam:GetAccountAuthorizationDetails, whatever the scale (the
+// race build has a tenth of the items).
+func thirdOfIAM(a *testutil.PolicyAccount) int {
+	return max(1, (len(a.Managed)+len(a.Users)+len(a.Roles)+len(a.Groups))/3)
 }
 
 // setWorkers replaces the limits for one test.
@@ -406,7 +413,7 @@ func TestLargeAnalysisU5Deterministic(t *testing.T) {
 // cancelled while the second IAM page is read.
 func TestLargeAnalysisU5CancelledLeavesNothingRunning(t *testing.T) {
 	a, changes := largeAccount(perfScale * 10)
-	a.DetailsPageItems = 50
+	a.DetailsPageItems = thirdOfIAM(a)
 	fake, s := largeWorld(t, a)
 	before := runtime.NumGoroutine()
 	ctx, cancel := context.WithCancel(context.Background())

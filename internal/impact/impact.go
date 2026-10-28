@@ -222,14 +222,20 @@ type locatedBuckets struct {
 	results []*jobResult
 }
 
-// locateBuckets reads the regions the bucket list did not give.
+// locateBuckets reads the regions the bucket list did not give. The regions
+// the list gave are recorded before any job starts, because the jobs write
+// to the same map.
 func (r *run) locateBuckets(buckets []awsaccess.Bucket) locatedBuckets {
 	located := locatedBuckets{regions: make(map[string]string, len(buckets))}
+	for _, b := range buckets {
+		if b.Region != "" {
+			located.regions[b.Name] = b.Region
+		}
+	}
 	var mu sync.Mutex
 	p := newPool(r.ctx, locationWorkers)
 	for _, b := range buckets {
 		if b.Region != "" {
-			located.regions[b.Name] = b.Region
 			continue
 		}
 		p.add(func(j *jobResult) {
