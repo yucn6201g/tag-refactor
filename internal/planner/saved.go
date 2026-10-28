@@ -162,7 +162,7 @@ func WriteDetails(o *JSONObject, p *Plan) {
 	})
 	o.Array("unreadPolicies", len(p.UnreadPolicies), func(i int) any {
 		u := p.UnreadPolicies[i]
-		return jsonUnread{SourceKind: u.SourceKind, PolicyRef: u.PolicyRef, Region: u.Region, Reason: u.Reason}
+		return jsonUnread(u)
 	})
 	o.Array("unsetRequiredTags", len(p.UnsetRequiredTags), func(i int) any {
 		u := p.UnsetRequiredTags[i]
@@ -483,7 +483,7 @@ func (r *planReader) build(rp *readPlan) (*Plan, error) {
 	r.conflicts(p, rp.KeyConflicts)
 	r.findings(p, rp.ImpactFindings)
 	for _, u := range rp.UnreadPolicies {
-		p.UnreadPolicies = append(p.UnreadPolicies, UnreadPolicy{SourceKind: u.SourceKind, PolicyRef: u.PolicyRef, Region: u.Region, Reason: u.Reason})
+		p.UnreadPolicies = append(p.UnreadPolicies, UnreadPolicy(u))
 	}
 	for i, u := range rp.UnsetRequiredTags {
 		at := fmt.Sprintf("unsetRequiredTags[%d]", i)
