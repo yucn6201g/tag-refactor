@@ -40,7 +40,7 @@ U1 の CI/CD の流れ(`construction/u1-walking-skeleton/infrastructure-design/c
 3. タグのないキューを作る。終了の処理で必ず消す(`infrastructure-specification.md` の「タグのないキュー」)。
 4. Resource Explorer の `tag:none` にキューが現れるまで、1分ごとに最大30分待つ。
 5. U2 の結合テスト(ビルドタグ `integration`)を、`TAG_REFACTOR_IT_PROFILE=tag-refactor-readonly` と、キューの ARN を渡す環境変数で動かす。結合テストが飛ばされたら失敗にする(U1 と同じ)。中身は `infrastructure-specification.md` の期待結果の表。
-6. `--debug` の行から操作ごとの L95 と、10分の見積もりを表示する。
+6. `--debug` の行から操作ごとの L95 と、10分の見積もりを表示する。L95 は、全リージョンの scan と plan を5回くり返した標本から求める(`performance-design.md` §4)。操作ごとの最大値と、再試行した呼び出しの数も表示する。
 7. Windows の Application Control でテストの実行ファイルが止められたときは、U1 のスクリプトと同じく再試行する。
 
 - スクリプトは Git Bash でも動くよう、U1 のスクリプトと同じ書き方(bash、`aws` の CLI)にする。

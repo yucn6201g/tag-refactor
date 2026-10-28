@@ -214,23 +214,39 @@ func TestIntegrationU2ConfigOperationsAreAllowed(t *testing.T) {
 	t.Logf("SelectResourceConfig returned %d results", len(resources))
 }
 
-var debugLine = regexp.MustCompile(`(?m)^debug: (\S+) (\S+) (\d+)ms`)
+var debugLine = regexp.MustCompile(`(?m)^debug: (\S+) (\S+) (\d+)ms retries=(\S+)`)
+
+// latencyRuns is how many times the latency test runs scan and plan of every
+// region (performance design §4). One run gives one sample per region of the
+// calls made once per region, about 17, so the L95 is their largest and one
+// slow call to a distant region decides the estimate. Five runs give about
+// 85 samples, and the L95 is a 95th percentile.
+const latencyRuns = 5
 
 // NFR1.8: the 95th percentile of each operation's time, from the --debug
-// lines of a scan and a plan of every region, and the estimate of
+// lines of five scans and plans of every region, and the estimate of
 // performance design §4 for 10,000 resources.
 func TestIntegrationU2LatencyEstimate(t *testing.T) {
 	e := u2Environment(t)
 	rules := filepath.Join("..", "..", "test", "sandbox", "u2-rules.yaml")
 	start := time.Now()
-	scan := runAgainstAWS(t, "scan", "--debug", "--profile", e.profile, "--rules", rules)
-	plan := runAgainstAWS(t, "plan", "--debug", "--profile", e.profile, "--rules", rules)
-	t.Logf("scan and plan of every region took %v", time.Since(start).Round(time.Millisecond))
+	var stderr strings.Builder
+	for range latencyRuns {
+		scan := runAgainstAWS(t, "scan", "--debug", "--profile", e.profile, "--rules", rules)
+		plan := runAgainstAWS(t, "plan", "--debug", "--profile", e.profile, "--rules", rules)
+		stderr.WriteString(scan.stderr)
+		stderr.WriteString(plan.stderr)
+	}
+	t.Logf("%d scans and plans of every region took %v", latencyRuns, time.Since(start).Round(time.Millisecond))
 
 	byOp := map[string][]int{}
-	for _, m := range debugLine.FindAllStringSubmatch(scan.stderr+plan.stderr, -1) {
+	retried := 0
+	for _, m := range debugLine.FindAllStringSubmatch(stderr.String(), -1) {
 		ms, _ := strconv.Atoi(m[3])
 		byOp[m[1]] = append(byOp[m[1]], ms)
+		if n, err := strconv.Atoi(m[4]); err == nil && n > 0 {
+			retried++
+		}
 	}
 	ops := make([]string, 0, len(byOp))
 	for op := range byOp {
@@ -240,7 +256,8 @@ func TestIntegrationU2LatencyEstimate(t *testing.T) {
 	worst, iam := 0.0, 0.0
 	for _, op := range ops {
 		l95 := percentile95(byOp[op])
-		t.Logf("L95 %-45s %6.0fms (n=%d)", op, l95, len(byOp[op]))
+		// The largest stays in the log, so a single slow call is still seen.
+		t.Logf("L95 %-45s %6.0fms (n=%d, largest %dms)", op, l95, len(byOp[op]), slices.Max(byOp[op]))
 		if strings.HasPrefix(op, "iam:") {
 			iam = math.Max(iam, l95)
 		} else {
@@ -255,6 +272,7 @@ func TestIntegrationU2LatencyEstimate(t *testing.T) {
 	// Since U5 the 100 policies are read in one page of
 	// iam:GetAccountAuthorizationDetails instead of 101 IAM calls.
 	estimate := 214*worst/1000*1.5 + iam/1000 + 30
+	t.Logf("NFR1.8 retried calls: %d (their waits are in the times above)", retried)
 	t.Logf("NFR1.8 estimate for 10,000 resources: %.0fs (limit 600s); the sandbox has few resources, so small pages may make L95 short", estimate)
 	if estimate > 600 {
 		t.Fatalf("the estimate %.0fs exceeds 10 minutes", estimate)
