@@ -2,19 +2,20 @@
 
 tag-refactor is a command-line tool that finds AWS tag keys written in
 different ways (for example `env` and `Env`) and plans how to unify them,
-showing which IAM policies use the tags that would change. It reads every
+showing which IAM policies and resource policies (S3, KMS, SQS, SNS and
+Secrets Manager) use the tags that would change. It reads every
 enabled region, finds resources that were never tagged, counts missing
 required tags, and drafts a rule file from the tags in use. It only reads
 from AWS. (The rest of this README is in Japanese.)
 
-## できること(U1〜U4)
+## できること(U1〜U5)
 
 AWS への書き込みは一切しません。
 
 | コマンド | できること |
 |---|---|
 | `scan` | アカウントで有効なすべてのリージョンを読み(`--region` で絞れます)、書き方の違うタグのキーをまとめて示します。大文字・小文字と区切り文字(`-`、`_`、空白)の違いに加えて、略語の辞書(`env`→`environment`、`prod`→`production`、`dev`→`development`、`stg`→`staging`。キー全体が一致するときだけ)でまとめます。辞書を使って初めてまとまったものには `(abbreviation match)` の印を付け、終了コードの理由にしません。`--rules` のルールファイルの `required` のキーが付いていないリソースの数、一度もタグが付いていないリソース、タグを変更できない種類も示します。`aws:` で始まるキーは対象にしません。 |
-| `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、ユーザー・ロール・グループに付いている、利用者が作った IAM の管理ポリシーのうち、`<前置>:ResourceTag/<キー>` の条件で変更するキーを使っているものを示します。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
+| `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、IAM のポリシー(管理ポリシーとインラインポリシー)と、S3、KMS、SQS、SNS、Secrets Manager のリソースポリシーのうち、変更するタグを参照しているものを、影響あり(`!`)か判定できない(`?`)として示します(下の「影響分析」)。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
 | `rules suggest` | 今使われているタグから、ルールファイルの下書きを作ります。`scan` と同じまとめ方でキーをまとめ、最も多くのリソースで使われている書き方を正しいキー名に、残りを別名にします。値も同じまとめ方でまとめ、書き方が2つ以上ある値を `values` の候補にします。全リージョンを読みます(`--region` で絞れます。一度もタグが付いていないリソースは探しません)。 |
 
 調べる範囲は次のとおりです。どのコマンドも、調べた範囲を `Checked:` で始まる1行で標準エラーに出します。
@@ -25,11 +26,11 @@ AWS への書き込みは一切しません。
   2. それ以外のリージョンは、AWS Config がすべての種類を記録していれば Config で、そうでなければ Resource Explorer(そのリージョンの索引と、絞り込みの条件のない既定のビュー)で探します。Config が一部の種類だけを記録しているときは両方を使います。
   3. どちらも使えないリージョンは、理由とともに `Untagged-resource discovery: partial`(一部)または `unavailable`(すべて)と示します。これだけでは終了コードは変わりません。このとき必須タグの件数は下限です(`Required tag counts are a lower bound.`)。
 - IAM のグローバルな種類(ユーザー、グループ、ロール、管理ポリシー)は、一度もタグが付いていないリソースの検出の対象外です。AWS Config は既定ではこれらを記録せず、Resource Explorer は IAM のタグを索引しないためです。
-- `plan` の影響分析が読むのは、ユーザー・ロール・グループに付いている、利用者が作った IAM の管理ポリシーだけです。インラインポリシー、リソースベースのポリシー、AWS の管理ポリシー、組織の SCP は読みません。「0 affected」は、この範囲での結果です。変更がないときは、ポリシーを読みません。
+- `plan` の影響分析が読むポリシーと読まないポリシーは、下の「影響分析」にまとめています。「0 affected」は、その範囲での結果です。変更がないときは、ポリシーを読みません。
 
 どのコマンドも、英語か日本語で表示でき(`--lang`)、端末では色を付けます(`NO_COLOR` で消せます)。
 
-まだできないこと(後の作業単位): 変更の適用と取り消し(`apply`、`rollback`)、IaC への反映、インラインポリシーやリソースポリシーの影響分析。
+まだできないこと(後の作業単位): 変更の適用と取り消し(`apply`、`rollback`)、IaC への反映。
 
 ## インストール
 
@@ -148,6 +149,42 @@ Markdown(`markdown`)は、プルリクエストや Wiki に貼るための形で
 - 収集や影響分析が不完全でも保存し、不完全の印(`inventoryComplete`、`impactAnalysisComplete`)を付けます。
 - **Windows PowerShell 5.1 では、変更案を `--out` で保存してください。** `>` のリダイレクトは UTF-16 で書き直すので、`--format json > plan.json` で作ったファイルは変更案として読めません(読むと「UTF-8 で保存し直す」案内が出ます)。
 
+### 影響分析
+
+`plan` は、変更が1件以上あるとき、変更するタグを参照しているポリシーを探します。AWS への呼び出しは読み取りだけです。
+
+読むもの:
+
+- 利用者が作った IAM の管理ポリシーのうち、ユーザー・ロール・グループに付いているものと、権限の上限(permissions boundary)として使われているもの(既定の版)
+- すべてのユーザー、ロール、グループのインラインポリシー(サービスにリンクされたロールも含みます)
+- S3 のバケットポリシー、KMS のキーポリシー(利用者が作ったキーだけ)、SQS のキューポリシー、SNS のトピックポリシー、Secrets Manager のシークレットのリソースポリシー。変更案のリージョン(`--region` で絞ったときはそのリージョン)のものを、各サービスの一覧から探して読みます(`scan` の結果には頼りません)。S3 は全リージョンのバケットの一覧を1回読み、変更案のリージョンにあるバケットだけのポリシーを読みます
+
+読まないもの: ロールの信頼ポリシー、AWS が管理する IAM のポリシー、どこにも付いていない管理ポリシー、AWS が管理する KMS のキー、組織の SCP と RCP、そのほかのサービスのポリシー(VPC エンドポイント、API Gateway など)。シークレットの値は読みません。
+
+照合するもの:
+
+- 条件キー `ResourceTag/<キー>`、`RequestTag/<キー>`、`PrincipalTag/<キー>`、`TagKeys`(前置は `aws:` でもサービス名でも)
+- 条件キーの中、条件の値の中、`Resource`・`NotResource` の中のポリシー変数(例 `${aws:PrincipalTag/team}`)
+- 4種類の変更(キー名の変更、値の変更、必須タグの追加、削除)のすべて。演算子の種類(等しい、大文字・小文字なし、パターン、`Null`、`IfExists`、`ForAnyValue:`・`ForAllValues:`、それ以外)に合わせて判定します
+
+結び付ける変更:
+
+- IAM のポリシーの `ResourceTag`、`RequestTag`、`TagKeys` は、そのキーのすべてのリソースの変更に結び付けます(IAM のポリシーは、どのリソースに当たるかを `Resource` で決めますが、そこまでは照合しません)。
+- リソースポリシーの `ResourceTag`、`RequestTag`、`TagKeys` は、そのポリシーが付いたリソース自身の変更だけに結び付けます。
+- `PrincipalTag` は、どのポリシーでも、IAM のユーザーとロールの変更だけに結び付けます。
+
+印の意味:
+
+- `!` 影響あり: その変更で、条件の結果が変わりうる参照です。タグのキーの `*` と `?` は IAM と同じパターンとして機械的に当てはめ、当てはまれば `!`、当てはまらなければ影響なしとします。`aws:ResourceTag` の条件キーは大文字・小文字を区別しないため、大文字・小文字だけのキー名の変更は影響なしとします(ほかの条件キーやポリシー変数では `!`)。
+- `?` 判定できない: ポリシー変数を含む参照(実際のキーや値は AWS が評価するときまで決まりません)と、文字列を比べない演算子(`ArnLike`、`NumericEquals` など)や `TagKeys` の `Null` のように、事前に結果を決められない条件です。一覧では理由を `cannot decide (policy variable)` か `cannot decide (condition operator)` で示します。
+- どちらでもない参照は示しません。影響があり得る参照を「影響なし」と表示することはありません。
+
+指摘は、ポリシー(`<ユーザー・ロール・グループの ARN>#<名前>` はインラインポリシー、リソースポリシーはリソースの ARN)、ステートメント、演算子、条件キーごとに1件で、原因の変更をすべて示します。`Resource` と `NotResource` の中の変数による指摘は、条件キーの欄に `Resource`(または `NotResource`)と、その値を出します。
+
+一覧や1つのポリシーを読めなかったとき(拒否、再試行を使い切った失敗、1 MiB を超える文書、JSON として読めない文書)は、結果の先頭に `! Impact analysis is incomplete` と、種類、リージョン、ポリシー、理由を出し、終了コードは 1 です。読めたポリシーの照合は続けます。一覧のあとで消えたリソースと、ポリシーが付いていないリソースは、読めなかったことにはしません。認証情報が切れたときは、途中の結果を出さずに止まります。
+
+ポリシーは同時に読みます。IAM は4つまで、リソースポリシーはリージョンを8つまで、1つのリージョンの中は4つまでです。この数は変えられません。どの順に読み終わっても、結果の順は同じです。
+
 ### 言語と色
 
 言語は、`--lang` があればそれを使います。なければ `LC_ALL`、`LC_MESSAGES`、`LANG` の順に最初の空でない値を見て、`ja` で始まれば日本語、それ以外は英語です。Windows で3つとも空のときは、Windows の表示言語(最初の優先言語)が日本語なら日本語にします。読めなければ英語です。
@@ -253,7 +290,7 @@ remove: [tmp-owner]
 
 - 標準出力には結果(一覧、差分、JSON、Markdown)だけを出します。アカウントとリージョン、変更案の作成日時、進み具合、警告、エラー、`Checked:` の行、かかった時間、`Exit code` の行、次の手順(`Save this plan: ...`)、`Saved plan` の行は標準エラーに出します。形式や言語を変えても、`--out` を付けても同じです。
 - 進み具合は、標準エラーが端末なら同じ場所を書き換えて示します(リージョンごとの状態と経過時間)。端末でないとき、`TERM=dumb` のとき、Windows で仮想端末の処理を有効にできないときは、状態が変わるたびに1行ずつ追記します。標準出力をファイルに向けても、標準エラーが端末なら書き換えます。
-- 記号: `+` 追加、`~` 名前や値の変更、`-` 削除、`!` 影響ありまたは不完全、`?` 判定できない(キーにポリシー変数を含む条件)。
+- 記号: `+` 追加、`~` 名前や値の変更、`-` 削除、`!` 影響ありまたは不完全、`?` 判定できない(ポリシー変数や、事前に結果を決められない演算子を含む条件。「影響分析」を参照)。
 - AWS から読んだ文字列(ARN、種類の名前など)の制御文字や双方向の制御文字は、一覧と差分では `\u{…}` の形に置き換えて出します。
 
 | 終了コード | 意味 |
@@ -268,14 +305,25 @@ remove: [tmp-owner]
 
 ## 必要な権限
 
-読み取りの権限だけで動きます。必要な IAM の操作は [`docs/iam/readonly-policy.json`](docs/iam/readonly-policy.json) にまとめています。この例の `<account-id>` は、使うアカウントの ID(12桁)に置き換えてください。`iam:GetPolicyVersion` は、そのアカウントの、利用者が作った管理ポリシー(`arn:aws:iam::<account-id>:policy/*`)だけに絞っています。ほかの操作はリソースを絞れないため `*` です。
+読み取りの権限だけで動きます。必要な IAM の操作は [`docs/iam/readonly-policy.json`](docs/iam/readonly-policy.json) にまとめています。この例の `<account-id>` は、使うアカウントの ID(12桁)に置き換えてください。1つのリソースを読む操作は、そのアカウントのそのサービスの ARN の形に絞っています(下の表)。一覧の操作は AWS がリソースを絞れないため `*` です。影響分析はすべての有効なリージョンを読むため、KMS、SQS、SNS、Secrets Manager の ARN のリージョンは `*` です。
 
 | IAM の操作 | 使う場面 |
 |---|---|
 | `ec2:DescribeRegions` | アカウントで有効なリージョンの一覧と、指定したリージョンが使えるかの確認。指定したリージョンの STS が認証情報を拒否したときは、`us-east-1` から使えるリージョンを確かめ直し、有効にしていないオプトインのリージョンなら「そのリージョンは使えない」と示します |
 | `tag:GetResources` | タグの付いたリソースの読み取り |
-| `iam:ListPolicies` | 付いている、利用者が作った管理ポリシーの一覧(`plan` で変更があるときだけ) |
-| `iam:GetPolicyVersion` | そのポリシーの既定の版の中身(`plan` で変更があるときだけ) |
+| `iam:ListPolicies` | 利用者が作った管理ポリシーの一覧と、付いている数・権限の上限として使われている数(`plan` で変更があるときだけ。以下の影響分析の操作も同じ) |
+| `iam:GetPolicyVersion` | 付いているか権限の上限として使われているポリシーの既定の版の中身。`arn:aws:iam::<account-id>:policy/*` |
+| `iam:ListUsers`、`iam:ListRoles`、`iam:ListGroups` | ユーザー、ロール、グループの一覧 |
+| `iam:ListUserPolicies`、`iam:GetUserPolicy` | ユーザーのインラインポリシー。`arn:aws:iam::<account-id>:user/*` |
+| `iam:ListRolePolicies`、`iam:GetRolePolicy` | ロールのインラインポリシー。`arn:aws:iam::<account-id>:role/*` |
+| `iam:ListGroupPolicies`、`iam:GetGroupPolicy` | グループのインラインポリシー。`arn:aws:iam::<account-id>:group/*` |
+| `s3:ListAllMyBuckets` | API の `ListBuckets` に AWS が求める IAM の操作。全リージョンのバケットとそのリージョン |
+| `s3:GetBucketLocation`、`s3:GetBucketPolicy` | 一覧にリージョンが無いバケットのリージョンと、バケットポリシー。`arn:aws:s3:::*` |
+| `kms:ListKeys` | KMS のキーの一覧 |
+| `kms:DescribeKey`、`kms:GetKeyPolicy` | 利用者が作ったキーかと、キーポリシー。`arn:aws:kms:*:<account-id>:key/*` |
+| `sqs:ListQueues`、`sqs:GetQueueAttributes` | キューの一覧と、キューの属性 `Policy` と `QueueArn`。属性は `arn:aws:sqs:*:<account-id>:*` |
+| `sns:ListTopics`、`sns:GetTopicAttributes` | トピックの一覧と、トピックの属性 `Policy`。属性は `arn:aws:sns:*:<account-id>:*` |
+| `secretsmanager:ListSecrets`、`secretsmanager:GetResourcePolicy` | シークレットの一覧と、そのリソースポリシー(値は読みません)。ポリシーは `arn:aws:secretsmanager:*:<account-id>:secret:*` |
 | `config:DescribeConfigurationRecorders` | AWS Config が何を記録しているか(`scan`) |
 | `config:DescribeConfigurationRecorderStatus` | AWS Config が記録しているか(`scan`) |
 | `config:SelectResourceConfig` | AWS Config に記録されたリソースとタグの問い合わせ(`scan`) |
@@ -284,7 +332,7 @@ remove: [tmp-owner]
 | `resource-explorer-2:GetView` | 既定のビューに絞り込みの条件があるか(`scan`) |
 | `resource-explorer-2:Search` | API の `ListResources` に AWS が求める IAM の操作。タグのないリソースを件数の上限なく読みます(`scan`)。1,000 件までに限られる API の `Search` は呼びません |
 
-`sts:GetCallerIdentity`(呼び出し元の確認)は IAM の権限が要りません。AWS Config や Resource Explorer の記録・索引・ビューを作ったり変えたりする操作は呼びません。使えないときは、理由(足りない IAM の操作の名前、`no default Resource Explorer view` など)を示すだけです。`iam:ListPolicies` や `iam:GetPolicyVersion` が拒否された場合、`plan` は変更案を出したうえで「影響分析は不完全」と示し、終了コード 1 で終わります。
+`sts:GetCallerIdentity`(呼び出し元の確認)は IAM の権限が要りません。AWS Config や Resource Explorer の記録・索引・ビューを作ったり変えたりする操作は呼びません。使えないときは、理由(足りない IAM の操作の名前、`no default Resource Explorer view` など)を示すだけです。影響分析の操作が拒否された場合、`plan` は変更案と読めたポリシーの指摘を出したうえで「影響分析は不完全」と、読めなかった種類、リージョン、理由を示し、終了コード 1 で終わります。
 
 ## 開発
 
@@ -300,10 +348,12 @@ go vet -tags integration ./...
 go tool govulncheck ./...
 go test -mod=readonly -run '^$' -fuzz FuzzParse -fuzztime 5m ./internal/rules/      # ルールファイルの読み込みのファジング(手元だけ)
 go test -mod=readonly -run '^$' -fuzz FuzzLoadPlan -fuzztime 5m ./internal/planner/ # 保存した変更案の読み込みのファジング(手元だけ)
+go test -mod=readonly -run '^$' -fuzz FuzzParsePolicy -fuzztime 5m ./internal/impact/ # ポリシーの文書の読み取りのファジング(手元だけ)
+go test -mod=readonly -run 'TestDetectionTable|TestLargeAnalysisU5' ./internal/impact/ # 検出率100%の表と、大きな偽の AWS での影響分析
 go test -mod=readonly -run 'TestGolden' ./internal/display/... -update               # 出力の期待のファイルを作り直す(差分を人が見る)
 ```
 
-- CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
+- CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/`、`internal/impact/testdata/fuzz/FuzzParsePolicy/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
 - 出力の期待のファイル(`internal/display/testdata/`)は、4つの形式 × 2つの言語と保存した変更案です。`.gitattributes` で LF に固定し、3つの OS で同じバイト列になることを確かめます。
 - 端末での文字の幅の表(`internal/display/width_table.go`)は、Go の `unicode` パッケージと同じ版の Unicode の `EastAsianWidth.txt` から作ります。Go を上げて Unicode の版が新しくなると、テストが「表を作り直す」案内で失敗します。そのときは `internal/display` で `go generate` を動かし(`gen_width.go` が `https://www.unicode.org/Public/<版>/ucd/EastAsianWidth.txt` を取ってきます。取れないときは `go run gen_width.go -in <手元のファイル>`)、できた `width_table.go`(先頭に元の URL と SHA-256 を書きます)をコミットします。CI はネットワークを使わず、コミットした表だけを使います。
 
@@ -336,6 +386,23 @@ go test -mod=readonly -run 'TestGolden' ./internal/display/... -update          
 
    索引の中身がそろうまで最大1時間ほどかかります。1時間以上おいてから検証します。
 5. 読み取り用のロール R2 を引き受けるプロファイル(例 `tag-refactor-readonly`)を手元の AWS の設定に足します。
+6. U5 では、U1 のスタックの R2 に影響分析の読み取りの権限を足し、U5 の確認用のスタック(`test/sandbox/u5-fixtures.yaml`)を作ります。どちらも、まず変更セットを作るだけにして、中身を人が確かめてから実行します(手順は U5 のインフラの設計 [`cicd-pipeline.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u5-impact/infrastructure-design/cicd-pipeline.md))。
+
+   ```bash
+   # U1 のスタック: R2 のインラインポリシーだけが変わり、ロールは作り直されない(Replacement が False)ことを確かめる
+   aws cloudformation create-change-set --stack-name tag-refactor-u1-fixtures --change-set-name u5-r2 \
+     --template-body file://test/sandbox/u1-fixtures.yaml --parameters ParameterKey=SsoPermissionSetName,UsePreviousValue=true \
+     --capabilities CAPABILITY_IAM --tags Key=project,Value=tag-refactor-fixture --region ap-northeast-1 --profile tag-refactor-sandbox
+   # U5 のスタック: ロール RU5、バケット BU5、キー KU5、キュー QU5、トピック TU5、シークレット SU5 と、それぞれのポリシー(10個)
+   aws cloudformation create-change-set --stack-name tag-refactor-u5-fixtures --change-set-type CREATE --change-set-name u5-create \
+     --template-body file://test/sandbox/u5-fixtures.yaml --parameters ParameterKey=SsoPermissionSetName,ParameterValue=<U1 と同じ値> \
+     --capabilities CAPABILITY_IAM --tags Key=project,Value=tag-refactor-fixture --region ap-northeast-1 --profile tag-refactor-sandbox
+   aws cloudformation describe-change-set --stack-name <スタック名> --change-set-name <変更セット名> --region ap-northeast-1 --profile tag-refactor-sandbox
+   # 人が中身を確かめて許可したら実行する。許可しないときは delete-change-set で消す
+   aws cloudformation execute-change-set --stack-name <スタック名> --change-set-name <変更セット名> --region ap-northeast-1 --profile tag-refactor-sandbox
+   ```
+
+   KMS のキーは月 1 USD、シークレットは月 0.40 USD で、どちらも時間で割った分がかかります。テスト用のルールファイルは `test/sandbox/u5-rules.yaml`(`env` を `Environment` に、`team` を `Team` に変える)です。
 
 ### 検証
 
@@ -349,6 +416,7 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 2. 管理者のプロファイルの呼び出し元のアカウントを `TAG_REFACTOR_SANDBOX_ACCOUNT_ID` と比べ、違えば止めます。
    続けて U3 の確認をします。U1 のスタック(`tag-refactor-u1-fixtures`)があることを確かめ、`tag-refactor` をビルドし、読み取り用のプロファイルで `rules suggest --region ap-northeast-1 --output <一時フォルダのファイル>` を動かします。終了コードが 0、標準出力が空、下書きの先頭が `# generated by tag-refactor`、`env` と `Env` が1つのまとまりであることを確かめ、`scan --rules` でその下書きを読み込めることを確かめます。一時フォルダはスクリプトの終わりに必ず消します。
    続けて U4 の確認をします。U4 の結合テスト(`internal/cli/integration_u4_test.go`)を読み取り用のプロファイルで動かし、`plan` を `--format json --out` で1回、一覧、差分、Markdown で1回ずつ動かして、4つの形式と保存した変更案の件数が一致すること、保存した変更案を読み込めること、`env` と `Env` から `Environment` への名前の変更と `Owner` の追加があることを確かめます。テストが飛ばされたとき、またはこのテストの `PASS` の行がちょうど1つでないときは失敗にします。
+   続けて U5 の確認をします。U5 のスタック(`tag-refactor-u5-fixtures`)が完成していることと6つの出力の ARN、U1 のスタックの R2 に `iam:GetRolePolicy` があることを確かめ、U5 の結合テスト(`internal/cli/integration_u5_test.go`)を読み取り用のプロファイルで動かします。ロール RU5 のインラインポリシー、5つのリソースポリシー、U1 の P1 が影響ありとして出ること、リソースポリシーの指摘がそのリソース自身の変更だけを指すこと、影響分析が完全なことを確かめます(このテストの `PASS` の行がちょうど1つでないときは失敗)。最後に、同じ `plan` を `--debug` 付きで5回動かし、操作ごとの標本の数と L95、IAM とリソースポリシーの L95 の最大、再試行が起きた呼び出しの数を表示します。10分の見積もりへの当てはめはチェックポイントで行います。
 3. U2 のスタックと `ap-northeast-1` の索引(種類 `LOCAL`、状態 `ACTIVE`)と条件のない既定のビューを確かめ、全リージョンの索引の種類を表示します。集約の索引があるときは、前提と違うので止めます。
 4. `ap-northeast-1` にタグのない SQS のキュー(`tag-refactor-u2-untagged-<乱数>`)を作ります。スクリプトの終わりに必ず消します(消せなかったときは名前を表示します)。
 5. Resource Explorer の `tag:none` にキューが現れるまで、1分ごとに最大30分待ちます。現れなければ失敗にします。索引の中身がそろうまで数時間かかることがあるので、時間をおいて再実行してください。
@@ -365,4 +433,4 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 
 ### 後片付け
 
-Construction の終わりに、人の指示で U2、U1 の順にスタックを消します。U2 のスタックを消すと、テンプレートで作った索引とビューも消えます(`false` を渡して作らなかったものは残ります)。
+Construction の終わりに、人の指示で U5、U2、U1 の順にスタックを消します。U5 のバケットは空のままなので、スタックと一緒に消えます。KMS のキーは7日の待ち期間のあとに消えます。シークレットがスタックの削除で消えることは、削除のときに確かめます。U2 のスタックを消すと、テンプレートで作った索引とビューも消えます(`false` を渡して作らなかったものは残ります)。
