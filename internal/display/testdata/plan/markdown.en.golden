@@ -7,9 +7,9 @@ Account ` 123456789012 ` · 2 regions · 2026-10-19T12:04:00Z
 | ` eu-west-1 ` | ` AccessDenied ` (` tag:GetResources `) |
 
 ## ! Impact analysis is incomplete
-| Policy | Reason |
-|---|---|
-| ` arn:aws:iam::123456789012:policy/Hidden ` | ` access denied to iam:GetPolicyVersion ` |
+| Policy | Region | Reason |
+|---|---|---|
+| IAM managed policy ` arn:aws:iam::123456789012:policy/Hidden ` |  | ` access denied to iam:GetPolicyVersion ` |
 
 ## Changes (4 resources)
 | Kind | Change | Resources |
@@ -66,8 +66,8 @@ Changes may be reverted by the next deploy.
 ## Impact
 | | Policy | Statement | Condition | Caused by |
 |---|---|---|---|---|
-| ! | ` arn:aws:iam::123456789012:policy/DevAccess ` | ` AllowDevEC2 ` | ` StringEquals ` ` aws:ResourceTag/env ` = ` dev ` | rename key ` env ` → ` Environment `, rename key ` Env ` → ` Environment ` |
-| ? | `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | cannot decide (policy variable) |
+| ! | IAM policy ` arn:aws:iam::123456789012:policy/DevAccess ` | ` AllowDevEC2 ` | ` StringEquals ` ` aws:ResourceTag/env ` = ` dev ` | rename key ` env ` → ` Environment `, rename key ` Env ` → ` Environment ` |
+| ? | IAM policy `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | cannot decide (policy variable) |
 
 ## Summary
 Summary: 4 to change · 1 conflict · 1 affected · 1 undecided · 1 value not set · 2 remove candidates · 1 IaC-managed

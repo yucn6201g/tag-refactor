@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -98,6 +99,10 @@ type Session struct {
 	sts     *sts.Client
 	ec2     *ec2.Client
 	iam     *iam.Client
+	// regional holds the clients of the resource policy services per region
+	// (resourcepolicies.go).
+	regionalMu sync.Mutex
+	regional   map[string]*regionClients
 }
 
 // regionPattern matches AWS region names such as us-east-1 or us-gov-west-1.

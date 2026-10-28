@@ -196,9 +196,12 @@ func TestAcceptance_AC1_2_1_ScanAndPlanUseOnlyReadOperations(t *testing.T) {
 		}
 	}
 	// U2: scan also asks AWS Config and Resource Explorer whether they can
-	// find never-tagged resources (none of them can in this account).
-	want := []string{"config:DescribeConfigurationRecorders", "ec2:DescribeRegions", "iam:GetPolicyVersion", "iam:ListPolicies",
-		"resource-explorer-2:ListIndexes", "sts:GetCallerIdentity", "tag:GetResources"}
+	// find never-tagged resources (none of them can in this account). U5:
+	// plan also lists the IAM users, roles and groups and the resources with
+	// resource policies (none in this account).
+	want := []string{"config:DescribeConfigurationRecorders", "ec2:DescribeRegions", "iam:GetPolicyVersion", "iam:ListGroups",
+		"iam:ListPolicies", "iam:ListRoles", "iam:ListUsers", "kms:ListKeys", "resource-explorer-2:ListIndexes", "s3:ListBuckets",
+		"secretsmanager:ListSecrets", "sns:ListTopics", "sqs:ListQueues", "sts:GetCallerIdentity", "tag:GetResources"}
 	if got := w.fake.Ops(); strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("operations = %v, want %v", got, want)
 	}

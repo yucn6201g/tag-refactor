@@ -86,8 +86,37 @@ var errorCodes = map[string]kindReason{}
 // the default view cannot be used; that is not a credential problem, and a
 // region without a usable view must not stop the whole run (security design
 // §4).
+//
+// The reads of single resources of the impact analysis name a resource that
+// was deleted after it was listed with each service's own NotFound code
+// (U5 security design §1). They are NotFound only for these operations, so
+// the kinds of the U1 to U4 operations stay as they were. S3's
+// NoSuchBucketPolicy is not an error at all: GetBucketPolicy reports it as a
+// bucket without a policy.
 var opErrorCodes = map[string]map[string]kindReason{
-	OpListResources: {"UnauthorizedException": {errkind.AccessDenied, errkind.ReasonNone}},
+	OpListResources:      {"UnauthorizedException": {errkind.AccessDenied, errkind.ReasonNone}},
+	OpListUserPolicies:   notFound("NoSuchEntity"),
+	OpListRolePolicies:   notFound("NoSuchEntity"),
+	OpListGroupPolicies:  notFound("NoSuchEntity"),
+	OpGetUserPolicy:      notFound("NoSuchEntity"),
+	OpGetRolePolicy:      notFound("NoSuchEntity"),
+	OpGetGroupPolicy:     notFound("NoSuchEntity"),
+	OpGetBucketLocation:  notFound("NoSuchBucket"),
+	OpGetBucketPolicy:    notFound("NoSuchBucket"),
+	OpDescribeKey:        notFound("NotFoundException"),
+	OpGetKeyPolicy:       notFound("NotFoundException"),
+	OpGetQueueAttributes: notFound("QueueDoesNotExist", "AWS.SimpleQueueService.NonExistentQueue"),
+	OpGetTopicAttributes: notFound("NotFound"),
+	OpGetResourcePolicy:  notFound("ResourceNotFoundException"),
+}
+
+// notFound maps the codes to NotFound.
+func notFound(codes ...string) map[string]kindReason {
+	m := make(map[string]kindReason, len(codes))
+	for _, c := range codes {
+		m[c] = kindReason{errkind.NotFound, errkind.ReasonNone}
+	}
+	return m
 }
 
 func init() {

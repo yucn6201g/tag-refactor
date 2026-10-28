@@ -62,18 +62,25 @@ type jsonConflict struct {
 	PresentTags  map[string]string `json:"presentTags"`
 }
 
+// jsonFinding is one impact finding of contract C2. U5 added
+// conditionOperator, written as is, and empty for Resource and NotResource.
 type jsonFinding struct {
-	Verdict        Verdict  `json:"verdict"`
-	PolicyRef      string   `json:"policyRef"`
-	SourceKind     string   `json:"sourceKind"`
-	StatementID    string   `json:"statementId"`
-	ConditionKey   string   `json:"conditionKey"`
-	ConditionValue string   `json:"conditionValue"`
-	ChangeIDs      []string `json:"changeIds"`
+	Verdict           Verdict  `json:"verdict"`
+	PolicyRef         string   `json:"policyRef"`
+	SourceKind        string   `json:"sourceKind"`
+	StatementID       string   `json:"statementId"`
+	ConditionOperator string   `json:"conditionOperator"`
+	ConditionKey      string   `json:"conditionKey"`
+	ConditionValue    string   `json:"conditionValue"`
+	ChangeIDs         []string `json:"changeIds"`
 }
 
+// jsonUnread is one unread policy of contract C2. U5 added policyRef and
+// region, left out when empty (a whole list; IAM and the bucket list).
 type jsonUnread struct {
 	SourceKind string `json:"sourceKind"`
+	PolicyRef  string `json:"policyRef,omitempty"`
+	Region     string `json:"region,omitempty"`
 	Reason     string `json:"reason"`
 }
 
@@ -150,11 +157,12 @@ func WriteDetails(o *JSONObject, p *Plan) {
 	o.Array("impactFindings", len(p.ImpactFindings), func(i int) any {
 		f := p.ImpactFindings[i]
 		return jsonFinding{Verdict: f.Verdict, PolicyRef: f.PolicyRef, SourceKind: f.SourceKind, StatementID: f.StatementID,
-			ConditionKey: f.ConditionKey, ConditionValue: f.ConditionValue, ChangeIDs: nonNil(f.ChangeIDs)}
+			ConditionOperator: f.ConditionOperator, ConditionKey: f.ConditionKey, ConditionValue: f.ConditionValue,
+			ChangeIDs: nonNil(f.ChangeIDs)}
 	})
 	o.Array("unreadPolicies", len(p.UnreadPolicies), func(i int) any {
 		u := p.UnreadPolicies[i]
-		return jsonUnread{SourceKind: u.SourceKind, Reason: u.Reason}
+		return jsonUnread{SourceKind: u.SourceKind, PolicyRef: u.PolicyRef, Region: u.Region, Reason: u.Reason}
 	})
 	o.Array("unsetRequiredTags", len(p.UnsetRequiredTags), func(i int) any {
 		u := p.UnsetRequiredTags[i]
@@ -249,13 +257,15 @@ type readConflict struct {
 }
 
 type readFinding struct {
-	Verdict        *string   `json:"verdict"`
-	PolicyRef      *string   `json:"policyRef"`
-	SourceKind     *string   `json:"sourceKind"`
-	StatementID    string    `json:"statementId"`
-	ConditionKey   string    `json:"conditionKey"`
-	ConditionValue string    `json:"conditionValue"`
-	ChangeIDs      *[]string `json:"changeIds"`
+	Verdict     *string `json:"verdict"`
+	PolicyRef   *string `json:"policyRef"`
+	SourceKind  *string `json:"sourceKind"`
+	StatementID string  `json:"statementId"`
+	// ConditionOperator is optional: plans saved before U5 have none.
+	ConditionOperator string    `json:"conditionOperator"`
+	ConditionKey      string    `json:"conditionKey"`
+	ConditionValue    string    `json:"conditionValue"`
+	ChangeIDs         *[]string `json:"changeIds"`
 }
 
 type readUnset struct {
@@ -473,7 +483,7 @@ func (r *planReader) build(rp *readPlan) (*Plan, error) {
 	r.conflicts(p, rp.KeyConflicts)
 	r.findings(p, rp.ImpactFindings)
 	for _, u := range rp.UnreadPolicies {
-		p.UnreadPolicies = append(p.UnreadPolicies, UnreadPolicy{SourceKind: u.SourceKind, Reason: u.Reason})
+		p.UnreadPolicies = append(p.UnreadPolicies, UnreadPolicy{SourceKind: u.SourceKind, PolicyRef: u.PolicyRef, Region: u.Region, Reason: u.Reason})
 	}
 	for i, u := range rp.UnsetRequiredTags {
 		at := fmt.Sprintf("unsetRequiredTags[%d]", i)
@@ -656,7 +666,7 @@ func (r *planReader) findings(p *Plan, findings []readFinding) {
 			}
 		}
 		p.ImpactFindings = append(p.ImpactFindings, ImpactFinding{Verdict: verdict, PolicyRef: ref, SourceKind: source,
-			StatementID: f.StatementID, ConditionKey: f.ConditionKey, ConditionValue: f.ConditionValue,
+			StatementID: f.StatementID, ConditionOperator: f.ConditionOperator, ConditionKey: f.ConditionKey, ConditionValue: f.ConditionValue,
 			ChangeIDs: append([]string{}, *f.ChangeIDs...)})
 	}
 }

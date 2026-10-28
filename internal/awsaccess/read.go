@@ -58,17 +58,17 @@ func (s *Session) ListTaggedResources(ctx context.Context, region string) ([]Tag
 	}
 }
 
-// ListAttachedCustomerPolicies reads the customer managed policies attached
-// to a user, role or group (BR5.1). OnlyAttached makes a separate read of the
-// attachments unnecessary.
-func (s *Session) ListAttachedCustomerPolicies(ctx context.Context) ([]IAMPolicyRef, error) {
+// ListCustomerPolicies reads every customer managed policy with its
+// attachment and permissions boundary counts (U5 BR1.1). It does not ask for
+// attached policies only: that filter leaves out the policies used only as a
+// permissions boundary, so the caller chooses by the counts.
+func (s *Session) ListCustomerPolicies(ctx context.Context) ([]IAMPolicyRef, error) {
 	var refs []IAMPolicyRef
 	marker := ""
 	for {
 		in := &iam.ListPoliciesInput{
-			Scope:        iamtypes.PolicyScopeTypeLocal,
-			OnlyAttached: true,
-			MaxItems:     aws.Int32(policyPageSize),
+			Scope:    iamtypes.PolicyScopeTypeLocal,
+			MaxItems: aws.Int32(policyPageSize),
 		}
 		if marker != "" {
 			in.Marker = aws.String(marker)
@@ -83,7 +83,12 @@ func (s *Session) ListAttachedCustomerPolicies(ctx context.Context) ([]IAMPolicy
 			return nil, err
 		}
 		for _, p := range out.Policies {
-			refs = append(refs, IAMPolicyRef{ARN: aws.ToString(p.Arn), DefaultVersionID: aws.ToString(p.DefaultVersionId)})
+			refs = append(refs, IAMPolicyRef{
+				ARN:              aws.ToString(p.Arn),
+				DefaultVersionID: aws.ToString(p.DefaultVersionId),
+				AttachmentCount:  int(aws.ToInt32(p.AttachmentCount)),
+				BoundaryCount:    int(aws.ToInt32(p.PermissionsBoundaryUsageCount)),
+			})
 		}
 		if !out.IsTruncated {
 			return refs, nil

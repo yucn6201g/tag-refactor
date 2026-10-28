@@ -27,6 +27,29 @@ const (
 	OpGetDefaultView                      = "resource-explorer-2:GetDefaultView"
 	OpGetView                             = "resource-explorer-2:GetView"
 	OpListResources                       = "resource-explorer-2:ListResources"
+
+	// The reads of the impact analysis (U5 security design §1).
+	OpListUsers          = "iam:ListUsers"
+	OpListRoles          = "iam:ListRoles"
+	OpListGroups         = "iam:ListGroups"
+	OpListUserPolicies   = "iam:ListUserPolicies"
+	OpListRolePolicies   = "iam:ListRolePolicies"
+	OpListGroupPolicies  = "iam:ListGroupPolicies"
+	OpGetUserPolicy      = "iam:GetUserPolicy"
+	OpGetRolePolicy      = "iam:GetRolePolicy"
+	OpGetGroupPolicy     = "iam:GetGroupPolicy"
+	OpListBuckets        = "s3:ListBuckets"
+	OpGetBucketLocation  = "s3:GetBucketLocation"
+	OpGetBucketPolicy    = "s3:GetBucketPolicy"
+	OpListKeys           = "kms:ListKeys"
+	OpDescribeKey        = "kms:DescribeKey"
+	OpGetKeyPolicy       = "kms:GetKeyPolicy"
+	OpListQueues         = "sqs:ListQueues"
+	OpGetQueueAttributes = "sqs:GetQueueAttributes"
+	OpListTopics         = "sns:ListTopics"
+	OpGetTopicAttributes = "sns:GetTopicAttributes"
+	OpListSecrets        = "secretsmanager:ListSecrets"
+	OpGetResourcePolicy  = "secretsmanager:GetResourcePolicy"
 )
 
 // Operation is one AWS operation tag-refactor calls (security design §1).
@@ -48,7 +71,8 @@ type Operation struct {
 // read-only policy docs/iam/readonly-policy.json must allow exactly the IAM
 // actions of the operations that need a permission; a test compares the two
 // so they cannot drift apart. The IAM names were checked against the Service
-// Authorization Reference: only ListResources differs from its API name.
+// Authorization Reference: only ListResources and ListBuckets differ from
+// their API names.
 var Operations = []Operation{
 	{API: OpGetCallerIdentity, IAMAction: OpGetCallerIdentity, NeedsPermission: false},
 	{API: OpDescribeRegions, IAMAction: OpDescribeRegions, NeedsPermission: true},
@@ -62,6 +86,27 @@ var Operations = []Operation{
 	{API: OpGetDefaultView, IAMAction: OpGetDefaultView, NeedsPermission: true},
 	{API: OpGetView, IAMAction: OpGetView, NeedsPermission: true},
 	{API: OpListResources, IAMAction: "resource-explorer-2:Search", NeedsPermission: true},
+	{API: OpListUsers, IAMAction: OpListUsers, NeedsPermission: true},
+	{API: OpListRoles, IAMAction: OpListRoles, NeedsPermission: true},
+	{API: OpListGroups, IAMAction: OpListGroups, NeedsPermission: true},
+	{API: OpListUserPolicies, IAMAction: OpListUserPolicies, NeedsPermission: true},
+	{API: OpListRolePolicies, IAMAction: OpListRolePolicies, NeedsPermission: true},
+	{API: OpListGroupPolicies, IAMAction: OpListGroupPolicies, NeedsPermission: true},
+	{API: OpGetUserPolicy, IAMAction: OpGetUserPolicy, NeedsPermission: true},
+	{API: OpGetRolePolicy, IAMAction: OpGetRolePolicy, NeedsPermission: true},
+	{API: OpGetGroupPolicy, IAMAction: OpGetGroupPolicy, NeedsPermission: true},
+	{API: OpListBuckets, IAMAction: "s3:ListAllMyBuckets", NeedsPermission: true},
+	{API: OpGetBucketLocation, IAMAction: OpGetBucketLocation, NeedsPermission: true},
+	{API: OpGetBucketPolicy, IAMAction: OpGetBucketPolicy, NeedsPermission: true},
+	{API: OpListKeys, IAMAction: OpListKeys, NeedsPermission: true},
+	{API: OpDescribeKey, IAMAction: OpDescribeKey, NeedsPermission: true},
+	{API: OpGetKeyPolicy, IAMAction: OpGetKeyPolicy, NeedsPermission: true},
+	{API: OpListQueues, IAMAction: OpListQueues, NeedsPermission: true},
+	{API: OpGetQueueAttributes, IAMAction: OpGetQueueAttributes, NeedsPermission: true},
+	{API: OpListTopics, IAMAction: OpListTopics, NeedsPermission: true},
+	{API: OpGetTopicAttributes, IAMAction: OpGetTopicAttributes, NeedsPermission: true},
+	{API: OpListSecrets, IAMAction: OpListSecrets, NeedsPermission: true},
+	{API: OpGetResourcePolicy, IAMAction: OpGetResourcePolicy, NeedsPermission: true},
 }
 
 // RequiredPermissions returns the IAM actions scan and plan need, in table
@@ -108,10 +153,64 @@ type TaggedResource struct {
 	Tags map[string]string
 }
 
-// IAMPolicyRef identifies a customer managed policy and its default version.
+// IAMPolicyRef identifies a customer managed policy, its default version and
+// how many users, roles and groups use it.
 type IAMPolicyRef struct {
 	ARN              string
 	DefaultVersionID string
+	// AttachmentCount is the number of users, roles and groups the policy is
+	// attached to.
+	AttachmentCount int
+	// BoundaryCount is the number of users and roles that use the policy as
+	// their permissions boundary.
+	BoundaryCount int
+}
+
+// PrincipalKind is the kind of an IAM principal that can have inline
+// policies.
+type PrincipalKind string
+
+// The kinds of IAM principals, in the order the impact analysis reads them.
+const (
+	PrincipalUser  PrincipalKind = "user"
+	PrincipalRole  PrincipalKind = "role"
+	PrincipalGroup PrincipalKind = "group"
+)
+
+// PrincipalKinds lists the kinds of IAM principals in reading order.
+var PrincipalKinds = []PrincipalKind{PrincipalUser, PrincipalRole, PrincipalGroup}
+
+// IAMPrincipal is an IAM user, role or group.
+type IAMPrincipal struct {
+	Kind PrincipalKind
+	Name string
+	ARN  string
+}
+
+// Bucket is an S3 bucket of the account.
+type Bucket struct {
+	Name string
+	// Region is the bucket's region from the ListBuckets answer, empty when
+	// the answer did not give it (GetBucketRegion reads it then).
+	Region string
+}
+
+// KMSKey is a KMS key of a region.
+type KMSKey struct {
+	ID  string
+	ARN string
+}
+
+// ResourcePolicy is the resource policy of one resource, as the service
+// returns it (not URL-encoded).
+type ResourcePolicy struct {
+	// ARN is the ARN of the resource; for a queue it is the QueueArn
+	// attribute.
+	ARN string
+	// Document is the policy document, empty when Found is false.
+	Document string
+	// Found is false when the resource has no resource policy.
+	Found bool
 }
 
 // AccountResolver checks the credentials and identifies the account (C6).
@@ -126,16 +225,63 @@ type TagReader interface {
 	ListTaggedResources(ctx context.Context, region string) ([]TaggedResource, error)
 }
 
-// PolicyReader reads IAM policies (C6, minimal U1 version). Listing and
-// reading one document are separate so that one unreadable policy does not
-// stop the others (BR5.5).
+// PolicyReader reads every policy the impact analysis matches (C6, U5
+// security design §1): IAM policies and the resource policies of five
+// services. It only reads. Listing and reading one document are separate so
+// that one unreadable policy does not stop the others (U5 BR1.5). A resource
+// that disappeared after it was listed is an error of kind NotFound.
 type PolicyReader interface {
-	// ListAttachedCustomerPolicies returns the customer managed policies that
-	// are attached to at least one user, role or group, reading all pages.
-	ListAttachedCustomerPolicies(ctx context.Context) ([]IAMPolicyRef, error)
-	// GetPolicyDocument returns the default version's document as IAM returns
-	// it (URL-encoded JSON).
+	IAMPolicyReader
+	ResourcePolicyReader
+}
+
+// IAMPolicyReader reads customer managed and inline IAM policies. The
+// documents are returned as IAM returns them: URL-encoded JSON.
+type IAMPolicyReader interface {
+	// ListCustomerPolicies returns every customer managed policy with its
+	// attachment and permissions boundary counts, reading all pages.
+	ListCustomerPolicies(ctx context.Context) ([]IAMPolicyRef, error)
+	// GetPolicyDocument returns the default version's document.
 	GetPolicyDocument(ctx context.Context, ref IAMPolicyRef) (string, error)
+	// ListPrincipals returns every user, role or group, reading all pages.
+	ListPrincipals(ctx context.Context, kind PrincipalKind) ([]IAMPrincipal, error)
+	// ListInlinePolicyNames returns the names of the inline policies of p,
+	// reading all pages.
+	ListInlinePolicyNames(ctx context.Context, p IAMPrincipal) ([]string, error)
+	// GetInlinePolicyDocument returns the document of one inline policy.
+	GetInlinePolicyDocument(ctx context.Context, p IAMPrincipal, name string) (string, error)
+}
+
+// ResourcePolicyReader reads the resource policies of S3 buckets, KMS keys,
+// SQS queues, SNS topics and Secrets Manager secrets. Every list reads all
+// pages.
+type ResourcePolicyReader interface {
+	// ListBuckets returns the buckets of every region with their regions.
+	ListBuckets(ctx context.Context) ([]Bucket, error)
+	// GetBucketRegion reads the region of a bucket whose list entry had none.
+	GetBucketRegion(ctx context.Context, bucket string) (string, error)
+	// GetBucketPolicy reads the bucket policy in the bucket's region.
+	GetBucketPolicy(ctx context.Context, region, bucket string) (ResourcePolicy, error)
+	// ListKeys returns the KMS keys of the region.
+	ListKeys(ctx context.Context, region string) ([]KMSKey, error)
+	// IsCustomerManagedKey reports whether a key was created by the account
+	// (KeyManager CUSTOMER) rather than by an AWS service.
+	IsCustomerManagedKey(ctx context.Context, region string, key KMSKey) (bool, error)
+	// GetKeyPolicy reads the key policy named default.
+	GetKeyPolicy(ctx context.Context, region string, key KMSKey) (ResourcePolicy, error)
+	// ListQueues returns the URLs of the SQS queues of the region.
+	ListQueues(ctx context.Context, region string) ([]string, error)
+	// GetQueuePolicy reads the Policy and QueueArn attributes of a queue.
+	GetQueuePolicy(ctx context.Context, region, queueURL string) (ResourcePolicy, error)
+	// ListTopics returns the ARNs of the SNS topics of the region.
+	ListTopics(ctx context.Context, region string) ([]string, error)
+	// GetTopicPolicy reads the Policy attribute of a topic.
+	GetTopicPolicy(ctx context.Context, region, topicARN string) (ResourcePolicy, error)
+	// ListSecrets returns the ARNs of the Secrets Manager secrets of the
+	// region.
+	ListSecrets(ctx context.Context, region string) ([]string, error)
+	// GetSecretPolicy reads the resource policy of a secret, never its value.
+	GetSecretPolicy(ctx context.Context, region, secretARN string) (ResourcePolicy, error)
 }
 
 // ConfigRecorder is one AWS Config configuration recorder of a region with

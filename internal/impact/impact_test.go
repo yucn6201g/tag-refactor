@@ -14,21 +14,23 @@ import (
 )
 
 // memoryPolicies replaces the PolicyReader of contract C6 with in-memory
-// documents (ARN to JSON). docErr makes single documents unreadable.
+// attached customer managed policies (ARN to JSON) and nothing else (U1).
+// docErr makes single documents unreadable.
 type memoryPolicies struct {
+	emptyReader
 	docs    map[string]string
 	listErr error
 	docErr  map[string]error
 	reads   int
 }
 
-func (m *memoryPolicies) ListAttachedCustomerPolicies(context.Context) ([]awsaccess.IAMPolicyRef, error) {
+func (m *memoryPolicies) ListCustomerPolicies(context.Context) ([]awsaccess.IAMPolicyRef, error) {
 	if m.listErr != nil {
 		return nil, m.listErr
 	}
 	var refs []awsaccess.IAMPolicyRef
 	for arn := range m.docs {
-		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1"})
+		refs = append(refs, awsaccess.IAMPolicyRef{ARN: arn, DefaultVersionID: "v1", AttachmentCount: 1})
 	}
 	return refs, nil
 }
@@ -52,7 +54,7 @@ func policyWith(operator, key, value string) string {
 
 func analyze(t *testing.T, docs map[string]string, changes ...planner.TagChangeInput) planner.ImpactResult {
 	t.Helper()
-	res, err := New(&memoryPolicies{docs: docs}).Analyze(context.Background(), changes)
+	res, err := New(&memoryPolicies{docs: docs}, nil).Analyze(context.Background(), changes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +82,9 @@ func TestResourceTagKeysOfAnyServicePrefixAreMatched(t *testing.T) {
 	}
 	res := analyze(t, docs, rename("c-000001", "env", "Environment"))
 
-	want := "affected p1 aws:ResourceTag/env c-000001\naffected p2 ec2:ResourceTag/env c-000001\naffected p3 AWS:resourcetag/ENV c-000001"
+	// Since U5 the RequestTag and TagKeys keys are matched too (BR2.1).
+	want := "affected p1 aws:ResourceTag/env c-000001\naffected p2 ec2:ResourceTag/env c-000001\naffected p3 AWS:resourcetag/ENV c-000001\n" +
+		"affected p4 aws:RequestTag/env c-000001\naffected p5 aws:TagKeys c-000001"
 	if got := verdicts(res); got != want {
 		t.Fatalf("findings:\n%s\nwant:\n%s", got, want)
 	}
@@ -155,7 +159,7 @@ func TestUnreadablePoliciesMakeTheResultIncomplete(t *testing.T) {
 		},
 		docErr: map[string]error{"p-denied": denied},
 	}
-	res, err := New(reader).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "Environment")})
+	res, err := New(reader, nil).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "Environment")})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +174,7 @@ func TestUnreadablePoliciesMakeTheResultIncomplete(t *testing.T) {
 	}
 
 	listDenied := &memoryPolicies{listErr: &errkind.Error{Kind: errkind.AccessDenied, Op: awsaccess.OpListPolicies}}
-	res, err = New(listDenied).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "E")})
+	res, err = New(listDenied, nil).Analyze(context.Background(), []planner.TagChangeInput{rename("c-000001", "env", "E")})
 	if err != nil || res.Complete || len(res.UnreadPolicies) != 1 || res.UnreadPolicies[0].PolicyRef != "" ||
 		res.UnreadPolicies[0].Reason != "access denied to iam:ListPolicies" {
 		t.Fatalf("result = %+v, %v", res, err)
@@ -224,34 +228,34 @@ func TestParsePolicyRejectsDocumentsItCannotRead(t *testing.T) {
 		`{"Statement":[{"Condition":{"StringEquals":{"aws:ResourceTag/env":{"nested":1}}}}]}`,
 		`{"Statement":[{"Condition":{"StringEquals":{"aws:ResourceTag/env":[1,}}}]}`,
 	} {
-		if _, err := parsePolicy(doc); err == nil {
-			t.Errorf("parsePolicy(%s) succeeded", doc)
+		if _, err := parseDocument(doc, true); err == nil {
+			t.Errorf("parseDocument(%s) succeeded", doc)
 		}
 	}
-	conds, err := parsePolicy(`{"Version":"2012-10-17"}`)
-	if err != nil || len(conds) != 0 {
-		t.Fatalf("a policy without statements: %v %v", conds, err)
+	statements, err := parseDocument(`{"Version":"2012-10-17"}`, true)
+	if err != nil || len(statements) != 0 {
+		t.Fatalf("a policy without statements: %v %v", statements, err)
 	}
-	conds, err = parsePolicy(`{"Statement":[{"Condition":{"StringEquals":{"aws:ResourceTag/a%b":"50%"}}}]}`)
-	if err != nil || len(conds) != 1 || conds[0].tagKey != "a%b" {
-		t.Fatalf("a document that is not URL-encoded is read as is: %+v %v", conds, err)
+	statements, err = parseDocument(`{"Statement":[{"Condition":{"StringEquals":{"aws:ResourceTag/a%b":"50%"}}}]}`, true)
+	if err != nil || len(statements) != 1 || len(statements[0].references()) != 1 || statements[0].references()[0].tagKey != "a%b" {
+		t.Fatalf("a document that is not URL-encoded is read as is: %+v %v", statements, err)
 	}
 }
 
 func TestNoChangesReadNoPoliciesAndCancellationStops(t *testing.T) {
 	reader := &memoryPolicies{docs: map[string]string{"p": policyWith("StringEquals", "aws:ResourceTag/env", "x")}}
-	res, err := New(reader).Analyze(context.Background(), nil)
+	res, err := New(reader, nil).Analyze(context.Background(), nil)
 	if err != nil || !res.Complete || reader.reads != 0 {
 		t.Fatalf("result = %+v, reads = %d, err = %v", res, reader.reads, err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := New(reader).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
+	if _, err := New(reader, nil).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
 		t.Fatal("a cancelled context must stop the analysis")
 	}
 	listFails := &memoryPolicies{listErr: context.Canceled}
-	if _, err := New(listFails).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
+	if _, err := New(listFails, nil).Analyze(ctx, []planner.TagChangeInput{rename("c-000001", "env", "E")}); err == nil {
 		t.Fatal("a cancelled list must stop the analysis")
 	}
 }

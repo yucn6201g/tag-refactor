@@ -35,6 +35,11 @@ var apiOperations = []string{
 	"config:DescribeConfigurationRecorders", "config:DescribeConfigurationRecorderStatus", "config:SelectResourceConfig",
 	"resource-explorer-2:ListIndexes", "resource-explorer-2:GetDefaultView", "resource-explorer-2:GetView",
 	"resource-explorer-2:ListResources",
+	// U5: the reads of the impact analysis.
+	"iam:ListUsers", "iam:ListRoles", "iam:ListGroups", "iam:ListUserPolicies", "iam:ListRolePolicies", "iam:ListGroupPolicies",
+	"iam:GetUserPolicy", "iam:GetRolePolicy", "iam:GetGroupPolicy", "s3:ListBuckets", "s3:GetBucketLocation", "s3:GetBucketPolicy",
+	"kms:ListKeys", "kms:DescribeKey", "kms:GetKeyPolicy", "sqs:ListQueues", "sqs:GetQueueAttributes", "sns:ListTopics",
+	"sns:GetTopicAttributes", "secretsmanager:ListSecrets", "secretsmanager:GetResourcePolicy",
 }
 
 const requiredOwnerRules = "version: 1\nkeys:\n  Environment:\n    aliases: [env, Env]\nrequired:\n  Owner:\n    default: platform\n"

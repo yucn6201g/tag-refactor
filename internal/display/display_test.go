@@ -133,9 +133,9 @@ func samplePlan() *planner.Plan {
 		Conflicts: []planner.KeyConflict{{ResourceARN: "arn:c", CanonicalKey: "Environment",
 			PresentTags: map[string]string{"env": "dev\x1b[2J", "Environment": `pr\od`}, KeyOrder: []string{"env", "Environment"}}},
 		ImpactFindings: []planner.ImpactFinding{
-			{Verdict: planner.VerdictAffected, PolicyRef: "arn:p1", StatementID: "AllowDev", ConditionOperator: "StringEquals",
+			{Verdict: planner.VerdictAffected, PolicyRef: "arn:p1", SourceKind: planner.SourceIAMManaged, StatementID: "AllowDev", ConditionOperator: "StringEquals",
 				ConditionKey: "aws:ResourceTag/env", ConditionValue: "dev", ChangeIDs: []string{"c-000001", "c-000002", "c-000003"}},
-			{Verdict: planner.VerdictUndecided, PolicyRef: "arn:p2", StatementID: "#0", ConditionOperator: "Null",
+			{Verdict: planner.VerdictUndecided, PolicyRef: "arn:p2", SourceKind: planner.SourceIAMManaged, StatementID: "#0", ConditionOperator: "Null",
 				ConditionKey: "aws:ResourceTag/${aws:PrincipalTag/team}", ChangeIDs: []string{"c-000001"}},
 		},
 		UnreadPolicies: []planner.UnreadPolicy{

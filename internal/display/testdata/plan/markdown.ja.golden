@@ -7,9 +7,9 @@
 | ` eu-west-1 ` | ` AccessDenied ` (` tag:GetResources `) |
 
 ## ! 影響分析が不完全です
-| ポリシー | 理由 |
-|---|---|
-| ` arn:aws:iam::123456789012:policy/Hidden ` | ` access denied to iam:GetPolicyVersion ` |
+| ポリシー | リージョン | 理由 |
+|---|---|---|
+| IAM 管理ポリシー ` arn:aws:iam::123456789012:policy/Hidden ` |  | ` access denied to iam:GetPolicyVersion ` |
 
 ## 変更(4 リソース)
 | 種類 | 内容 | リソース |
@@ -66,8 +66,8 @@ default も当てはまる条件もないため、変更しません。
 ## 影響
 | | ポリシー | ステートメント | 条件 | 原因 |
 |---|---|---|---|---|
-| ! | ` arn:aws:iam::123456789012:policy/DevAccess ` | ` AllowDevEC2 ` | ` StringEquals ` ` aws:ResourceTag/env ` = ` dev ` | キー名の変更 ` env ` → ` Environment `、キー名の変更 ` Env ` → ` Environment ` |
-| ? | `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | 判定できません(ポリシー変数) |
+| ! | IAM ポリシー ` arn:aws:iam::123456789012:policy/DevAccess ` | ` AllowDevEC2 ` | ` StringEquals ` ` aws:ResourceTag/env ` = ` dev ` | キー名の変更 ` env ` → ` Environment `、キー名の変更 ` Env ` → ` Environment ` |
+| ? | IAM ポリシー `` arn:aws:iam::123456789012:policy/Teama\|b`c<d>&\u{1B}[2J\u{202E}e `` | ` #0 ` | ` StringEquals ` ` aws:ResourceTag/${aws:PrincipalTag/team} ` = ` yes ` | 判定できません(ポリシー変数) |
 
 ## 要約
 要約: 変更 4 · 衝突 1 · 影響あり 1 · 判定できない 1 · 値が未指定 1 · 消す候補 2 · IaC 1
