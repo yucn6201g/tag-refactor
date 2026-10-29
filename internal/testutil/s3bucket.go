@@ -91,7 +91,9 @@ func (f *FakeAWS) HandleS3Buckets(buckets ...*S3Bucket) {
 	for _, b := range buckets {
 		byName[b.Name] = b
 	}
-	noSuchBucket := func(Call) Reply { return S3Error(http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist") }
+	noSuchBucket := func(Call) Reply {
+		return S3Error(http.StatusNotFound, "NoSuchBucket", "The specified bucket does not exist")
+	}
 	route := func(op string, h func(b *S3Bucket, c Call) Reply) {
 		other := f.handler(op)
 		if other == nil {

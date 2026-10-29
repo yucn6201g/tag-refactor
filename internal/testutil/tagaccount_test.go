@@ -36,7 +36,9 @@ func TestTagAccountReadsByARNAndHidesNeverTaggedResources(t *testing.T) {
 
 	r := a.getResources(tagCall(OpGetResources, "us-east-1", map[string]any{"ResourceARNList": []any{"arn:q1", "arn:q2", "arn:q3", "arn:none"}}))
 
-	var page struct{ ResourceTagMappingList []struct{ ResourceARN string } }
+	var page struct {
+		ResourceTagMappingList []struct{ ResourceARN string }
+	}
 	decodeJSON(t, r, &page)
 	if len(page.ResourceTagMappingList) != 1 || page.ResourceTagMappingList[0].ResourceARN != "arn:q1" {
 		t.Fatalf("found %+v, want arn:q1 only (other region, never tagged, missing)", page)
