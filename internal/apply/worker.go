@@ -148,10 +148,11 @@ func (c *conductor) writeAll(ctx context.Context, writes []*Target) {
 // outcome is what the writes of a resource tell before the read back.
 type outcome int
 
+// The outcomes start at 1: the zero value is no outcome, which decide
+// refuses.
 const (
-	outNone outcome = iota
 	// outApplied: every write worked.
-	outApplied
+	outApplied outcome = iota + 1
 	// outNothing: the first write was refused; nothing was written.
 	outNothing
 	// outPartial: the first write worked and the second was refused.
