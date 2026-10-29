@@ -728,6 +728,33 @@ func TestTheSecondStopCancelsTheRunningCall(t *testing.T) {
 	w.requireNoLock()
 }
 
+// BR4.5: a write cancelled by the second Ctrl+C stays resultUnknown even
+// when the read back still shows the tags before, since AWS may apply the
+// cancelled call later. A failed write that was not cancelled is decided by
+// the read back.
+func TestACancelledWriteStaysUnknown(t *testing.T) {
+	e := &errkind.Error{Kind: errkind.Internal, Op: awsaccess.OpTagResources}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	back := map[string]map[string]string{"arn:a": {"k": "v"}}
+	cases := []struct {
+		ctx    context.Context
+		status journal.Status
+		reason Reason
+	}{
+		{cancelled, journal.StatusPending, ReasonResultUnknown},
+		{context.Background(), journal.StatusFailed, ReasonWriteFailed},
+	}
+	for _, c := range cases {
+		tg := &Target{ARN: "arn:a", TouchedKeys: []string{"k"},
+			Current: map[string]string{"k": "v"}, PlannedAfter: map[string]string{"k": "w"}}
+		decide(tg, write{out: writeOutcome(c.ctx, 0, e), err: e}, back, true)
+		if tg.Status != c.status || tg.Reason != c.reason {
+			t.Errorf("cancelled %v: %s/%s, want %s/%s", c.ctx.Err() != nil, tg.Status, tg.Reason, c.status, c.reason)
+		}
+	}
+}
+
 // A panic in a region or in the conductor ends the run as Internal, saves
 // the record and removes the lock (security design §3).
 func TestPanicsReleaseTheLock(t *testing.T) {

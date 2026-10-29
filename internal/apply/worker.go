@@ -164,6 +164,9 @@ const (
 	outDecide
 	// outDecidePartial: the second write ended without an answer.
 	outDecidePartial
+	// outCancelled: the second Ctrl+C cancelled the write. AWS may still
+	// apply it after the read back, so the result stays unknown (BR4.5).
+	outCancelled
 )
 
 // write is the outcome of one target with the error behind it.
@@ -317,7 +320,7 @@ func (c *conductor) writeBatch(ctx context.Context, region string, ts []*Target,
 		if err != nil {
 			e := errkind.Ensure(err, s.op)
 			for _, t := range live {
-				writes[t] = write{out: failedOutcome(i, e), err: e}
+				writes[t] = write{out: writeOutcome(ctx, i, e), err: e}
 			}
 			return
 		}
@@ -327,7 +330,7 @@ func (c *conductor) writeBatch(ctx context.Context, region string, ts []*Target,
 				if e.Kind == errkind.CredentialsMissing {
 					c.st.stop(StopCredentials, e)
 				}
-				writes[t] = write{out: failedOutcome(i, e), err: e}
+				writes[t] = write{out: writeOutcome(ctx, i, e), err: e}
 				continue
 			}
 			next = append(next, t)
@@ -337,6 +340,15 @@ func (c *conductor) writeBatch(ctx context.Context, region string, ts []*Target,
 	for _, t := range live {
 		writes[t] = write{out: outApplied}
 	}
+}
+
+// writeOutcome is the outcome of a write that failed in step i: unknown when
+// the run was cancelled while it ran, else failedOutcome.
+func writeOutcome(ctx context.Context, i int, e *errkind.Error) outcome {
+	if ctx.Err() != nil {
+		return outCancelled
+	}
+	return failedOutcome(i, e)
 }
 
 // failedOutcome is the outcome of a write that failed in step i (0 the
@@ -409,6 +421,8 @@ func decide(t *Target, w write, back map[string]map[string]string, read bool) {
 		default:
 			t.Status, t.Reason = journal.StatusPending, ReasonResultUnknown
 		}
+	case outCancelled:
+		t.Status, t.Reason = journal.StatusPending, ReasonResultUnknown
 	default:
 		panic(fmt.Sprintf("apply: no write outcome for %s", t.ARN))
 	}
