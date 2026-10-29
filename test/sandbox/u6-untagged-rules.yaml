@@ -1,0 +1,11 @@
+# Rule file for the U6 checkpoint in the sandbox account: adds the check key
+# to the SQS queues of ap-northeast-1, so that the never-tagged queue of U2
+# can be written (a queue without tags cannot be matched by its tags). The
+# verification script checks with plan that only the expected queues are in
+# range before it applies this file.
+version: 1
+required:
+  tag-refactor-u6-check:
+    when:
+      - match: {resourceType: sqs, region: ap-northeast-1}
+        value: "1"

@@ -1,0 +1,234 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TagRefactorReadOnly",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:DescribeRegions",
+        "tag:GetResources",
+        "iam:GetAccountAuthorizationDetails",
+        "config:DescribeConfigurationRecorders",
+        "config:DescribeConfigurationRecorderStatus",
+        "config:SelectResourceConfig",
+        "resource-explorer-2:ListIndexes",
+        "resource-explorer-2:GetDefaultView",
+        "resource-explorer-2:GetView",
+        "resource-explorer-2:Search",
+        "s3:ListAllMyBuckets",
+        "kms:ListKeys",
+        "sqs:ListQueues",
+        "sns:ListTopics",
+        "secretsmanager:ListSecrets"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TagRefactorReadBucketPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketPolicy",
+        "s3:GetBucketLocation"
+      ],
+      "Resource": "arn:aws:s3:::*"
+    },
+    {
+      "Sid": "TagRefactorReadKeyPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "kms:DescribeKey",
+        "kms:GetKeyPolicy"
+      ],
+      "Resource": "arn:aws:kms:*:<account-id>:key/*"
+    },
+    {
+      "Sid": "TagRefactorReadQueuePolicies",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:GetQueueAttributes"
+      ],
+      "Resource": "arn:aws:sqs:*:<account-id>:*"
+    },
+    {
+      "Sid": "TagRefactorReadTopicPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetTopicAttributes"
+      ],
+      "Resource": "arn:aws:sns:*:<account-id>:*"
+    },
+    {
+      "Sid": "TagRefactorReadSecretPolicies",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetResourcePolicy"
+      ],
+      "Resource": "arn:aws:secretsmanager:*:<account-id>:secret:*"
+    },
+    {
+      "Sid": "TagRefactorTaggingAPI",
+      "Effect": "Allow",
+      "Action": [
+        "tag:TagResources",
+        "tag:UntagResources"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TagRefactorTagEC2",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": [
+        "arn:aws:ec2:*:<account-id>:*",
+        "arn:aws:ec2:*::snapshot/*",
+        "arn:aws:ec2:*::image/*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagS3Buckets",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketTagging",
+        "s3:PutBucketTagging",
+        "s3:TagResource",
+        "s3:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:s3:::*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagSQS",
+      "Effect": "Allow",
+      "Action": [
+        "sqs:TagQueue",
+        "sqs:UntagQueue"
+      ],
+      "Resource": [
+        "arn:aws:sqs:*:<account-id>:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagSNS",
+      "Effect": "Allow",
+      "Action": [
+        "sns:TagResource",
+        "sns:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:sns:*:<account-id>:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagSecretsManager",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:TagResource",
+        "secretsmanager:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:*:<account-id>:secret:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagIAM",
+      "Effect": "Allow",
+      "Action": [
+        "iam:TagRole",
+        "iam:TagUser",
+        "iam:TagPolicy",
+        "iam:UntagRole",
+        "iam:UntagUser",
+        "iam:UntagPolicy"
+      ],
+      "Resource": [
+        "arn:aws:iam::<account-id>:role/*",
+        "arn:aws:iam::<account-id>:user/*",
+        "arn:aws:iam::<account-id>:policy/*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagKMS",
+      "Effect": "Allow",
+      "Action": [
+        "kms:TagResource",
+        "kms:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:kms:*:<account-id>:key/*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagLambda",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:TagResource",
+        "lambda:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:lambda:*:<account-id>:function:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagDynamoDB",
+      "Effect": "Allow",
+      "Action": [
+        "dynamodb:TagResource",
+        "dynamodb:UntagResource"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:<account-id>:table/*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:TagResource",
+        "logs:TagLogGroup",
+        "logs:UntagResource",
+        "logs:UntagLogGroup"
+      ],
+      "Resource": [
+        "arn:aws:logs:*:<account-id>:log-group:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorTagRDS",
+      "Effect": "Allow",
+      "Action": [
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource"
+      ],
+      "Resource": [
+        "arn:aws:rds:*:<account-id>:*"
+      ]
+    },
+    {
+      "Sid": "TagRefactorRecordObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::<record-bucket>/<record-prefix>/*"
+    },
+    {
+      "Sid": "TagRefactorRecordList",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::<record-bucket>",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": "<record-prefix>/*"
+        }
+      }
+    }
+  ]
+}
