@@ -326,6 +326,12 @@ const (
 	ExitMeaningReviewNeeded      = "exit.reviewNeeded"
 	ExitMeaningNoIssues          = "exit.noIssues"
 	ExitMeaningNoChangesNeeded   = "exit.noChangesNeeded"
+	// The meanings of apply (U6 BR6.2).
+	ExitMeaningApplied      = "exit.applied"
+	ExitMeaningCancelled    = "exit.cancelled"
+	ExitMeaningApplySkipped = "exit.applySkipped"
+	ExitMeaningApplyFailed  = "exit.applyFailed"
+	ExitMeaningImpactStop   = "exit.impactStop"
 )
 
 // ExitCode prints the exit code line with its meaning, one of the

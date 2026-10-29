@@ -39,6 +39,10 @@ type stopper struct {
 
 func newStopper() *stopper { return &stopper{ch: make(chan struct{})} }
 
+// TransientLimit is the number of write calls in a row that may end
+// Transient before a run stops (NFR5.17), for the message of the stop.
+func TransientLimit() int { return transientLimit }
+
 // stop raises the signal; the first reason and error are kept.
 func (s *stopper) stop(reason StopReason, err error) {
 	s.mu.Lock()
