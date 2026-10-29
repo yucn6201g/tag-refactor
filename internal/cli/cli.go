@@ -52,6 +52,9 @@ type Deps struct {
 	// or rules suggest --output exists, before anything is written to it.
 	// The tests of this package use it to interrupt a run while it saves.
 	savingHook func()
+	// interrupts, when set, replaces the subscription to Ctrl+C of apply
+	// (the second stage of the stop). The tests of this package use it.
+	interrupts func() (<-chan os.Signal, func())
 }
 
 // Exit codes (contract C5, BR6.3).
@@ -80,6 +83,14 @@ type outcome struct {
 	// saveHint is the rule file of a plan that was not saved: the last line
 	// says how to save it (screen 4).
 	saveHint string
+	// fixed is the exit code apply decided (U6 BR6.2), with its meaning.
+	fixed *fixedExit
+}
+
+// fixedExit is an exit code with the display.ExitMeaning shown next to it.
+type fixedExit struct {
+	code    int
+	meaning string
 }
 
 // exitCode applies BR6.3 and BR5.3 to scan and rules suggest: error or
@@ -91,6 +102,9 @@ type outcome struct {
 // draft gives 0 even with variants, and 1 when it is incomplete or too large
 // (U3 BR6.6, BR6.7). The meaning is a display.ExitMeaning identifier.
 func (o outcome) exitCode() (int, string) {
+	if o.fixed != nil {
+		return o.fixed.code, o.fixed.meaning
+	}
 	if o.plan != nil {
 		return planExitCode(o.plan)
 	}
@@ -224,8 +238,8 @@ func (a *app) rootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
-	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand())
-	for _, name := range []string{"apply", "rollback", "iac"} {
+	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand(), a.applyCommand())
+	for _, name := range []string{"rollback", "iac"} {
 		root.AddCommand(unavailableCommand(name))
 	}
 	return root

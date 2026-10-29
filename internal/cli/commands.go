@@ -239,26 +239,9 @@ func (a *app) runPlan(ctx context.Context, args planArgs) error {
 			return withOption(err, "--out")
 		}
 	}
-	rs, err := a.loadRules(args.rules)
+	_, plan, snap, err := makePlan(ctx, cancel, a, args.rules, args.profile, args.regions, allReadersOf)
 	if err != nil {
 		return err
-	}
-	r, snap, err := a.collectAll(ctx, args.profile, args.regions)
-	if err != nil {
-		return err
-	}
-	plan := planner.Build(snap, rs, planner.Options{Now: a.deps.Now(), RuleFile: args.rules, ToolVersion: toolVersion()})
-	if plan.NeedsAnalysis() {
-		policies := &stoppingPolicyReader{inner: r.policies, cancel: cancel}
-		var analyzer planner.ImpactAnalyzer = impact.New(policies, plan.Regions)
-		result, err := analyzer.Analyze(ctx, plan.ImpactInputs())
-		if stop := policies.stopped(); stop != nil {
-			return stop
-		}
-		if err != nil {
-			return err
-		}
-		plan.AttachImpact(result)
 	}
 	if args.out != "" {
 		if err := a.saveFile(ctx, args.out, planPrefix, planner.MaxPlanBytes, func(w io.Writer) error {
@@ -282,6 +265,45 @@ func (a *app) runPlan(ctx context.Context, args planArgs) error {
 	a.p.PlanResult(plan, display.Output{Format: args.format, ExitCode: plan.ExitCode(), ToolVersion: plan.ToolVersion})
 	a.p.PlanScope(snap, plan.NeedsAnalysis())
 	return nil
+}
+
+// planReaderSet is a set of readers that can make a plan: plan's own, and
+// apply's for --rules (U6 BR1.3).
+type planReaderSet interface {
+	readerSet
+	policyReader() awsaccess.PolicyReader
+}
+
+func (r readers) policyReader() awsaccess.PolicyReader { return r.policies }
+
+// makePlan reads the rule file, collects the regions and builds the plan
+// with its impact analysis, as plan does (U4 W1). cancel stops the run when
+// a policy read finds missing or expired credentials.
+func makePlan[R planReaderSet](ctx context.Context, cancel context.CancelFunc, a *app, rulesPath, profile string, regions []string,
+	stage func(*awsaccess.Session) R) (R, *planner.Plan, *inventory.Snapshot, error) {
+	var none R
+	rs, err := a.loadRules(rulesPath)
+	if err != nil {
+		return none, nil, nil, err
+	}
+	r, snap, err := collect(ctx, a, profile, regions, stage)
+	if err != nil {
+		return none, nil, nil, err
+	}
+	plan := planner.Build(snap, rs, planner.Options{Now: a.deps.Now(), RuleFile: rulesPath, ToolVersion: toolVersion()})
+	if plan.NeedsAnalysis() {
+		policies := &stoppingPolicyReader{inner: r.policyReader(), cancel: cancel}
+		var analyzer planner.ImpactAnalyzer = impact.New(policies, plan.Regions)
+		result, err := analyzer.Analyze(ctx, plan.ImpactInputs())
+		if stop := policies.stopped(); stop != nil {
+			return none, nil, nil, stop
+		}
+		if err != nil {
+			return none, nil, nil, err
+		}
+		plan.AttachImpact(result)
+	}
+	return r, plan, snap, nil
 }
 
 // stoppingPolicyReader stops the run when reading a policy finds missing or

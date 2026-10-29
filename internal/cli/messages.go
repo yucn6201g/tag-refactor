@@ -28,6 +28,12 @@ func describe(e *errkind.Error, lang display.Lang) (what, fix string) {
 		return describeFileError(e, lang)
 	case errkind.CredentialsMissing:
 		return describeCredentials(e, lang)
+	case errkind.Conflict:
+		// The lock of the account is held (U6 BR3.1); its content was shown
+		// above the error.
+		return t("err.lockHeld", e.Subject), t("err.lockHeldFix")
+	case errkind.AccountMismatch:
+		return t(e.DetailID, e.DetailArgs...), t(e.HintID, e.HintArgs...)
 	case errkind.AccessDenied:
 		// The IAM action is what the user has to allow; it differs from the
 		// API name for Resource Explorer's ListResources (security design §3).
@@ -68,11 +74,17 @@ func describeInvalidInput(e *errkind.Error, lang display.Lang) (string, string) 
 	case errkind.ReasonRegionUnavailable:
 		return t("err.regionNA", e.Region), t("err.regionNAFix")
 	}
-	fix := e.Hint
+	detail, fix := e.Detail, e.Hint
+	if e.DetailID != "" {
+		detail = t(e.DetailID, e.DetailArgs...)
+	}
+	if e.HintID != "" {
+		fix = t(e.HintID, e.HintArgs...)
+	}
 	if fix == "" {
 		fix = t("err.help")
 	}
-	return e.Detail, fix
+	return detail, fix
 }
 
 // describeOutput formats the errors of the files tag-refactor writes; Key is
