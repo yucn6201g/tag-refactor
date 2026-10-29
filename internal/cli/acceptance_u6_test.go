@@ -627,7 +627,14 @@ func TestAcceptanceU6_AC4_2_6_StoppedRunsLeaveWholeRecords(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var once sync.Once
-	w.account.OnWrite(func(testutil.Call) { once.Do(cancel) })
+	// Ctrl+C while the first write runs; AWS answers a moment later, as a
+	// real call would, so the stop is seen before the next batch.
+	w.account.OnWrite(func(testutil.Call) {
+		once.Do(func() {
+			cancel()
+			time.Sleep(200 * time.Millisecond)
+		})
+	})
 
 	r := w.applyContext(ctx, "", false, "--plan", plan, "--yes")
 
@@ -641,7 +648,7 @@ func TestAcceptanceU6_AC4_2_6_StoppedRunsLeaveWholeRecords(t *testing.T) {
 		statuses[e.Status]++
 	}
 	if rec.Completed == nil || *rec.Completed || statuses["applied"] != 1 || statuses["pending"] != 1 {
-		t.Fatalf("record after Ctrl+C: completed %v, statuses %v", rec.Completed, statuses)
+		t.Fatalf("record after Ctrl+C: completed %v, statuses %v\nstderr:\n%s", *rec.Completed, statuses, r.stderr)
 	}
 	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
 		t.Fatalf("the temporary file older than an hour was not cleaned up (err %v)", err)

@@ -48,7 +48,13 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 		{&errkind.Error{Kind: errkind.Transient, Op: "tag:GetResources"}, "kept failing on tag:GetResources after retries", "--debug"},
 		{&errkind.Error{Kind: errkind.Internal, Cause: secret}, "an unexpected error occurred in tag-refactor", "--debug"},
 		{&errkind.Error{Kind: errkind.Internal, Op: "tag:GetResources", Detail: "repeated token"}, "in tag:GetResources: repeated token", "--debug"},
-		{&errkind.Error{Kind: errkind.Conflict, Op: "x"}, "an unexpected error occurred in x", "--debug"},
+		// U6: Conflict is the lock of an account held by another apply or
+		// rollback (BR3.1); AccountMismatch a plan of another account (BR1.2).
+		{&errkind.Error{Kind: errkind.Conflict, Subject: "123456789012"}, "another apply or rollback is running for account 123456789012", "--force-unlock"},
+		{&errkind.Error{Kind: errkind.AccountMismatch, DetailID: "err.accountMismatch", DetailArgs: []any{"111111111111", "123456789012"},
+			HintID: "err.accountMismatchFix", HintArgs: []any{"111111111111"}}, "the plan is for account 111111111111, but the credentials are for account 123456789012", "--profile"},
+		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--record-to", DetailID: "journal.badLocation",
+			DetailArgs: []any{"s3://"}, HintID: "journal.badLocationFix"}, `--record-to "s3://" is not a folder`, "bucket name"},
 	}
 	for _, tc := range cases {
 		what, fix := describe(tc.err, display.English)
