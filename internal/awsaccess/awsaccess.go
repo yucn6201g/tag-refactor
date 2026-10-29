@@ -2,13 +2,17 @@
 // (contract C6). It builds the SDK configuration, applies time limits and the
 // SDK's standard retries, converts SDK errors into error kinds, and exposes
 // read-only interfaces: tags, IAM policies, AWS Config and Resource Explorer.
-// The write interface is a separate type and has no implementation yet, so
-// scan and plan cannot be given one (NFR3.1).
+// The write interfaces (TagWriter and ObjectStore) are implemented by Writer,
+// a separate type that only apply and rollback build from a Session, so scan,
+// rules suggest and plan cannot be given one (NFR3.1, U6 NFR3.10).
 package awsaccess
 
 import (
 	"context"
+	"slices"
 	"time"
+
+	"github.com/yucn6201g/tag-refactor/internal/errkind"
 )
 
 // Operation names, written as API operations with the IAM service prefix
@@ -107,7 +111,7 @@ func RequiredPermissions() []string {
 // that an AccessDenied names what the user has to allow. Names outside the
 // table are returned unchanged.
 func IAMAction(api string) string {
-	for _, op := range Operations {
+	for _, op := range slices.Concat(Operations, WriteOperations) {
 		if op.API == api {
 			return op.IAMAction
 		}
@@ -364,11 +368,45 @@ type ExplorerReader interface {
 	UntaggedResources(ctx context.Context, region, viewARN string) ([]ExplorerResource, error)
 }
 
-// TagWriter is the write interface of contract C6. U1 has no implementation
-// and scan and plan never receive one; U6 and U7 will implement it.
+// ARNTagReader reads the tags of resources named by their ARNs (U6 BR3.3,
+// BR4.3, BR4.7). It only reads.
+type ARNTagReader interface {
+	// GetTags reads the tags of at most MaxReadARNs resources of the region
+	// with one tag:GetResources call. A resource the answer does not hold is
+	// not in the map: it was deleted, or never had a tag.
+	GetTags(ctx context.Context, region string, arns []string) (map[string]map[string]string, error)
+}
+
+// WriteResult is the per-resource result of one TagResources or
+// UntagResources (contract C6 perResourceResult).
+type WriteResult struct {
+	// Failed holds, by ARN, the error of each resource that was not written.
+	// A resource that is not in it was written.
+	Failed map[string]*errkind.Error
+}
+
+// TagWriter is the write interface of contract C6. Only apply and rollback
+// receive one. Both methods refuse keys starting with aws: without calling
+// AWS (U6 NFR3.12). An error means the call failed as a whole; the
+// resources that failed one by one are in the WriteResult.
 type TagWriter interface {
-	TagResources(ctx context.Context, region string, arns []string, tags map[string]string) error
-	UntagResources(ctx context.Context, region string, arns []string, keys []string) error
+	TagResources(ctx context.Context, region string, arns []string, tags map[string]string) (WriteResult, error)
+	UntagResources(ctx context.Context, region string, arns []string, keys []string) (WriteResult, error)
+}
+
+// ObjectStore keeps the run records in S3 (contract C6). The URIs have the
+// form s3://bucket/key. Only apply and rollback receive one.
+type ObjectStore interface {
+	// Put replaces the object with data in one write.
+	Put(ctx context.Context, uri string, data []byte) error
+	// Get reads the object; a missing one is NotFound.
+	Get(ctx context.Context, uri string) ([]byte, error)
+	// PutIfAbsent writes the object only when no object has the name; an
+	// existing one is Conflict, and a store that cannot write on that
+	// condition is StorageFailed.
+	PutIfAbsent(ctx context.Context, uri string, data []byte) error
+	// Delete removes the object.
+	Delete(ctx context.Context, uri string) error
 }
 
 // CallRecord describes one AWS API call for the --debug output. It carries no
