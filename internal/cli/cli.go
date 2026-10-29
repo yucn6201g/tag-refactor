@@ -41,6 +41,12 @@ type Deps struct {
 	// ExplorerPageSize, when set, replaces the page size of Resource
 	// Explorer's ListResources (tests only). Zero keeps 500.
 	ExplorerPageSize int
+	// Stdin is where apply reads the confirmation (U6 BR2.2). Nil means the
+	// process standard input.
+	Stdin io.Reader
+	// StdinIsTerminal reports whether Stdin is a terminal (U6 BR2.3). Nil
+	// asks the operating system about the process standard input.
+	StdinIsTerminal func() bool
 
 	// savingHook, when set, is called once the temporary file of plan --out
 	// or rules suggest --output exists, before anything is written to it.
