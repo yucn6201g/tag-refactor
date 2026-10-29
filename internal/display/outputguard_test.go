@@ -12,7 +12,9 @@ import (
 )
 
 // The packages that may write to the process output (security design §4).
-var outputPackages = []string{"internal/display", "cmd/tag-refactor"}
+// scripts holds helpers of the verification scripts (U6: u6check.go), run
+// with go run and never part of the tag-refactor binary.
+var outputPackages = []string{"internal/display", "cmd/tag-refactor", "scripts"}
 
 // forbiddenOutput lists the identifiers that write to the process output
 // directly. Everywhere else, output must go through a display.Printer so that

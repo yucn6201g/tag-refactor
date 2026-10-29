@@ -5,17 +5,19 @@ different ways (for example `env` and `Env`) and plans how to unify them,
 showing which IAM policies and resource policies (S3, KMS, SQS, SNS and
 Secrets Manager) use the tags that would change. It reads every
 enabled region, finds resources that were never tagged, counts missing
-required tags, and drafts a rule file from the tags in use. It only reads
-from AWS. (The rest of this README is in Japanese.)
+required tags, and drafts a rule file from the tags in use. apply rewrites
+the tags of a plan after a confirmation, keeping a record of every change
+so that it can be undone. (The rest of this README is in Japanese.)
 
-## できること(U1〜U5)
+## できること(U1〜U6)
 
-AWS への書き込みは一切しません。
+AWS に書き込むのは `apply` だけです(タグと、指定したときの記録の S3 のオブジェクト)。ほかのコマンドは読み取りだけで、書き込みの口を持ちません。
 
 | コマンド | できること |
 |---|---|
 | `scan` | アカウントで有効なすべてのリージョンを読み(`--region` で絞れます)、書き方の違うタグのキーをまとめて示します。大文字・小文字と区切り文字(`-`、`_`、空白)の違いに加えて、略語の辞書(`env`→`environment`、`prod`→`production`、`dev`→`development`、`stg`→`staging`。キー全体が一致するときだけ)でまとめます。辞書を使って初めてまとまったものには `(abbreviation match)` の印を付け、終了コードの理由にしません。`--rules` のルールファイルの `required` のキーが付いていないリソースの数、一度もタグが付いていないリソース、タグを変更できない種類も示します。`aws:` で始まるキーは対象にしません。 |
 | `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、IAM のポリシー(管理ポリシーとインラインポリシー)と、S3、KMS、SQS、SNS、Secrets Manager のリソースポリシーのうち、変更するタグを参照しているものを、影響あり(`!`)か判定できない(`?`)として示します(下の「影響分析」)。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
+| `apply` | 変更案のとおりにタグを書き換えます。保存した変更案(`--plan`)か、その場で作る変更案(`--rules`)のどちらか1つを使います。要約と影響のある変更を示し、`yes` と入力したときだけ書き換えます。書き換える前のタグを記録に保存し、取り消しのコマンドを示します(下の「タグの書き換え(apply)」)。 |
 | `rules suggest` | 今使われているタグから、ルールファイルの下書きを作ります。`scan` と同じまとめ方でキーをまとめ、最も多くのリソースで使われている書き方を正しいキー名に、残りを別名にします。値も同じまとめ方でまとめ、書き方が2つ以上ある値を `values` の候補にします。全リージョンを読みます(`--region` で絞れます。一度もタグが付いていないリソースは探しません)。 |
 
 調べる範囲は次のとおりです。どのコマンドも、調べた範囲を `Checked:` で始まる1行で標準エラーに出します。
@@ -30,7 +32,7 @@ AWS への書き込みは一切しません。
 
 どのコマンドも、英語か日本語で表示でき(`--lang`)、端末では色を付けます(`NO_COLOR` で消せます)。
 
-まだできないこと(後の作業単位): 変更の適用と取り消し(`apply`、`rollback`)、IaC への反映。
+まだできないこと(後の作業単位): 書き換えの取り消し(`rollback`。`apply` は取り消しに使う記録を書き、コマンドを示します)、IaC への反映。
 
 ## インストール
 
@@ -63,6 +65,12 @@ tag-refactor plan --rules tagrules.yaml --format markdown > plan.md
 
 # 変更案をファイルに保存する(後の apply が読む。標準出力にはいつもの一覧が出る)
 tag-refactor plan --rules tagrules.yaml --out plan.json
+
+# 保存した変更案のとおりにタグを書き換える(要約を見て yes と入力する)
+tag-refactor apply --plan plan.json --profile dev
+
+# スクリプトから書き換える(影響のある変更があれば止まる。影響も承知なら --allow-impact を足す)
+tag-refactor apply --plan plan.json --yes
 
 # 日本語で表示する / スクリプトから JSON で読む
 tag-refactor scan --lang ja
@@ -195,6 +203,48 @@ Markdown(`markdown`)は、プルリクエストや Wiki に貼るための形で
 
 色は補助です。意味は必ず記号(`+` 追加、`~` 変更、`-` 削除、`!` 影響ありまたは不完全、`?` 判定できない)と文字でも示します。色を付けるのは、標準出力と標準エラーのそれぞれについて、端末であり、`NO_COLOR` が設定されていない(または空)、`TERM` が `dumb` でない、Windows では仮想端末の処理を有効にできた、のすべてを満たすときだけです。ファイルやパイプに向けた出力には色の制御の文字は入りません。Windows で有効にした仮想端末の処理は、終わるときに元に戻します。
 
+### タグの書き換え(apply)
+
+```bash
+tag-refactor apply --plan plan.json                 # 保存した変更案(アカウントが違えば止まる)
+tag-refactor apply --rules tagrules.yaml            # plan と同じ手順で変更案をその場で作る(保存しない)
+tag-refactor apply --plan plan.json --yes           # 確認なし。影響のある変更があれば止まる(終了コード 2)
+tag-refactor apply --plan plan.json --yes --allow-impact
+tag-refactor apply --plan plan.json --record-to s3://my-bucket/tag-refactor
+```
+
+| オプション | 意味 |
+|---|---|
+| `--plan` / `--rules` | どちらか1つが必須です。`--plan` は `plan --out` で保存した変更案、`--rules` はルールファイル(`plan` と同じに全リージョンを読み、影響分析もします)。 |
+| `--yes` | 確認の入力なしで書き換えます。影響のある変更(`!` と `?`、影響分析が不完全な場合も含む)があれば、何も書き換えずに終了コード 2 で止まります。標準入力が端末でないときは `--yes` が要ります(`yes` をパイプで流しても確認になりません)。 |
+| `--allow-impact` | `--yes` と一緒のときだけ、影響のある変更も書き換えます。`--yes` なしでは何も変えず、確認画面で判断するよう案内します。 |
+| `--record-to` | 記録の置き場所。既定は `~/.tag-refactor/runs/<アカウントID>/`。フォルダを指定すると `<フォルダ>/<アカウントID>/` に、`s3://<バケット>/<前置き>` を指定すると `<前置き>/<アカウントID>/` に置きます。 |
+| `--force-unlock` | 強制終了などで残った印を外してから進めます。実行中の apply や rollback がないことを確かめてから使ってください。 |
+| `--profile`、`--lang`、`--debug` | ほかのコマンドと同じです。 |
+
+**確認と書き換えの順序**
+
+1. 同じアカウントの印を取ります(下の「記録と印」)。別の apply か rollback が動いていれば、印の中身(実行 ID、ホスト名、プロセスID、作った時刻)を示して止まります。
+2. 要約(リージョンの数、変更案の ID、種類ごとの変更の数、影響のある変更を `! affected` と `? cannot decide` の記号と文字で、不完全の印、IaC で管理されているリソースの数、変更しない衝突と値が未指定の必須タグの件数、記録の場所)を標準エラーに出し、`yes` の入力を待ちます。`yes` 以外、入力の終わり、Ctrl+C は取り消しで、何も書き換えずに終了コード 0 です。
+3. 変更のあるすべてのリソースの今のタグを読みます。`aws:` で始まるキーを除いて変更案の作成時と違うリソース(`changed after the plan was made`)と、見つからないリソース(`no longer exists`)は飛ばします。一度もタグが付いていないリソースはタグ付けの API が返さないため、変更案の時点でも利用者のタグがなかったものは、タグなしとして書き換えます。
+4. 書き換え後のタグを求め、付けるタグと消すキーをその差だけにします。`aws:` で始まるキーは付けも消しもしません。書き換え後に `aws:` 以外のタグが50個を超えるリソースは飛ばします(`would have 51 tags, over the limit of 50`)。最後は50個以下でも、付けるのを先にすると途中で50個を超えるリソースは、消すのを先にします。
+5. 書き換える前に、すべてのリソースの前後のタグを記録に保存します。保存できなければ何も書き換えません。
+6. 同じ書き換えのリソースを20個ずつまとめて書きます(付けるのが先、消すのが後)。リージョンは同時に4つまで、1つのリージョンの中は順に書きます。100個ずつ、書く直前に今のタグを読み直して変わったものを飛ばし、書いたあとに読み戻して記録します。読み戻したタグが期待と違うものは `Not confirmed after writing` として数えます(タグの API は新しいタグを遅れて返すことがあります。終了コードは変えません)。
+7. 権限のないリソースなどは失敗として記録し、残りを続けます。何も書いていない失敗、一部だけ書いた失敗、結果が分からないもの(時間切れなど)を分けて示します。認証情報の期限切れと、書き込みの呼び出しが一時的な失敗で10回続いたときは、新しい書き込みを止めます。
+8. 終わりに、書き換えた件数、飛ばしたものと失敗したものの一覧(標準出力)、ログファイル、記録の場所、取り消しのコマンド `tag-refactor rollback --run <実行ID>`(`--record-to` と `--profile` を付けたときは同じ値を `--record-from` と `--profile` で)を示します。
+
+Ctrl+C で止めると、動いている書き込みを待ち、新しい書き込みを始めずに記録を保存し(未完了の記録)、印を消し、取り消しのコマンドを示して終了コード 1 で終わります。待っている間の2回目の Ctrl+C では、動いている呼び出しを待たずに取り消し、そのリソースを「結果が分からない」として記録を保存してから終わります。
+
+値がリソースごとに違うキーの名前を変えると、リソースをまとめて書けないため、書き込みの呼び出しがリソースの数の2倍になります(1万件の偏ったリージョンで約20分の見積もり)。
+
+**記録と印**
+
+- 記録(`<実行ID>.json`)は書き換えの前に保存し、書き換えの間は5秒ごとと終わりに保存し直します。手元では同じフォルダの一時ファイルに書いてディスクに書き出してから名前を変えるので、途中で止まっても前の版か新しい版のどちらかが残ります。S3 では1回の書き込みで置き換えます。ACL は付けず、暗号化はバケットの既定に任せます。
+- 失敗と飛ばしの詳細は、手元の `~/.tag-refactor/runs/<アカウントID>/<実行ID>.log` に1行ずつ(ARN、リージョン、状態、理由、エラーの種類、操作の名前)書きます。タグの値と AWS のエラー文は書きません。
+- 印は手元の `~/.tag-refactor/runs/<アカウントID>/.lock` に常に作り、記録を S3 に置くときは S3 の `<前置き>/<アカウントID>/.lock` にも「同じ名前がなければ作る」条件付きの書き込みで作ります。どの終わり方でも、自分の実行 ID の印だけを消します。
+- 手元の印は、同じ端末の中の同時実行だけを防ぎます。別の端末から同じアカウントに apply しうるときは、記録を S3 に置いてください。条件付きの書き込みに対応しない保存先は、エラーとして止まります。
+- 手元のフォルダとファイルは、Linux と macOS では本人だけが読み書きできる権限(0700、0600)で作り、既にあるフォルダをほかの利用者が読めるときは警告します。Windows ではその場所の権限を引き継ぎます。プロファイルの外のフォルダを `--record-to` に指定すると、ほかの利用者が読める場合があります。
+
 ### ルールファイルの下書き(rules suggest)
 
 ```bash
@@ -300,6 +350,8 @@ remove: [tmp-owner]
 | 1 | エラー、Ctrl+C での中断、読めなかったリージョンがある、影響分析が不完全(ポリシーを読めなかった)、変更案を保存できなかった、または `rules suggest` の下書きがキーだけで 64 KiB を超えた |
 | 2 | 確認が必要(`scan`: 表記ゆれか必須タグの欠落、`plan`: 変更、衝突、値が未指定、影響のどれかがある) |
 
+`apply` の終了コード: 0 はすべて書き換えた、または確認で `yes` 以外を入力した。1 はエラー、失敗したリソースや結果が分からないリソースがある、止めた、記録を保存できなかった、印を消せなかった、印があった、アカウントが違う、収集が不完全な変更案。2 は飛ばしたリソースがある、変更案に衝突か値が未指定の必須タグがある、または `--yes` だけで影響のある変更があって止まった。
+
 一度もタグが付いていないリソースを探せなかったこと、見つかったこと、タグを変更できない種類があることだけでは、終了コードは変わりません。
 
 エラーは2行(`Error:` 何が起きたか、`Fix:` どう直すか。日本語では `エラー:` と `直し方:`)で出します。AWS の SDK のエラー文はそのまま出しません。
@@ -328,6 +380,19 @@ remove: [tmp-owner]
 | `resource-explorer-2:GetView` | 既定のビューに絞り込みの条件があるか(`scan`) |
 | `resource-explorer-2:Search` | API の `ListResources` に AWS が求める IAM の操作。タグのないリソースを件数の上限なく読みます(`scan`)。1,000 件までに限られる API の `Search` は呼びません |
 
+`apply` には、書き換え用の例 [`docs/iam/apply-policy.json`](docs/iam/apply-policy.json) を使います。読み取り用の例のすべてに、次を足したものです。`<account-id>` はアカウントの ID、`<record-bucket>` と `<record-prefix>` は `--record-to` の S3 のバケットと前置きに置き換えます(S3 に記録しないなら、記録の2つの文は消してかまいません)。
+
+| IAM の操作 | `Resource` | 使う場面 |
+|---|---|---|
+| `tag:TagResources`、`tag:UntagResources` | `*` | タグ付けの API での書き込み。Service Authorization Reference でリソースの種類を持たない操作なので、範囲を絞れません |
+| 種類ごとのタグの操作(EC2、S3 のバケット、SQS、SNS、Secrets Manager、IAM のロール・ユーザー・管理ポリシー、KMS、Lambda、DynamoDB、CloudWatch Logs、RDS) | 各サービスの ARN の形(例: `arn:aws:sqs:*:<account-id>:*`) | タグ付けの API は、リソースごとにそのサービスのタグの操作(例: `sqs:TagQueue`、`sqs:UntagQueue`)も確かめます |
+| `s3:GetObject`、`s3:PutObject`、`s3:DeleteObject` | `arn:aws:s3:::<record-bucket>/<record-prefix>/*` | S3 の記録と印 |
+| `s3:ListBucket` | `arn:aws:s3:::<record-bucket>`(`s3:prefix` を `<record-prefix>/*` に絞る) | ない記録を読んだときに AccessDenied ではなく NotFound になるように |
+
+- 表にない種類のリソースは、例のままでは AccessDenied(足りない操作の名前つき)で失敗します。AWS 管理ポリシー `ResourceGroupsTaggingAPITagUntagSupportedResources` を使うか、その種類のタグの操作を足してください。
+- 検証用アカウントで実際に書き換えて確かめた種類は、S3 のバケット、SQS、SNS、Secrets Manager、IAM のロール、EC2 のセキュリティグループです。EC2 のインスタンス・スナップショット・AMI、KMS、Lambda、DynamoDB、CloudWatch Logs、RDS は確かめていません。
+- 記録のバケットの既定の暗号化が SSE-KMS のときは、そのキーへの `kms:GenerateDataKey` と `kms:Decrypt` も要ります(例には入れていません)。
+
 `sts:GetCallerIdentity`(呼び出し元の確認)は IAM の権限が要りません。AWS Config や Resource Explorer の記録・索引・ビューを作ったり変えたりする操作は呼びません。使えないときは、理由(足りない IAM の操作の名前、`no default Resource Explorer view` など)を示すだけです。影響分析の操作が拒否された場合、`plan` は変更案と読めたポリシーの指摘を出したうえで「影響分析は不完全」と、読めなかった種類、リージョン、理由を示し、終了コード 1 で終わります。
 
 ## 開発
@@ -347,7 +412,11 @@ go test -mod=readonly -run '^$' -fuzz FuzzLoadPlan -fuzztime 5m ./internal/plann
 go test -mod=readonly -run '^$' -fuzz FuzzParsePolicy -fuzztime 5m ./internal/impact/ # ポリシーの文書の読み取りのファジング(手元だけ)
 go test -mod=readonly -run 'TestDetectionTable|TestLargeAnalysisU5' ./internal/impact/ # 検出率100%の表と、大きな偽の AWS での影響分析
 go test -mod=readonly -run 'TestGolden' ./internal/display/... -update               # 出力の期待のファイルを作り直す(差分を人が見る)
+go test -mod=readonly -run 'TestAcceptanceU6' ./internal/cli/...                    # apply の受け入れ条件
+go test -mod=readonly -run 'TestLargeApplyU6' ./internal/apply/...                  # 1万件の apply(呼び出しの回数、同時の数、30秒)
 ```
+
+- apply と記録のテストは、テストごとの一時のホーム(`HOME`、`USERPROFILE`)で動き、本物の `~/.tag-refactor` には触れません。
 
 - CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/`、`internal/impact/testdata/fuzz/FuzzParsePolicy/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
 - 出力の期待のファイル(`internal/display/testdata/`)は、4つの形式 × 2つの言語と保存した変更案です。`.gitattributes` で LF に固定し、3つの OS で同じバイト列になることを確かめます。
@@ -400,6 +469,15 @@ go test -mod=readonly -run 'TestGolden' ./internal/display/... -update          
    ```
 
    シークレットは月 0.40 USD で、時間で割った分がかかります。テスト用のルールファイルは `test/sandbox/u5-rules.yaml`(`env` を `Environment` に、`team` を `Team` に変える)です。
+7. U6 では、U6 の確認用のスタック(`test/sandbox/u6-fixtures.yaml`: 空の VPC VU6 とセキュリティグループ GU6、記録用のバケット BU6R とそのポリシー、書き換え用のロール R3)を、U5 と同じく変更セットで中身を確かめてから作ります(手順は U6 のインフラの設計 [`cicd-pipeline.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/infrastructure-design/cicd-pipeline.md))。作る前に、R3 のインラインポリシーと BU6R のバケットポリシーに IAM Access Analyzer の `ValidatePolicy` を当て、誤りがないことを確かめます。
+
+   ```bash
+   aws cloudformation create-change-set --stack-name tag-refactor-u6-fixtures --change-set-type CREATE --change-set-name u6-create \
+     --template-body file://test/sandbox/u6-fixtures.yaml --parameters ParameterKey=SsoPermissionSetName,ParameterValue=<U1 と同じ値> \
+     --capabilities CAPABILITY_IAM --tags Key=project,Value=tag-refactor-fixture --region ap-northeast-1 --profile tag-refactor-sandbox
+   ```
+
+   R3 を引き受けるプロファイル(既定の名前 `tag-refactor-apply`)を、R2 と同じ形で手元の AWS の設定に足します(`role_arn` はスタックの出力 `ApplyRoleArn`)。VPC とセキュリティグループに費用はかかりません。バケットは記録のオブジェクトの分だけです。テスト用のルールファイルは `test/sandbox/u6-add-rules.yaml`(確かめ専用のキー `tag-refactor-u6-check` を6つの種類の確認用のリソースに付ける)、`u6-remove-rules.yaml`(そのキーを消す)、`u6-untagged-rules.yaml`(`ap-northeast-1` の SQS のキューに付ける)です。
 
 ### 検証
 
@@ -419,15 +497,17 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 5. Resource Explorer の `tag:none` にキューが現れるまで、1分ごとに最大30分待ちます。現れなければ失敗にします。索引の中身がそろうまで数時間かかることがあるので、時間をおいて再実行してください。
 6. U2 の結合テスト(`internal/cli/integration_u2_test.go`)を読み取り用のプロファイルで動かします。飛ばされたテストがあれば失敗にします。
 7. `--debug` の行から求めた操作ごとの95パーセンタイル(L95)と、1万件のときの10分の見積もりを表示します。
+8. U6 の確認をします(U2 のキューを消す前)。U6 のスタックと R3 のプロファイル、手元に印が残っていないことを確かめ、R3 で `plan --rules <ルール> --out` を作って範囲を確かめ(`scripts/u6check.go`: 確かめ専用のキーの追加か削除だけ、影響なし、確認用のリソースだけ、6つの対象がすべて入っている。外れれば何も書き換えずに失敗)、`apply --plan ... --yes --debug` で足して消すことを5回くり返します(3回目は記録を S3 に置く)。合否は記録で決めます(完了している、失敗と未処理がない、6つの対象が `applied`)。そのあと、どのリソースと IAM のロールにもキーが残っていないこと、印が残っていないことを確かめ、U2 のタグのないキューでも足して消し(書き換える前のタグが空だったこと)、S3 の記録の暗号化と ACL、ないキーが NotFound になることを確かめ、タグの操作の L95 と30分の見積もり(値がばらばらな場合の見積もりも)を表示します。キーを足したあとに失敗したときは、後片付けで R3 を使ってキーを消します(印で止まったときは、印の中身を示して `--force-unlock` を案内します。自動では外しません)。
 
 | 環境変数 | 意味 |
 |---|---|
 | `TAG_REFACTOR_SANDBOX_ACCOUNT_ID` | 検証用アカウントの ID(必須) |
 | `TAG_REFACTOR_SANDBOX_PROFILE` | 管理者のプロファイル(既定 `tag-refactor-sandbox`) |
 | `TAG_REFACTOR_IT_PROFILE` | 読み取り用のプロファイル(既定 `tag-refactor-readonly`) |
+| `TAG_REFACTOR_APPLY_PROFILE` | 書き換え用のロール R3 のプロファイル(既定 `tag-refactor-apply`) |
 
 スクリプトは認証情報を表示しません。AWS の CLI の出力からは、ARN、名前、状態の値だけを読みます。
 
 ### 後片付け
 
-Construction の終わりに、人の指示で U5、U2、U1 の順にスタックを消します。U5 のバケットは空のままなので、スタックと一緒に消えます。KMS のキーは7日の待ち期間のあとに消えます。シークレットがスタックの削除で消えることは、削除のときに確かめます。U2 のスタックを消すと、テンプレートで作った索引とビューも消えます(`false` を渡して作らなかったものは残ります)。
+Construction の終わりに、人の指示で U6、U5、U2、U1 の順にスタックを消します。U6 のバケット BU6R は、中の記録を消してからスタックを消します。U5 のバケットは空のままなので、スタックと一緒に消えます。KMS のキーは7日の待ち期間のあとに消えます。シークレットがスタックの削除で消えることは、削除のときに確かめます。U2 のスタックを消すと、テンプレートで作った索引とビューも消えます(`false` を渡して作らなかったものは残ります)。
