@@ -282,6 +282,11 @@ func (c *conductor) closeRun(ctx context.Context) {
 		}
 	}
 	c.mu.Unlock()
+	if ctx.Err() != nil {
+		// The calls were cancelled (the second Ctrl+C), perhaps before the
+		// stop of the first one was seen: the run is stopped, never complete.
+		c.st.stop(StopSignal, nil)
+	}
 	reason, err := c.st.why()
 	c.res.Stop, c.res.StopErr = reason, err
 	if reason == StopNone {
