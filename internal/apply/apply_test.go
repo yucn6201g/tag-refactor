@@ -665,11 +665,10 @@ func TestTheFirstStopFinishesTheRunningBatch(t *testing.T) {
 	p := manyResources(w, 4)
 	stop := make(chan struct{})
 	var once sync.Once
+	// The stop is given while the first batch is written, with no wait: the
+	// region sees it before its next batch.
 	w.aws.onWrite = func(string, []string) {
-		once.Do(func() {
-			close(stop)
-			time.Sleep(50 * time.Millisecond)
-		})
+		once.Do(func() { close(stop) })
 	}
 	res, err := w.a.Run(context.Background(), Request{Plan: p, AccountID: acct}, stop)
 	if err != nil {

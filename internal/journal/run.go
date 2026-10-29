@@ -1,6 +1,7 @@
 package journal
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -70,14 +71,10 @@ func (j *Journal) Begin(ctx context.Context, h *LockHandle, planID string) (*Run
 		rec: RunRecord{Version: Version, ToolVersion: j.opts.ToolVersion, RunID: h.RunID, AccountID: h.AccountID,
 			PlanID: planID, StartedAt: j.now(), Entries: []Entry{}}}
 	if h.Location.Kind == LocationS3 {
+		// The first save writes the record only if it does not exist, which
+		// refuses a run ID that has one. Reading it here would need the 404
+		// of a missing key, which S3 answers only with s3:ListBucket.
 		r.where = h.Location.s3URI(h.AccountID, h.RunID+".json")
-		_, err := j.opts.Store.Get(ctx, r.where)
-		switch {
-		case err == nil:
-			return nil, storageError(r.where, "journal.runExists", "a run record with this run ID already exists", nil)
-		case errkind.KindOf(err) != errkind.NotFound:
-			return nil, err
-		}
 		return r, nil
 	}
 	dir := h.Location.localDir(j.opts.Home, h.AccountID)
@@ -184,7 +181,12 @@ func (r *Run) store(ctx context.Context, data []byte, v uint64) error {
 	case first:
 		err = r.j.opts.Store.PutIfAbsent(ctx, r.where, data)
 		if errkind.KindOf(err) == errkind.Conflict {
-			err = storageError(r.where, "journal.runExists", "a run record with this run ID already exists", err)
+			// A retry of a write that reached S3 ends 412 on our own record.
+			if held, gerr := r.j.opts.Store.Get(ctx, r.where); gerr == nil && bytes.Equal(held, data) {
+				err = nil
+			} else {
+				err = storageError(r.where, "journal.runExists", "a run record with this run ID already exists", err)
+			}
 		}
 	default:
 		err = r.j.opts.Store.Put(ctx, r.where, data)

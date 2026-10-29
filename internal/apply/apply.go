@@ -169,6 +169,7 @@ func (a *Applier) Run(ctx context.Context, req Request, stop <-chan struct{}) (r
 		return res, err
 	}
 	c := &conductor{a: a, req: req, res: res, st: newStopper()}
+	c.st.signal = stop
 	defer func() {
 		cctx, cancel := closingContext(ctx)
 		defer cancel()

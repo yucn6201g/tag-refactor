@@ -33,6 +33,9 @@ type memStore struct {
 	gate      chan struct{}
 	ifAbsent  error
 	deleteErr error
+	// writeTwice makes a PutIfAbsent that writes answer Conflict, as a
+	// retry of a write that reached S3 would.
+	writeTwice bool
 }
 
 func newMemStore() *memStore { return &memStore{objects: map[string][]byte{}} }
@@ -73,7 +76,10 @@ func (m *memStore) PutIfAbsent(ctx context.Context, uri string, data []byte) err
 	if exists {
 		return &errkind.Error{Kind: errkind.Conflict, Subject: uri}
 	}
-	return m.Put(ctx, uri, data)
+	if err := m.Put(ctx, uri, data); err != nil || !m.writeTwice {
+		return err
+	}
+	return &errkind.Error{Kind: errkind.Conflict, Subject: uri}
 }
 
 func (m *memStore) Delete(_ context.Context, uri string) error {
@@ -437,8 +443,14 @@ func TestBeginRefusesARunIDThatHasARecord(t *testing.T) {
 	j := newJournal(t, m, nil)
 	r := beginS3(t, j)
 	_ = r.Complete(context.Background())
+	// In S3 the first save refuses it: Begin reads nothing, since a missing
+	// key is 404 only with s3:ListBucket.
 	h := &LockHandle{AccountID: acct, RunID: r.RunID(), Location: s3Loc}
-	if _, err := j.Begin(context.Background(), h, "plan-2"); errkind.KindOf(err) != errkind.StorageFailed {
+	r2, err := j.Begin(context.Background(), h, "plan-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r2.RecordBefore(context.Background(), nil); errkind.KindOf(err) != errkind.StorageFailed {
 		t.Fatalf("S3: %v", err)
 	}
 	local := newJournal(t, nil, nil)
@@ -523,6 +535,31 @@ func TestTheS3LockIsTakenAfterTheLocalOneAndUndoneOnFailure(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(j2.defaultDir(acct), lockName)); !os.IsNotExist(err) {
 		t.Fatal("the local lock must be removed when S3 cannot take a lock")
+	}
+}
+
+// A conditional write that reached S3 and was retried ends 412 on what the
+// run itself wrote: the lock and the first save of the record count as done.
+func TestARetriedConditionalWriteFindsItsOwnObject(t *testing.T) {
+	m := newMemStore()
+	m.writeTwice = true
+	j := newJournal(t, m, nil)
+	h, err := j.Lock(context.Background(), acct, s3Loc, PurposeApply, "mine")
+	if err != nil {
+		t.Fatalf("lock: %v", err)
+	}
+	r, err := j.Begin(context.Background(), h, "plan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.RecordBefore(context.Background(), nil); err != nil {
+		t.Fatalf("first save: %v", err)
+	}
+	if err := j.Release(context.Background(), h); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.Get(context.Background(), s3Loc.s3URI(acct, lockName)); errkind.KindOf(err) != errkind.NotFound {
+		t.Fatalf("the S3 lock was left: %v", err)
 	}
 }
 

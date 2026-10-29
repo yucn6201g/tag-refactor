@@ -35,6 +35,9 @@ type stopper struct {
 	reason    StopReason
 	err       error
 	transient int
+	// signal is the stop channel of the caller (the first Ctrl+C). stopped
+	// reads it too, so a stop given before a check is always seen by it.
+	signal <-chan struct{}
 }
 
 func newStopper() *stopper { return &stopper{ch: make(chan struct{})} }
@@ -58,6 +61,9 @@ func (s *stopper) stop(reason StopReason, err error) {
 func (s *stopper) stopped() bool {
 	select {
 	case <-s.ch:
+		return true
+	case <-s.signal:
+		s.stop(StopSignal, nil)
 		return true
 	default:
 		return false

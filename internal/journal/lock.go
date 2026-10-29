@@ -86,15 +86,19 @@ func (j *Journal) Lock(ctx context.Context, accountID string, loc Location, purp
 	}
 	uri := loc.s3URI(accountID, lockName)
 	if err := j.opts.Store.PutIfAbsent(ctx, uri, data); err != nil {
-		_ = os.Remove(h.local)
-		if errkind.KindOf(err) == errkind.Conflict {
-			held := HeldLock{Where: uri}
-			if existing, gerr := j.opts.Store.Get(ctx, uri); gerr == nil {
-				held = parseLock(uri, existing)
-			}
+		if errkind.KindOf(err) != errkind.Conflict {
+			_ = os.Remove(h.local)
+			return nil, err
+		}
+		held := HeldLock{Where: uri}
+		if existing, gerr := j.opts.Store.Get(ctx, uri); gerr == nil {
+			held = parseLock(uri, existing)
+		}
+		// A retry of a write that reached S3 ends 412 on our own lock.
+		if held.Info.RunID != runID {
+			_ = os.Remove(h.local)
 			return nil, conflict(accountID, held)
 		}
-		return nil, err
 	}
 	h.s3 = uri
 	return h, nil
