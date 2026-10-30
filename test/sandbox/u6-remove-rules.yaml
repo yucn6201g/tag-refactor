@@ -1,4 +1,4 @@
 # Rule file for the U6 checkpoint in the sandbox account: removes the check
-# key that u6-add-rules.yaml or u6-untagged-rules.yaml added.
+# key that u6-add-rules.yaml added.
 version: 1
 remove: [tag-refactor-u6-check]

@@ -48,8 +48,9 @@
 #    apply --yes --allow-impact --debug (the plan check stands in for the
 #    stop of --yes alone), the third run keeping its record in S3, and
 #    judges every run by its record; checks that no resource and no IAM role
-#    keeps the key and no lock is left; does the same once for the
-#    never-tagged queue of U2 (its tags before must be empty); checks the
+#    keeps the key and no lock is left; reports whether the tagging API
+#    returns the never-tagged queue of U2 when it is named (plan never
+#    includes a never-tagged resource, so apply does not write it); checks the
 #    S3 record (encrypted, the owner's grant only, a missing key NotFound);
 #    and prints the L95 of the tagging calls and the two estimates of
 #    NFR5.15.
@@ -457,7 +458,7 @@ u6_plan() {
   run_tool plan --lang en --profile "$apply_profile" --rules "$rules" --format json --out "$U6_PLAN"
   { [ "$TOOL_STATUS" -eq 0 ] || [ "$TOOL_STATUS" -eq 2 ]; } ||
     { sed 's/^/  /' "$u3_dir/stderr" >&2; fail "plan --rules $rules ended with exit code $TOOL_STATUS"; }
-  go run scripts/u6check.go plan "$U6_PLAN" "$mode" "$queue_arn" "$@" || fail "the plan of $rules is out of range; nothing was changed"
+  go run scripts/u6check.go plan "$U6_PLAN" "$mode" "$@" || fail "the plan of $rules is out of range; nothing was changed"
 }
 
 # u6_apply applies the plan with R3, --yes and --allow-impact, and sets
@@ -543,27 +544,16 @@ if aws_admin s3api head-object --bucket "$u6_bucket" --key "runs/$account/.lock"
 fi
 u6_added=""
 
-# U6 step 5: the never-tagged queue of U2, with its own rules.
+# U6 step 5: whether the tagging API returns the never-tagged queue of U2
+# when it is named. Only reported: plan builds its changes from the tagged
+# inventory, so a never-tagged resource is never in a plan and apply never
+# writes it (a limit the README states).
 if aws_admin resourcegroupstaggingapi get-resources --resource-arn-list "$queue_arn" \
   --query 'ResourceTagMappingList[].ResourceARN' --output text | grep -qF "$queue_arn"; then
   echo "verify: the tagging API returns the never-tagged queue when it is named"
 else
-  echo "verify: the tagging API does not return the never-tagged queue when it is named (apply treats it as having no tags)"
+  echo "verify: the tagging API does not return the never-tagged queue when it is named"
 fi
-u6_plan test/sandbox/u6-untagged-rules.yaml untagged "$queue_arn"
-untagged_plan="$U6_PLAN"
-u6_added=yes
-u6_apply "$u6_dir/records"
-u6_record "$u6_dir/records"
-go run scripts/u6check.go record "$U6_RECORD" "$untagged_plan" "$queue_arn" || fail "the add on the never-tagged queue is not complete"
-go run scripts/u6check.go entry "$U6_RECORD" "$queue_arn" || fail "the never-tagged queue was not written from empty tags"
-u6_plan test/sandbox/u6-remove-rules.yaml remove "$queue_arn"
-remove_plan="$U6_PLAN"
-u6_apply "$u6_dir/records"
-u6_record "$u6_dir/records"
-go run scripts/u6check.go record "$U6_RECORD" "$remove_plan" "$queue_arn" || fail "the removal on the never-tagged queue is not complete"
-u6_check_removed
-u6_added=""
 
 # U6 step 6: the record in S3 is encrypted, has no grant but the owner's,
 # and R3 reads a missing key as NotFound.

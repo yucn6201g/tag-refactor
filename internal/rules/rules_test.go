@@ -395,7 +395,7 @@ func TestSandboxRuleFileIsValid(t *testing.T) {
 	}
 }
 
-// The three rule files of the U6 checkpoint load with no warning but the one
+// The two rule files of the U6 checkpoint load with no warning but the one
 // that they have no key rules: the resource types are in the form scan shows
 // (U6 cicd-pipeline.md).
 func TestSandboxU6RuleFilesAreValid(t *testing.T) {
@@ -406,7 +406,6 @@ func TestSandboxU6RuleFilesAreValid(t *testing.T) {
 		"u6-remove-rules.yaml": func(rs *RuleSet) bool {
 			return len(rs.RemoveKeys) == 1 && rs.RemoveKeys[0].Key == "tag-refactor-u6-check"
 		},
-		"u6-untagged-rules.yaml": func(rs *RuleSet) bool { return len(rs.RequiredTags) == 1 },
 	} {
 		rs, err := load(filepath.Join("..", "..", "test", "sandbox", name))
 		if err != nil {

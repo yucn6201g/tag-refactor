@@ -392,6 +392,7 @@ remove: [tmp-owner]
 
 - 表にない種類のリソースは、例のままでは AccessDenied(足りない操作の名前つき)で失敗します。AWS 管理ポリシー `ResourceGroupsTaggingAPITagUntagSupportedResources` を使うか、その種類のタグの操作を足してください。
 - 検証用アカウントで実際に書き換えて確かめた種類は、S3 のバケット、SQS、SNS、Secrets Manager、EC2 のセキュリティグループです。IAM のロールとユーザーは、タグの API(`tag:GetResources`)が返さないため `scan` で集まらず、`apply` の対象になりません(例の権限の IAM のタグの操作は、偽の AWS のテストだけで確かめています)。EC2 のインスタンス・スナップショット・AMI、KMS、Lambda、DynamoDB、CloudWatch Logs、RDS は確かめていません。
+- 一度もタグが付いていないリソースは、`scan` で件数として見つかっても変更案に入らないため、`apply` で必須タグを付けることはできません(`plan` はタグ付けの API で集めたリソースだけから変更案を作ります)。
 - 記録のバケットの既定の暗号化が SSE-KMS のときは、そのキーへの `kms:GenerateDataKey` と `kms:Decrypt` も要ります(例には入れていません)。
 
 `sts:GetCallerIdentity`(呼び出し元の確認)は IAM の権限が要りません。AWS Config や Resource Explorer の記録・索引・ビューを作ったり変えたりする操作は呼びません。使えないときは、理由(足りない IAM の操作の名前、`no default Resource Explorer view` など)を示すだけです。影響分析の操作が拒否された場合、`plan` は変更案と読めたポリシーの指摘を出したうえで「影響分析は不完全」と、読めなかった種類、リージョン、理由を示し、終了コード 1 で終わります。
@@ -478,7 +479,7 @@ go test -mod=readonly -run 'TestLargeApplyU6' ./internal/apply/...              
      --capabilities CAPABILITY_IAM --tags Key=project,Value=tag-refactor-fixture --region ap-northeast-1 --profile tag-refactor-sandbox
    ```
 
-   R3 を引き受けるプロファイル(既定の名前 `tag-refactor-apply`)を、R2 と同じ形で手元の AWS の設定に足します(`role_arn` はスタックの出力 `ApplyRoleArn`)。VPC とセキュリティグループに費用はかかりません。バケットは記録のオブジェクトの分だけです。テスト用のルールファイルは `test/sandbox/u6-add-rules.yaml`(確かめ専用のキー `tag-refactor-u6-check` を5つの種類の確認用のリソースに付ける。IAM のロールは scan で集まらないため含めない)、`u6-remove-rules.yaml`(そのキーを消す)、`u6-untagged-rules.yaml`(`ap-northeast-1` の SQS のキューに付ける)です。
+   R3 を引き受けるプロファイル(既定の名前 `tag-refactor-apply`)を、R2 と同じ形で手元の AWS の設定に足します(`role_arn` はスタックの出力 `ApplyRoleArn`)。VPC とセキュリティグループに費用はかかりません。バケットは記録のオブジェクトの分だけです。テスト用のルールファイルは `test/sandbox/u6-add-rules.yaml`(確かめ専用のキー `tag-refactor-u6-check` を5つの種類の確認用のリソースに付ける。IAM のロールは scan で集まらないため含めない)と `u6-remove-rules.yaml`(そのキーを消す)です。
 
 ### 検証
 
@@ -498,7 +499,7 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 5. Resource Explorer の `tag:none` にキューが現れるまで、1分ごとに最大30分待ちます。現れなければ失敗にします。索引の中身がそろうまで数時間かかることがあるので、時間をおいて再実行してください。
 6. U2 の結合テスト(`internal/cli/integration_u2_test.go`)を読み取り用のプロファイルで動かします。飛ばされたテストがあれば失敗にします。
 7. `--debug` の行から求めた操作ごとの95パーセンタイル(L95)と、1万件のときの10分の見積もりを表示します。
-8. U6 の確認をします(U2 のキューを消す前)。U6 のスタックと R3 のプロファイル、手元に印が残っていないことを確かめ、R3 で `plan --rules <ルール> --out` を作って範囲を確かめ(`scripts/u6check.go`: 確かめ専用のキーの追加か削除だけ、U1 の P2(キーにポリシー変数がある条件)がどのキーにも付ける「決められない」以外の影響なし、確認用のリソースだけ、5つの対象がすべて入っている。外れれば何も書き換えずに失敗)、`apply --plan ... --yes --allow-impact --debug` で足して消すことを5回くり返します(3回目は記録を S3 に置く)。合否は記録で決めます(完了している、失敗と未処理がない、5つの対象が `applied`)。そのあと、どのリソースと IAM のロールにもキーが残っていないこと、印が残っていないことを確かめ、U2 のタグのないキューでも足して消し(書き換える前のタグが空だったこと)、S3 の記録の暗号化と ACL、ないキーが NotFound になることを確かめ、タグの操作の L95 と30分の見積もり(値がばらばらな場合の見積もりも)を表示します。キーを足したあとに失敗したときは、後片付けで R3 を使ってキーを消します(印で止まったときは、印の中身を示して `--force-unlock` を案内します。自動では外しません)。
+8. U6 の確認をします(U2 のキューを消す前)。U6 のスタックと R3 のプロファイル、手元に印が残っていないことを確かめ、R3 で `plan --rules <ルール> --out` を作って範囲を確かめ(`scripts/u6check.go`: 確かめ専用のキーの追加か削除だけ、U1 の P2(キーにポリシー変数がある条件)がどのキーにも付ける「決められない」以外の影響なし、確認用のリソースだけ、5つの対象がすべて入っている。外れれば何も書き換えずに失敗)、`apply --plan ... --yes --allow-impact --debug` で足して消すことを5回くり返します(3回目は記録を S3 に置く)。合否は記録で決めます(完了している、失敗と未処理がない、5つの対象が `applied`)。そのあと、どのリソースと IAM のロールにもキーが残っていないこと、印が残っていないことを確かめ、U2 の一度もタグのないキューを ARN で指定したときにタグ付けの API が返すかを表示し(`plan` は一度もタグのないリソースを変更案に入れないため、`apply` はそれを書き換えません)、S3 の記録の暗号化と ACL、ないキーが NotFound になることを確かめ、タグの操作の L95 と30分の見積もり(値がばらばらな場合の見積もりも)を表示します。キーを足したあとに失敗したときは、後片付けで R3 を使ってキーを消します(印で止まったときは、印の中身を示して `--force-unlock` を案内します。自動では外しません)。
 
 | 環境変数 | 意味 |
 |---|---|
