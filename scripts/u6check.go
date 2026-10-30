@@ -10,8 +10,9 @@
 //	go run scripts/u6check.go entry <record.json> <arn>
 //
 // plan: every resource with changes changes the check key only (added for
-// add and untagged, removed for remove), has no change with impact, and is
-// a fixture (tagged project=tag-refactor-fixture) or, for untagged, the
+// add and untagged, removed for remove), has no change with impact but the
+// one the U1 fixture P2 gives every key (a policy variable in its condition
+// key, which plan cannot decide), and is a fixture (tagged project=tag-refactor-fixture) or, for untagged, the
 // never-tagged queue of U2; every listed ARN is in the plan.
 // record: the record is completed, has no failed or pending entry, no entry
 // outside the plan, and every listed ARN applied.
@@ -23,15 +24,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 )
 
 const checkKey = "tag-refactor-u6-check"
 
 type plan struct {
+	ImpactAnalysisComplete bool `json:"impactAnalysisComplete"`
+	ImpactFindings         []struct {
+		Verdict     string   `json:"verdict"`
+		PolicyRef   string   `json:"policyRef"`
+		StatementID string   `json:"statementId"`
+		ChangeIDs   []string `json:"changeIds"`
+	} `json:"impactFindings"`
 	Resources []struct {
 		ARN        string            `json:"arn"`
 		BeforeTags map[string]string `json:"beforeTags"`
 		Changes    []struct {
+			ChangeID string `json:"changeId"`
 			Kind     string `json:"kind"`
 			FromKey  string `json:"fromKey"`
 			ToKey    string `json:"toKey"`
@@ -82,9 +92,29 @@ func main() {
 	}
 }
 
+// p2Finding reports whether a finding is the one the U1 fixture P2 gives
+// every tag key: undecided, from its statement PolicyVariableKey, whose
+// condition key is aws:ResourceTag/${aws:PrincipalTag/team}.
+func p2Finding(verdict, policyRef, statementID string) bool {
+	return verdict == "undecided" && statementID == "PolicyVariableKey" &&
+		strings.Contains(policyRef, ":policy/tag-refactor-u1-fixtures-P2-")
+}
+
 func checkPlan(path, mode, u2Queue string, want []string) {
 	var p plan
 	read(path, &p)
+	if !p.ImpactAnalysisComplete {
+		fail("the impact analysis of %s is not complete", path)
+	}
+	// other holds the changes that a finding other than that of P2 names.
+	other := map[string]bool{}
+	for _, f := range p.ImpactFindings {
+		if !p2Finding(f.Verdict, f.PolicyRef, f.StatementID) {
+			for _, id := range f.ChangeIDs {
+				other[id] = true
+			}
+		}
+	}
 	in := map[string]bool{}
 	for _, r := range p.Resources {
 		in[r.ARN] = true
@@ -98,8 +128,8 @@ func checkPlan(path, mode, u2Queue string, want []string) {
 			if !ok {
 				fail("%s has the change %s %s%s, not only the check key", r.ARN, c.Kind, c.FromKey, c.ToKey)
 			}
-			if c.Impacted {
-				fail("%s has a change with impact: a policy of the fixtures uses %s", r.ARN, checkKey)
+			if other[c.ChangeID] {
+				fail("%s has a change with impact: a policy of the fixtures other than P2 uses %s", r.ARN, checkKey)
 			}
 		}
 	}
@@ -108,7 +138,7 @@ func checkPlan(path, mode, u2Queue string, want []string) {
 			fail("%s is not in the plan: it was not collected", arn)
 		}
 	}
-	fmt.Printf("plan (%s): %d resources, only %s, no impact\n", mode, len(p.Resources), checkKey)
+	fmt.Printf("plan (%s): %d resources, only %s, no impact but that of P2\n", mode, len(p.Resources), checkKey)
 }
 
 func checkRecord(path, planPath string, want []string) {

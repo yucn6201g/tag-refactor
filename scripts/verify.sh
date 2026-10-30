@@ -42,9 +42,11 @@
 # U6. With the role R3 of the U6 stack (profile tag-refactor-apply), while
 #    the queue of U2 still exists: checks the U6 stack, the profile and that
 #    no lock is left; plans the check key tag-refactor-u6-check and checks
-#    the range of each plan (scripts/u6check.go: only that key, no impact,
-#    only fixtures, every target present); adds and removes it five times
-#    with apply --yes --debug, the third run keeping its record in S3, and
+#    the range of each plan (scripts/u6check.go: only that key, no impact
+#    but the undecided one the U1 fixture P2 gives every key, only
+#    fixtures, every target present); adds and removes it five times with
+#    apply --yes --allow-impact --debug (the plan check stands in for the
+#    stop of --yes alone), the third run keeping its record in S3, and
 #    judges every run by its record; checks that no resource and no IAM role
 #    keeps the key and no lock is left; does the same once for the
 #    never-tagged queue of U2 (its tags before must be empty); checks the
@@ -133,7 +135,7 @@ cleanup() {
     rm -f -- "$u6_plan_file"
     if "$tool" plan --lang en --profile "$apply_profile" --rules test/sandbox/u6-remove-rules.yaml --out "$u6_plan_file" >/dev/null 2>&1 ||
       [ -s "$u6_plan_file" ]; then
-      "$tool" apply --lang en --profile "$apply_profile" --plan "$u6_plan_file" --yes --record-to "$u3_dir/u6-cleanup" \
+      "$tool" apply --lang en --profile "$apply_profile" --plan "$u6_plan_file" --yes --allow-impact --record-to "$u3_dir/u6-cleanup" \
         >/dev/null 2>"$u3_dir/u6-cleanup-stderr" || true
       if grep -q 'another apply or rollback is running' "$u3_dir/u6-cleanup-stderr"; then
         sed 's/^/  /' "$u3_dir/u6-cleanup-stderr" >&2
@@ -456,11 +458,13 @@ u6_plan() {
   go run scripts/u6check.go plan "$U6_PLAN" "$mode" "$queue_arn" "$@" || fail "the plan of $rules is out of range; nothing was changed"
 }
 
-# u6_apply applies the plan with R3 and --yes (never --allow-impact) and
-# sets U6_RUN to the run ID. A run that made no record fails.
+# u6_apply applies the plan with R3, --yes and --allow-impact, and sets
+# U6_RUN to the run ID. --allow-impact is needed for the undecided finding
+# that the U1 fixture P2 gives every key; u6_plan has already refused any
+# other finding. A run that made no record fails.
 u6_apply() {
   local record_to="$1"
-  run_tool apply --lang en --profile "$apply_profile" --plan "$U6_PLAN" --yes --debug --record-to "$record_to"
+  run_tool apply --lang en --profile "$apply_profile" --plan "$U6_PLAN" --yes --allow-impact --debug --record-to "$record_to"
   grep -E '^debug: tag:[A-Za-z]+ ' "$u3_dir/stderr" >>"$u6_debug" || true
   U6_RUN="$(sed -n 's/.*tag-refactor rollback --run \([0-9TZ]*-[0-9a-f]*\).*/\1/p' "$u3_dir/stderr" | head -n 1)"
   if [ -z "$U6_RUN" ] || { [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ]; }; then
