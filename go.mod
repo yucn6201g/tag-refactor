@@ -9,7 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/configservice v1.74.5
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.339.0
 	github.com/aws/aws-sdk-go-v2/service/iam v1.64.4
-	github.com/aws/aws-sdk-go-v2/service/kms v1.61.4
+	github.com/aws/aws-sdk-go-v2/service/kms v1.62.0
 	github.com/aws/aws-sdk-go-v2/service/resourceexplorer2 v1.33.5
 	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.41.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
