@@ -70,8 +70,6 @@ type Target struct {
 	// recordBefore and recordPlanned are what the record keeps for the
 	// resource (functional-spec.md, the values of the record).
 	recordBefore, recordPlanned map[string]string
-	// writing is set once a write for the resource has started.
-	writing bool
 }
 
 // newTargets returns one target per resource of the plan, in plan order.

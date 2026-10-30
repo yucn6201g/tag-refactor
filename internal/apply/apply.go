@@ -14,7 +14,6 @@ import (
 	"context"
 	"io"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
@@ -132,28 +131,14 @@ func (r *Result) ExitCode(p *planner.Plan) int {
 	return 0
 }
 
-// closeTimeout bounds the work after a stop: the last save, the read back
-// and the release of the lock run on a context that Ctrl+C does not cancel
-// (security design §3).
-var closeTimeout = 30 * time.Second
-
-func closingContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), closeTimeout)
-}
-
-// conductor holds the state of one run.
+// conductor holds the state of one apply; ex holds what apply shares with
+// rollback, and its lock guards the targets.
 type conductor struct {
-	a    *Applier
-	req  Request
-	res  *Result
-	st   *stopper
-	run  *journal.Run
-	mu   sync.Mutex
-	done int
-	// abandoned is set when the record is closed, which the second Ctrl+C
-	// does while the regions still run: from then on they change nothing.
-	abandoned bool
-	closed    bool
+	a   *Applier
+	req Request
+	res *Result
+	ex  *execution
+	run *journal.Run
 }
 
 // Run runs one apply. ctx is the context of the AWS calls: the second
@@ -164,12 +149,13 @@ type conductor struct {
 func (a *Applier) Run(ctx context.Context, req Request, stop <-chan struct{}) (res *Result, err error) {
 	runID := journal.NewRunID(a.opts.Now(), a.opts.Rand)
 	res = &Result{RunID: runID}
-	h, err := a.lock(ctx, req, res)
+	h, removed, err := takeLock(ctx, a.opts.Journal, req.AccountID, req.Location, journal.PurposeApply, runID,
+		req.ForceUnlock, req.OnLocksRemoved)
+	res.RemovedLocks = removed
 	if err != nil {
 		return res, err
 	}
-	c := &conductor{a: a, req: req, res: res, st: newStopper()}
-	c.st.signal = stop
+	c := &conductor{a: a, req: req, res: res, ex: newExecution("apply", stop)}
 	defer func() {
 		cctx, cancel := closingContext(ctx)
 		defer cancel()
@@ -187,37 +173,12 @@ func (a *Applier) Run(ctx context.Context, req Request, stop <-chan struct{}) (r
 	}()
 	finished := make(chan struct{})
 	defer close(finished)
-	go func() {
-		select {
-		case <-stop:
-			c.st.stop(StopSignal, nil)
-		case <-finished:
-		}
-	}()
+	c.ex.watchStop(stop, finished)
 	if req.Confirm != nil && !req.Confirm() {
 		res.Cancelled = true
 		return res, nil
 	}
 	return res, c.apply(ctx, h)
-}
-
-// lock takes the lock, removing a lock in the way first with --force-unlock
-// (BR3.1, BR3.2).
-func (a *Applier) lock(ctx context.Context, req Request, res *Result) (*journal.LockHandle, error) {
-	j := a.opts.Journal
-	h, err := j.Lock(ctx, req.AccountID, req.Location, journal.PurposeApply, res.RunID)
-	if errkind.KindOf(err) != errkind.Conflict || !req.ForceUnlock {
-		return h, err
-	}
-	removed, ferr := j.ForceUnlock(ctx, req.AccountID, req.Location)
-	res.RemovedLocks = removed
-	if req.OnLocksRemoved != nil {
-		req.OnLocksRemoved(removed)
-	}
-	if ferr != nil {
-		return nil, ferr
-	}
-	return j.Lock(ctx, req.AccountID, req.Location, journal.PurposeApply, res.RunID)
 }
 
 // apply is steps 9 to 13 of workflow W1.
@@ -227,8 +188,8 @@ func (c *conductor) apply(ctx context.Context, h *journal.LockHandle) error {
 	if err := c.readCurrent(ctx, targets); err != nil {
 		return err
 	}
-	if c.st.stopped() {
-		c.res.Stop, c.res.StopErr = c.st.why()
+	if c.ex.st.stopped() {
+		c.res.Stop, c.res.StopErr = c.ex.st.why()
 		c.res.NotWritten = len(targets)
 		return nil
 	}
@@ -270,25 +231,22 @@ func (c *conductor) apply(ctx context.Context, h *journal.LockHandle) error {
 func (c *conductor) closeRun(ctx context.Context) {
 	cctx, cancel := closingContext(ctx)
 	defer cancel()
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
+	if !c.ex.abandon(func() {
+		for _, t := range c.res.Targets {
+			if t.Status == journal.StatusPending && c.ex.writeStarted(t.ARN) && t.Reason == ReasonNone {
+				t.Reason = ReasonResultUnknown
+				_ = c.run.RecordAfter(t.ARN, nil, t.Status, t.recordReason())
+			}
+		}
+	}) {
 		return
 	}
-	c.closed, c.abandoned = true, true
-	for _, t := range c.res.Targets {
-		if t.Status == journal.StatusPending && t.writing && t.Reason == ReasonNone {
-			t.Reason = ReasonResultUnknown
-			_ = c.run.RecordAfter(t.ARN, nil, t.Status, t.recordReason())
-		}
-	}
-	c.mu.Unlock()
 	if ctx.Err() != nil {
 		// The calls were cancelled (the second Ctrl+C), perhaps before the
 		// stop of the first one was seen: the run is stopped, never complete.
-		c.st.stop(StopSignal, nil)
+		c.ex.st.stop(StopSignal, nil)
 	}
-	reason, err := c.st.why()
+	reason, err := c.ex.st.why()
 	c.res.Stop, c.res.StopErr = reason, err
 	if reason == StopNone {
 		c.res.SaveErr = c.run.Complete(cctx)
@@ -300,8 +258,8 @@ func (c *conductor) closeRun(ctx context.Context) {
 
 // collect sorts the targets into the lists of the result (BR6.1).
 func (c *conductor) collect() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.ex.mu.Lock()
+	defer c.ex.mu.Unlock()
 	r := c.res
 	for _, t := range r.Targets {
 		switch {
@@ -340,10 +298,4 @@ func (c *conductor) writeLog() {
 }
 
 // progress counts n more resources done.
-func (c *conductor) progress(n, total int) {
-	c.mu.Lock()
-	c.done += n
-	done := c.done
-	c.mu.Unlock()
-	c.a.opts.Sink.ItemsProcessed(done, total)
-}
+func (c *conductor) progress(n, total int) { c.ex.progress(c.a.opts.Sink, n, total) }

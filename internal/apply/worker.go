@@ -5,45 +5,11 @@ import (
 	"fmt"
 	"maps"
 	"sync"
-	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/journal"
 )
-
-// abandonWait bounds the wait for the regions after the second Ctrl+C,
-// once the record is saved: their calls were cancelled and end quickly.
-var abandonWait = 10 * time.Second
-
-// forEachRegion runs work for every region, at most regionWorkers at once,
-// each in a goroutine that turns a panic into a stop of the run (security
-// design §3). It returns a channel closed when every region is done.
-func (c *conductor) forEachRegion(regions []string, work func(region string)) <-chan struct{} {
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, regionWorkers)
-	for _, region := range regions {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer func() {
-				if p := recover(); p != nil {
-					c.st.stop(StopInternal, &errkind.Error{Kind: errkind.Internal, Op: "apply", Region: region,
-						Detail: "an unexpected internal error"})
-				}
-			}()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			work(region)
-		}()
-	}
-	done := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(done)
-	}()
-	return done
-}
 
 // readCurrent reads the current tags of every target, region by region in
 // reads of unitSize ARNs (BR3.3, workflow W2). A target whose tags, without
@@ -63,10 +29,10 @@ func (c *conductor) readCurrent(ctx context.Context, targets []*Target) error {
 	}
 	var mu sync.Mutex
 	var credErr error
-	done := c.forEachRegion(regions, func(region string) {
+	done := c.ex.forEachRegion(regions, func(region string) {
 		ts := byRegion[region]
 		for start := 0; start < len(ts); start += unitSize {
-			if c.st.stopped() {
+			if c.ex.st.stopped() {
 				return
 			}
 			part := ts[start:min(start+unitSize, len(ts))]
@@ -79,7 +45,7 @@ func (c *conductor) readCurrent(ctx context.Context, targets []*Target) error {
 				mu.Lock()
 				credErr = err
 				mu.Unlock()
-				c.st.stop(StopCredentials, err)
+				c.ex.st.stop(StopCredentials, err)
 				return
 			}
 			for _, t := range part {
@@ -91,7 +57,7 @@ func (c *conductor) readCurrent(ctx context.Context, targets []*Target) error {
 	if credErr != nil {
 		return credErr
 	}
-	if reason, err := c.st.why(); reason == StopInternal {
+	if reason, err := c.ex.st.why(); reason == StopInternal {
 		return err
 	}
 	return nil
@@ -126,23 +92,14 @@ func (c *conductor) checkRead(t *Target, found map[string]map[string]string, err
 func (c *conductor) writeAll(ctx context.Context, writes []*Target) {
 	regions, units := planUnits(writes)
 	total := len(writes)
-	done := c.forEachRegion(regions, func(region string) {
+	c.ex.writeRegions(ctx, regions, func(region string) {
 		for _, u := range units[region] {
-			if c.st.stopped() {
+			if c.ex.st.stopped() {
 				return
 			}
 			c.writeUnit(ctx, u, total)
 		}
-	})
-	select {
-	case <-done:
-	case <-ctx.Done():
-		c.closeRun(ctx)
-		select {
-		case <-done:
-		case <-time.After(abandonWait):
-		}
-	}
+	}, func() { c.closeRun(ctx) })
 }
 
 // outcome is what the writes of a resource tell before the read back.
@@ -185,7 +142,7 @@ func (c *conductor) writeUnit(ctx context.Context, u unit, total int) {
 	}
 	found, err := c.a.opts.AWS.GetTags(ctx, u.region, arns)
 	if err != nil {
-		c.st.callEnded(credentialsOnly(err))
+		c.ex.st.callEnded(credentialsOnly(err))
 		e := errkind.Ensure(err, awsaccess.OpGetResources)
 		for _, t := range all {
 			c.settle(t, func() {
@@ -195,10 +152,10 @@ func (c *conductor) writeUnit(ctx context.Context, u unit, total int) {
 		c.progress(len(all), total)
 		return
 	}
-	writes := map[*Target]write{}
+	writes := map[string]write{}
 	var attempted []*Target
 	for _, b := range u.batches {
-		if c.st.stopped() {
+		if c.ex.st.stopped() {
 			break
 		}
 		var live []*Target
@@ -217,15 +174,11 @@ func (c *conductor) writeUnit(ctx context.Context, u unit, total int) {
 		c.progress(len(all)-countPending(all), total)
 		return
 	}
-	readCtx := ctx
-	if ctx.Err() != nil {
-		var cancel context.CancelFunc
-		readCtx, cancel = closingContext(ctx)
-		defer cancel()
-	}
+	readCtx, cancel := readContext(ctx)
+	defer cancel()
 	back, readErr := c.readBack(readCtx, u.region, attempted)
 	for _, t := range attempted {
-		c.settle(t, func() { decide(t, writes[t], back, readErr == nil) })
+		c.settle(t, func() { decide(t, writes[t.ARN], back, readErr == nil) })
 	}
 	c.progress(len(all)-countPending(all), total)
 }
@@ -268,78 +221,22 @@ func (c *conductor) recheck(t *Target, found map[string]map[string]string) bool 
 // settle changes a target and records it, unless the run was abandoned. A
 // record that cannot take it stops the run (BR4.4).
 func (c *conductor) settle(t *Target, change func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.abandoned {
-		return
-	}
-	change()
-	if err := c.run.RecordAfter(t.ARN, t.AfterTags, t.Status, t.recordReason()); err != nil {
-		c.st.stop(StopStorage, err)
-	}
+	c.ex.settle(func() error {
+		change()
+		return c.run.RecordAfter(t.ARN, t.AfterTags, t.Status, t.recordReason())
+	})
 }
 
-// writeBatch writes one batch: the tags to set first and the keys to remove
-// after, or the other way round for a batch that removes first (BR4.1). A
-// resource goes to the second call only when the first worked for it.
-func (c *conductor) writeBatch(ctx context.Context, region string, ts []*Target, writes map[*Target]write) {
-	c.mu.Lock()
-	for _, t := range ts {
-		t.writing = true
-	}
-	c.mu.Unlock()
+// writeBatch writes one batch with the shared write (BR4.1): every target of
+// a batch has the same tags to set, keys to remove and order.
+func (c *conductor) writeBatch(ctx context.Context, region string, ts []*Target, writes map[string]write) {
 	first := ts[0]
-	type step struct {
-		op   string
-		call func(arns []string) (awsaccess.WriteResult, error)
+	arns := make([]string, len(ts))
+	for i, t := range ts {
+		arns[i] = t.ARN
 	}
-	tag := step{awsaccess.OpTagResources, func(arns []string) (awsaccess.WriteResult, error) {
-		return c.a.opts.AWS.TagResources(ctx, region, arns, first.TagsToSet)
-	}}
-	untag := step{awsaccess.OpUntagResources, func(arns []string) (awsaccess.WriteResult, error) {
-		return c.a.opts.AWS.UntagResources(ctx, region, arns, first.KeysToRemove)
-	}}
-	var steps []step
-	if len(first.TagsToSet) > 0 {
-		steps = append(steps, tag)
-	}
-	if len(first.KeysToRemove) > 0 {
-		steps = append(steps, untag)
-	}
-	if first.RemoveFirst && len(steps) == 2 {
-		steps[0], steps[1] = steps[1], steps[0]
-	}
-	live := ts
-	for i, s := range steps {
-		arns := make([]string, len(live))
-		for j, t := range live {
-			arns[j] = t.ARN
-		}
-		res, err := s.call(arns)
-		c.st.callEnded(err)
-		if err != nil {
-			e := errkind.Ensure(err, s.op)
-			for _, t := range live {
-				writes[t] = write{out: writeOutcome(ctx, i, e), err: e}
-			}
-			return
-		}
-		var next []*Target
-		for _, t := range live {
-			if e, failed := res.Failed[t.ARN]; failed {
-				if e.Kind == errkind.CredentialsMissing {
-					c.st.stop(StopCredentials, e)
-				}
-				writes[t] = write{out: writeOutcome(ctx, i, e), err: e}
-				continue
-			}
-			next = append(next, t)
-		}
-		live = next
-	}
-	for _, t := range live {
-		writes[t] = write{out: outApplied}
-	}
+	b := batchWrite{set: first.TagsToSet, remove: first.KeysToRemove, removeFirst: first.RemoveFirst}
+	maps.Copy(writes, c.ex.writeBatch(ctx, c.a.opts.AWS, region, arns, b))
 }
 
 // writeOutcome is the outcome of a write that failed in step i: unknown when
