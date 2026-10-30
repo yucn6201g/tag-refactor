@@ -33,15 +33,21 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		args []string
 		what string
 	}{
-		"unknown flag":             {[]string{"scan", "--bogus"}, "unknown flag: --bogus"},
-		"positional argument":      {[]string{"scan", "extra"}, `unknown command "extra"`},
-		"unknown command":          {[]string{"nope"}, `unknown command "nope"`},
-		"later command":            {[]string{"apply", "--plan", "p.json"}, "apply is not available in this version"},
-		"rules suggest with rules": {[]string{"rules", "suggest", "--rules", "r.yaml"}, "unknown flag: --rules"},
-		"unknown rules command":    {[]string{"rules", "check"}, `unknown command "check"`},
-		"comma-separated regions":  {[]string{"scan", "--region", "us-east-1,eu-west-1"}, `"us-east-1,eu-west-1" is not an AWS region name`},
-		"broken rule file on scan": {[]string{"scan", "--rules", "missing-rules.yaml"}, "missing-rules.yaml: the rule file does not exist"},
-		"plan without a rule file": {[]string{"plan"}, "plan needs a rule file"},
+		"unknown flag":        {[]string{"scan", "--bogus"}, "unknown flag: --bogus"},
+		"positional argument": {[]string{"scan", "extra"}, `unknown command "extra"`},
+		"unknown command":     {[]string{"nope"}, `unknown command "nope"`},
+		// U6 made apply available; rollback (U7) and iac (U8) are not yet.
+		"later command":             {[]string{"rollback", "--run", "x"}, "rollback is not available in this version"},
+		"iac":                       {[]string{"iac", "--plan", "p.json"}, "iac is not available in this version"},
+		"apply without a plan":      {[]string{"apply"}, "apply needs one of --plan and --rules"},
+		"apply with both":           {[]string{"apply", "--plan", "p.json", "--rules", "r.yaml"}, "apply needs one of --plan and --rules"},
+		"apply with a bad bucket":   {[]string{"apply", "--plan", "p.json", "--record-to", "s3://Bad_Bucket/x"}, `--record-to "s3://Bad_Bucket/x" is not`},
+		"apply with a missing plan": {[]string{"apply", "--plan", "no-such-plan.json"}, "no-such-plan.json: the plan file does not exist"},
+		"rules suggest with rules":  {[]string{"rules", "suggest", "--rules", "r.yaml"}, "unknown flag: --rules"},
+		"unknown rules command":     {[]string{"rules", "check"}, `unknown command "check"`},
+		"comma-separated regions":   {[]string{"scan", "--region", "us-east-1,eu-west-1"}, `"us-east-1,eu-west-1" is not an AWS region name`},
+		"broken rule file on scan":  {[]string{"scan", "--rules", "missing-rules.yaml"}, "missing-rules.yaml: the rule file does not exist"},
+		"plan without a rule file":  {[]string{"plan"}, "plan needs a rule file"},
 		// U4 made --format, --out and --lang available (contract C5); their
 		// wrong values are the usage errors now, still before any AWS call.
 		"diff on scan":            {[]string{"scan", "--format", "diff"}, `--format "diff" is not one of table|json|markdown`},

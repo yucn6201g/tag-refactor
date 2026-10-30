@@ -49,6 +49,14 @@ type Call struct {
 	Query url.Values
 	// Bucket is the bucket an S3 request names, empty for ListBuckets.
 	Bucket string
+	// Key is the object key an S3 request names, empty for bucket requests.
+	Key string
+	// Header holds the request headers, for example If-None-Match of a
+	// conditional S3 write.
+	Header http.Header
+	// Body is the body of an S3 request, decoded from aws-chunked when the
+	// SDK sent it that way.
+	Body []byte
 	// N counts the calls of the same Op so far, starting at 1.
 	N int
 }
@@ -76,11 +84,13 @@ type Handler func(c Call) Reply
 
 // FakeAWS is an http.RoundTripper that answers AWS API calls from registered
 // handlers and records every call. Calls to operations that are not reads
-// (Get, List, Describe, or config:SelectResourceConfig) or that have no
-// handler fail the test.
+// (Get, List, Describe, or config:SelectResourceConfig) fail the test unless
+// AllowWrites was called, which only the tests of apply do (U6 NFR3.10).
+// Calls without a handler always fail the test.
 type FakeAWS struct {
 	t        testing.TB
 	mu       sync.Mutex
+	writes   bool
 	handlers map[string]Handler
 	calls    []Call
 	counts   map[string]int
@@ -103,6 +113,23 @@ func (f *FakeAWS) Handle(op string, h Handler) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.handlers[op] = h
+}
+
+// AllowWrites lets the fake answer operations that are not reads, such as
+// tag:TagResources and s3:PutObject. The tests of scan, rules suggest and plan
+// never call it, so a write from them still fails the test (NFR3.1, U6
+// NFR3.10).
+func (f *FakeAWS) AllowWrites() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.writes = true
+}
+
+// handler returns the handler registered for op, or nil.
+func (f *FakeAWS) handler(op string) Handler {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.handlers[op]
 }
 
 // Calls returns a copy of the calls received so far.
@@ -268,11 +295,12 @@ func (f *FakeAWS) RoundTrip(req *http.Request) (*http.Response, error) {
 	f.calls = append(f.calls, call)
 	h, ok := f.handlers[call.Op]
 	delay := f.delay
+	writes := f.writes
 	f.mu.Unlock()
 	leave := f.enter(call)
 	defer leave()
 
-	if !IsReadOperation(call.Op) {
+	if !writes && !IsReadOperation(call.Op) {
 		f.t.Errorf("fake AWS: non-read operation %s was called", call.Op)
 		return newResponse(req, QueryError(http.StatusBadRequest, "FakeAWSRejectedWrite", "write operations are not allowed")), nil
 	}
@@ -346,13 +374,18 @@ func parseCall(req *http.Request) (Call, error) {
 	if p, ok := signingServiceToIAMPrefix[service]; ok {
 		service = p
 	}
-	c := Call{Service: service, Region: region, AccessKeyID: accessKey, Host: req.URL.Host, Path: req.URL.Path}
+	c := Call{Service: service, Region: region, AccessKeyID: accessKey, Host: req.URL.Host, Path: req.URL.Path,
+		Header: req.Header.Clone()}
 	switch {
 	case service == "s3":
 		// REST-XML (S3): the operation follows from the bucket and the
 		// query.
 		c.Query = req.URL.Query()
 		c.Bucket, c.Action = s3Operation(req.URL.Host, req.URL.Path, c.Query)
+		c.Key = s3Key(req.URL.Host, req.URL.Path, c.Bucket)
+		if c.Body, err = decodeAWSChunked(req.Header, body); err != nil {
+			return Call{}, err
+		}
 	case req.Header.Get("X-Amz-Target") != "":
 		// JSON 1.1 (tagging API, AWS Config): the operation is in the header.
 		target := req.Header.Get("X-Amz-Target")
@@ -404,6 +437,47 @@ func s3Operation(host, path string, query url.Values) (bucket, action string) {
 		action = "GetBucketLocation"
 	}
 	return bucket, action
+}
+
+// s3Key returns the object key of an S3 request: the path after the bucket.
+func s3Key(host, path, bucket string) string {
+	path = strings.TrimPrefix(path, "/")
+	if bucket == "" || strings.HasPrefix(host, bucket+".s3.") {
+		return path
+	}
+	_, key, _ := strings.Cut(path, "/")
+	return key
+}
+
+// decodeAWSChunked returns the payload of a body the SDK sent with the
+// aws-chunked content encoding (a streaming body with a trailing checksum):
+// chunks of "<hex size>\r\n<data>\r\n" up to a chunk of size 0, followed by
+// the trailers. Other bodies are returned as they are.
+func decodeAWSChunked(header http.Header, body []byte) ([]byte, error) {
+	if !strings.Contains(header.Get("Content-Encoding"), "aws-chunked") {
+		return body, nil
+	}
+	var out []byte
+	rest := body
+	for {
+		line, after, ok := bytes.Cut(rest, []byte("\r\n"))
+		if !ok {
+			return nil, fmt.Errorf("aws-chunked body: no chunk header")
+		}
+		sizeText, _, _ := strings.Cut(string(line), ";")
+		var size int
+		if _, err := fmt.Sscanf(sizeText, "%x", &size); err != nil {
+			return nil, fmt.Errorf("aws-chunked body: chunk size %q: %w", sizeText, err)
+		}
+		if size == 0 {
+			return out, nil
+		}
+		if len(after) < size+2 {
+			return nil, fmt.Errorf("aws-chunked body: chunk shorter than %d bytes", size)
+		}
+		out = append(out, after[:size]...)
+		rest = after[size+2:]
+	}
 }
 
 // isRESTJSON reports whether a request without X-Amz-Target uses REST-JSON:

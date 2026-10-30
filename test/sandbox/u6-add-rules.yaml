@@ -1,0 +1,22 @@
+# Rule file for the U6 checkpoint in the sandbox account
+# (construction/u6-apply/infrastructure-design/cicd-pipeline.md): adds the
+# check key tag-refactor-u6-check=1 to five resource types of the
+# fixtures, and only to resources tagged project=tag-refactor-fixture. There
+# is no default, so every other resource only counts as a required tag value
+# not set and is never written. The types are written as scan shows them.
+# IAM roles are left out: tag:GetResources does not return them, so scan
+# never collects them.
+version: 1
+required:
+  tag-refactor-u6-check:
+    when:
+      - match: {resourceType: s3, tags: {project: tag-refactor-fixture}}
+        value: "1"
+      - match: {resourceType: sqs, tags: {project: tag-refactor-fixture}}
+        value: "1"
+      - match: {resourceType: sns, tags: {project: tag-refactor-fixture}}
+        value: "1"
+      - match: {resourceType: "secretsmanager:secret", tags: {project: tag-refactor-fixture}}
+        value: "1"
+      - match: {resourceType: "ec2:security-group", tags: {project: tag-refactor-fixture}}
+        value: "1"

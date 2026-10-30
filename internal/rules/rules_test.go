@@ -395,6 +395,28 @@ func TestSandboxRuleFileIsValid(t *testing.T) {
 	}
 }
 
+// The two rule files of the U6 checkpoint load with no warning but the one
+// that they have no key rules: the resource types are in the form scan shows
+// (U6 cicd-pipeline.md).
+func TestSandboxU6RuleFilesAreValid(t *testing.T) {
+	for name, check := range map[string]func(*RuleSet) bool{
+		"u6-add-rules.yaml": func(rs *RuleSet) bool {
+			return len(rs.RequiredTags) == 1 && rs.RequiredTags[0].Key == "tag-refactor-u6-check"
+		},
+		"u6-remove-rules.yaml": func(rs *RuleSet) bool {
+			return len(rs.RemoveKeys) == 1 && rs.RemoveKeys[0].Key == "tag-refactor-u6-check"
+		},
+	} {
+		rs, err := load(filepath.Join("..", "..", "test", "sandbox", name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !check(rs) || len(rs.Warnings) != 1 || rs.Warnings[0].Key != "keys" {
+			t.Errorf("%s: rule set = %+v", name, rs)
+		}
+	}
+}
+
 func TestSuggestAndEditDistance(t *testing.T) {
 	if got := suggest("Aliases", keyRuleKeys); got != "aliases" {
 		t.Fatalf("suggest = %q", got)

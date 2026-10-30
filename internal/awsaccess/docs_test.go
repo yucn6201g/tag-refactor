@@ -120,10 +120,6 @@ func TestReadOnlyPolicyExampleMatchesTheOperationsTable(t *testing.T) {
 	}
 }
 
-// accountPlaceholder is the part of the example policy that the user replaces
-// with the account ID.
-const accountPlaceholder = "<account-id>"
-
 // singleResourceReads are the actions that read one resource, with the
 // resource the example policy limits them to (U5 security design §1). Every
 // other action is a list, or iam:GetAccountAuthorizationDetails, which reads

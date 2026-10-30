@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # U2 (scan of every region), U3 (rules suggest), U4 (plan formats and the
-# saved plan) and U5 (impact analysis) checkpoint verification.
+# saved plan), U5 (impact analysis) and U6 (apply) checkpoint verification.
 # It calls the sandbox AWS account, so it only runs locally, never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
@@ -39,14 +39,31 @@
 #    read-only profile; a skipped test is a failure.
 # 7. Prints the 95th percentile of each call (from five scans and plans of
 #    every region), the number of retried calls and the 10-minute estimate.
+# U6. With the role R3 of the U6 stack (profile tag-refactor-apply), while
+#    the queue of U2 still exists: checks the U6 stack, the profile and that
+#    no lock is left; plans the check key tag-refactor-u6-check and checks
+#    the range of each plan (scripts/u6check.go: only that key, no impact
+#    but the undecided one the U1 fixture P2 gives every key, only
+#    fixtures, every target present); adds and removes it five times with
+#    apply --yes --allow-impact --debug (the plan check stands in for the
+#    stop of --yes alone), the third run keeping its record in S3, and
+#    judges every run by its record; checks that no resource and no IAM role
+#    keeps the key and no lock is left; reports whether the tagging API
+#    returns the never-tagged queue of U2 when it is named (plan never
+#    includes a never-tagged resource, so apply does not write it); checks the
+#    S3 record (encrypted, the owner's grant only, a missing key NotFound);
+#    and prints the L95 of the tagging calls and the two estimates of
+#    NFR5.15.
 #
 # The temporary folder of U3 and the queue of U2 are removed by one cleanup on
-# every exit; it is defined before the first of them is made.
+# every exit; it is defined before the first of them is made. While the U6
+# check key may be on the fixtures, the cleanup first removes it with R3.
 #
 # Environment:
 #   TAG_REFACTOR_SANDBOX_ACCOUNT_ID  the sandbox account ID (required)
 #   TAG_REFACTOR_SANDBOX_PROFILE     admin profile (default tag-refactor-sandbox)
 #   TAG_REFACTOR_IT_PROFILE          read-only profile (default tag-refactor-readonly)
+#   TAG_REFACTOR_APPLY_PROFILE       profile of the role R3 (default tag-refactor-apply)
 #
 # It prints no credentials: from the AWS CLI it reads ARNs, names and states
 # only, through --query.
@@ -108,7 +125,29 @@ aws_admin() {
 queue_name=""
 queue_url=""
 u3_dir=""
+tool=""
+# u6_added is set while the U6 check key may be on the fixtures: the
+# cleanup then removes it with R3 before anything else (U6 cicd-pipeline.md).
+u6_added=""
 cleanup() {
+  if [ -n "$u6_added" ] && [ -n "$tool" ] && [ -x "$tool" ]; then
+    echo "verify: removing the U6 check key after a failure"
+    u6_plan_file="$u3_dir/u6-cleanup-plan.json"
+    rm -f -- "$u6_plan_file"
+    if "$tool" plan --lang en --profile "$apply_profile" --rules test/sandbox/u6-remove-rules.yaml --out "$u6_plan_file" >/dev/null 2>&1 ||
+      [ -s "$u6_plan_file" ]; then
+      "$tool" apply --lang en --profile "$apply_profile" --plan "$u6_plan_file" --yes --allow-impact --record-to "$u3_dir/u6-cleanup" \
+        >/dev/null 2>"$u3_dir/u6-cleanup-stderr" || true
+      if grep -q 'another apply or rollback is running' "$u3_dir/u6-cleanup-stderr"; then
+        sed 's/^/  /' "$u3_dir/u6-cleanup-stderr" >&2
+        echo "verify: a lock stopped the cleanup; check that no apply runs, then remove it with --force-unlock" >&2
+      fi
+    fi
+    left="$(u6_remaining 2>/dev/null || true)"
+    if [ -n "$(printf '%s' "$left" | tr -d ' ')" ]; then
+      echo "verify: the check key tag-refactor-u6-check is still on $left; remove it by hand" >&2
+    fi
+  fi
   if [ -n "$u3_dir" ] && [ -d "$u3_dir" ]; then
     rm -rf -- "$u3_dir"
   fi
@@ -363,4 +402,206 @@ passed="$(printf '%s\n' "$LAST_OUTPUT" | grep -c -- '--- PASS: TestIntegrationU2
 # 7. The 95th percentile of each call and the estimate (NFR1.8).
 echo "verify: call latencies and the 10-minute estimate"
 printf '%s\n' "$LAST_OUTPUT" | grep -E 'L95 |NFR1\.8 (estimate|retried)|took ' | sed 's/^ *//'
+
+# U6. apply with the role R3 against the fixtures (U6 cicd-pipeline.md),
+# while the never-tagged queue of U2 still exists.
+# U6 step 1: the stacks, the profile of R3 and no lock left behind.
+u6_stack="tag-refactor-u6-fixtures"
+u6_status="$(aws_admin cloudformation describe-stacks --stack-name "$u6_stack" --query 'Stacks[0].StackStatus' --output text 2>/dev/null)" ||
+  fail "the stack $u6_stack does not exist; deploy test/sandbox/u6-fixtures.yaml as construction/u6-apply/infrastructure-design/cicd-pipeline.md describes"
+case "$u6_status" in
+  CREATE_COMPLETE | UPDATE_COMPLETE) ;;
+  *) fail "the stack $u6_stack is $u6_status; deploy test/sandbox/u6-fixtures.yaml as cicd-pipeline.md describes" ;;
+esac
+u6_output() {
+  local value
+  value="$(aws_admin cloudformation describe-stacks --stack-name "$u6_stack" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" --output text)" || fail "cannot read the output $1 of $u6_stack"
+  { [ -n "$value" ] && [ "$value" != "None" ]; } || fail "the stack $u6_stack has no output $1; deploy test/sandbox/u6-fixtures.yaml again"
+  printf '%s' "$value"
+}
+r3_arn="$(u6_output ApplyRoleArn)"
+u6_sg="$(u6_output SecurityGroupArn)"
+u6_bucket="$(u6_output RecordBucket)"
+qu5_url="$(aws_admin cloudformation describe-stack-resource --stack-name "$u5_stack" --logical-resource-id QU5 \
+  --query StackResourceDetail.PhysicalResourceId --output text)" || fail "cannot read QU5 of $u5_stack"
+qu5_arn="$(aws_admin sqs get-queue-attributes --queue-url "$qu5_url" --attribute-names QueueArn --query Attributes.QueueArn --output text)" ||
+  fail "cannot read the ARN of QU5"
+# RU5 is not a target: tag:GetResources does not return IAM roles, so scan
+# never collects them (step 4 still checks that no role keeps the key).
+u6_targets=("$u5_bucket" "$qu5_arn" "$u5_topic" "$u5_secret" "$u6_sg")
+apply_profile="${TAG_REFACTOR_APPLY_PROFILE:-tag-refactor-apply}"
+apply_caller="$(aws --profile "$apply_profile" --region "$region" sts get-caller-identity --query Arn --output text)" ||
+  fail "cannot use the profile $apply_profile; add a profile that assumes $r3_arn (README.md, apply)"
+case "$apply_caller" in
+  *":assumed-role/${r3_arn##*/}/"*) ;;
+  *) fail "the profile $apply_profile is not the role ${r3_arn##*/} of $u6_stack" ;;
+esac
+local_lock="$HOME/.tag-refactor/runs/$account/.lock"
+if [ -e "$local_lock" ]; then
+  sed 's/^/  /' "$local_lock" >&2
+  fail "a lock is left at $local_lock; check that no apply runs, then remove it with apply --force-unlock (never automatically)"
+fi
+u6_dir="$u3_dir/u6"
+mkdir -p "$u6_dir"
+u6_debug="$u6_dir/debug-lines"
+: >"$u6_debug"
+u6_plans=0
+
+# u6_plan makes the plan of a rule file with R3 in every region and checks
+# its range (U6 step 2). It sets U6_PLAN to the saved plan.
+u6_plan() {
+  local rules="$1" mode="$2"
+  shift 2
+  u6_plans=$((u6_plans + 1))
+  U6_PLAN="$u6_dir/plan-$u6_plans.json"
+  run_tool plan --lang en --profile "$apply_profile" --rules "$rules" --format json --out "$U6_PLAN"
+  { [ "$TOOL_STATUS" -eq 0 ] || [ "$TOOL_STATUS" -eq 2 ]; } ||
+    { sed 's/^/  /' "$u3_dir/stderr" >&2; fail "plan --rules $rules ended with exit code $TOOL_STATUS"; }
+  go run scripts/u6check.go plan "$U6_PLAN" "$mode" "$@" || fail "the plan of $rules is out of range; nothing was changed"
+}
+
+# u6_apply applies the plan with R3, --yes and --allow-impact, and sets
+# U6_RUN to the run ID. --allow-impact is needed for the undecided finding
+# that the U1 fixture P2 gives every key; u6_plan has already refused any
+# other finding. A run that made no record fails.
+u6_apply() {
+  local record_to="$1"
+  run_tool apply --lang en --profile "$apply_profile" --plan "$U6_PLAN" --yes --allow-impact --debug --record-to "$record_to"
+  grep -E '^debug: tag:[A-Za-z]+ ' "$u3_dir/stderr" >>"$u6_debug" || true
+  U6_RUN="$(sed -n 's/.*tag-refactor rollback --run \([0-9TZ]*-[0-9a-f]*\).*/\1/p' "$u3_dir/stderr" | head -n 1)"
+  if [ -z "$U6_RUN" ] || { [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ]; }; then
+    sed 's/^/  /' "$u3_dir/stderr" >&2
+    if grep -q 'another apply or rollback is running' "$u3_dir/stderr"; then
+      fail "apply stopped at a lock; check that no apply runs, then remove it with --force-unlock"
+    fi
+    fail "apply ended with exit code $TOOL_STATUS without a complete run"
+  fi
+}
+
+# u6_record copies the record of the last run to U6_RECORD.
+u6_record() {
+  U6_RECORD="$u6_dir/$U6_RUN.json"
+  case "$1" in
+    s3://*) aws_admin s3api get-object --bucket "$u6_bucket" --key "runs/$account/$U6_RUN.json" "$U6_RECORD" >/dev/null ||
+      fail "the record $U6_RUN is not in s3://$u6_bucket/runs/$account/" ;;
+    *) cp "$1/$account/$U6_RUN.json" "$U6_RECORD" || fail "the record $U6_RUN is not in $1/$account/" ;;
+  esac
+}
+
+# U6 step 3: add and remove the check key five times; the third run keeps
+# its record in S3. The flag tells the cleanup to remove the key.
+s3_run=""
+for round in 1 2 3 4 5; do
+  record_to="$u6_dir/records"
+  [ "$round" -eq 3 ] && record_to="s3://$u6_bucket/runs"
+  u6_plan test/sandbox/u6-add-rules.yaml add "${u6_targets[@]}"
+  add_plan="$U6_PLAN"
+  u6_added=yes
+  u6_apply "$record_to"
+  u6_record "$record_to"
+  go run scripts/u6check.go record "$U6_RECORD" "$add_plan" "${u6_targets[@]}" || fail "the add of round $round is not complete"
+  [ "$round" -eq 3 ] && s3_run="$U6_RUN"
+  u6_plan test/sandbox/u6-remove-rules.yaml remove "${u6_targets[@]}"
+  remove_plan="$U6_PLAN"
+  u6_apply "$record_to"
+  u6_record "$record_to"
+  go run scripts/u6check.go record "$U6_RECORD" "$remove_plan" "${u6_targets[@]}" || fail "the removal of round $round is not complete"
+  if grep -q '"status": "skipped"' "$U6_RECORD"; then
+    fail "the removal of round $round skipped resources"
+  fi
+done
+
+# U6 step 4: nothing keeps the check key (eventually consistent: six reads
+# 10 seconds apart), and no lock is left.
+u6_remaining() {
+  local r left=""
+  for r in ap-northeast-1 us-east-1; do
+    left="$left $(aws --profile "$admin" --region "$r" resourcegroupstaggingapi get-resources \
+      --tag-filters Key=tag-refactor-u6-check --query 'ResourceTagMappingList[].ResourceARN' --output text)"
+  done
+  for role in "${u5_role##*/}" "${r3_arn##*/}" "${r2_arn##*/}"; do
+    if aws_admin iam list-role-tags --role-name "$role" --query 'Tags[].Key' --output text | tr '\t' '\n' | grep -qx tag-refactor-u6-check; then
+      left="$left role/$role"
+    fi
+  done
+  printf '%s' "$left" | tr -s ' \t' ' ' | sed 's/^ //; s/ $//; s/None//g'
+}
+u6_check_removed() {
+  local attempt left
+  for attempt in 1 2 3 4 5 6; do
+    left="$(u6_remaining)"
+    [ -z "$(printf '%s' "$left" | tr -d ' ')" ] && return 0
+    echo "verify: the check key is still on $left (read $attempt of 6)"
+    sleep 10
+  done
+  fail "the check key is left on $left"
+}
+u6_check_removed
+[ ! -e "$local_lock" ] || fail "the local lock $local_lock is left"
+if aws_admin s3api head-object --bucket "$u6_bucket" --key "runs/$account/.lock" >/dev/null 2>&1; then
+  fail "the S3 lock s3://$u6_bucket/runs/$account/.lock is left"
+fi
+u6_added=""
+
+# U6 step 5: whether the tagging API returns the never-tagged queue of U2
+# when it is named. Only reported: plan builds its changes from the tagged
+# inventory, so a never-tagged resource is never in a plan and apply never
+# writes it (a limit the README states).
+if aws_admin resourcegroupstaggingapi get-resources --resource-arn-list "$queue_arn" \
+  --query 'ResourceTagMappingList[].ResourceARN' --output text | grep -qF "$queue_arn"; then
+  echo "verify: the tagging API returns the never-tagged queue when it is named"
+else
+  echo "verify: the tagging API does not return the never-tagged queue when it is named"
+fi
+
+# U6 step 6: the record in S3 is encrypted, has no grant but the owner's,
+# and R3 reads a missing key as NotFound.
+sse="$(aws_admin s3api head-object --bucket "$u6_bucket" --key "runs/$account/$s3_run.json" --query ServerSideEncryption --output text)" ||
+  fail "the S3 record $s3_run is missing"
+{ [ -n "$sse" ] && [ "$sse" != "None" ]; } || fail "the S3 record $s3_run is not encrypted"
+grants="$(aws_admin s3api get-object-acl --bucket "$u6_bucket" --key "runs/$account/$s3_run.json" --query 'length(Grants)' --output text)" ||
+  fail "cannot read the ACL of the S3 record"
+[ "$grants" = "1" ] || fail "the S3 record has $grants grants; only the owner may have one"
+missing_err="$(aws --profile "$apply_profile" --region "$region" s3api get-object --bucket "$u6_bucket" \
+  --key "runs/$account/no-such-run.json" "$u6_dir/missing" 2>&1 >/dev/null || true)"
+case "$missing_err" in
+  *NoSuchKey* | *"Not Found"*) echo "verify: a missing record reads as NotFound with R3" ;;
+  *AccessDenied*) fail "a missing record reads as AccessDenied with R3; fix the s3:ListBucket statement of docs/iam/apply-policy.json" ;;
+  *) fail "reading a missing record with R3 gave: $missing_err" ;;
+esac
+echo "verify: the S3 record $s3_run is encrypted ($sse) with the owner's grant only"
+
+# U6 step 7: L95 of the tagging calls of the ten applies and the estimates
+# of NFR5.15 for the skewed region (2,000 resources): usual changes 20 first
+# reads, 50 reads again and back, 105 writes of each kind; values that
+# differ on every resource 20, 50 and 2,000 of each kind.
+awk '
+  {
+    op = $2; ms = $4; sub(/ms$/, "", ms)
+    n[op]++; t[op, n[op]] = ms + 0
+    retries = $5; sub(/^retries=/, "", retries)
+    if (retries + 0 >= 1) retried++
+  }
+  END {
+    for (op in n) {
+      for (i = 2; i <= n[op]; i++) {
+        v = t[op, i]
+        for (j = i - 1; j >= 1 && t[op, j] > v; j--) t[op, j + 1] = t[op, j]
+        t[op, j + 1] = v
+      }
+      k = int(0.95 * n[op] + 0.999999); if (k < 1) k = 1
+      l95[op] = t[op, k]
+      note = (n[op] < 20) ? " (few samples: the largest)" : ""
+      printf "  L95 %s: %d ms, %d samples%s\n", op, l95[op], n[op], note
+    }
+    g = l95["tag:GetResources"]; tg = l95["tag:TagResources"]; ut = l95["tag:UntagResources"]
+    usual = ((20 + 50) * g + 105 * tg + 105 * ut) * 1.2 / 60000
+    scattered = ((20 + 50) * g + 2000 * tg + 2000 * ut) * 1.2 / 60000
+    printf "  retried calls: %d\n", retried
+    printf "  NFR5.15 estimate, usual changes: %.1f minutes (limit 30)\n", usual
+    printf "  NFR5.15 estimate, values differing on every resource: %.1f minutes (recorded, not judged)\n", scattered
+  }
+' "$u6_debug"
+echo "verify: record these values and the limits of the small samples at the U6 checkpoint"
 echo "verify: OK"

@@ -102,6 +102,16 @@ var opErrorCodes = map[string]map[string]kindReason{
 	OpGetQueueAttributes: notFound("QueueDoesNotExist", "AWS.SimpleQueueService.NonExistentQueue"),
 	OpGetTopicAttributes: notFound("NotFound"),
 	OpGetResourcePolicy:  notFound("ResourceNotFoundException"),
+	// The run records of apply (U6 security design §3): a conditional write
+	// refused because the lock exists, or because another conditional write
+	// of it runs, is Conflict; a store without conditional writes is
+	// StorageFailed.
+	OpPutObject: {
+		"PreconditionFailed":         {errkind.Conflict, errkind.ReasonNone},
+		"ConditionalRequestConflict": {errkind.Conflict, errkind.ReasonNone},
+		"NotImplemented":             {errkind.StorageFailed, errkind.ReasonNone},
+	},
+	OpGetObject: notFound("NoSuchKey", "NoSuchBucket"),
 }
 
 // notFound maps the codes to NotFound.
