@@ -238,10 +238,8 @@ func (a *app) rootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
-	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand(), a.applyCommand())
-	for _, name := range []string{"rollback", "iac"} {
-		root.AddCommand(unavailableCommand(name))
-	}
+	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand(), a.applyCommand(), a.rollbackCommand())
+	root.AddCommand(unavailableCommand("iac"))
 	return root
 }
 

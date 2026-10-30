@@ -365,7 +365,7 @@ var catalog = map[string]message{
 	"rollback.badRunID":         {en: "--run %q is not a run ID such as 20261019T211003Z-7f3a", ja: "--run %q は 20261019T211003Z-7f3a のような実行 ID ではありません"},
 	"rollback.runFix":           {en: "pass the run ID of the rollback command apply showed: tag-refactor rollback --run <run-id>", ja: "apply が示した取り消しのコマンドの実行 ID を渡してください: tag-refactor rollback --run <実行 ID>"},
 	"rollback.notTerminal":      {en: "rollback asks for a confirmation, but standard input is not a terminal", ja: "rollback は確認を求めますが、標準入力が端末ではありません"},
-	"rollback.recordMissing":    {en: "the run record %s does not exist (account %s)", ja: "記録 %s がありません(アカウント %s)"},
+	"rollback.recordMissing":    {en: "the run record does not exist (account %s)", ja: "記録がありません(アカウント %s)"},
 	"rollback.recordMissingFix": {en: "if apply used --record-to, pass the same value to --record-from; check the run ID and that --profile is the account of the apply", ja: "apply で --record-to を使った場合は、同じ値を --record-from に渡してください。実行 ID と、--profile が apply のアカウントであることも確かめてください"},
 	"rollback.recordVersionFix": {en: "undo it with the version of tag-refactor that wrote the record", ja: "記録を書いた版の tag-refactor で取り消してください"},
 	"rollback.accountMismatch":  {en: "the record %s is for account %s, but the credentials are for account %s", ja: "記録 %s はアカウント %s のものですが、認証情報はアカウント %s のものです"},

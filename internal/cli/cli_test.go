@@ -36,9 +36,11 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		"unknown flag":        {[]string{"scan", "--bogus"}, "unknown flag: --bogus"},
 		"positional argument": {[]string{"scan", "extra"}, `unknown command "extra"`},
 		"unknown command":     {[]string{"nope"}, `unknown command "nope"`},
-		// U6 made apply available; rollback (U7) and iac (U8) are not yet.
-		"later command":             {[]string{"rollback", "--run", "x"}, "rollback is not available in this version"},
+		// U6 made apply and U7 rollback available; iac (U8) is not yet.
 		"iac":                       {[]string{"iac", "--plan", "p.json"}, "iac is not available in this version"},
+		"rollback without --run":    {[]string{"rollback"}, "rollback needs --run with the run ID that apply showed"},
+		"rollback with a bad run":   {[]string{"rollback", "--run", "x"}, `--run "x" is not a run ID`},
+		"rollback with a bad place": {[]string{"rollback", "--run", "20261019T211003Z-7f3a", "--record-from", "s3://Bad_Bucket/x"}, `--record-from "s3://Bad_Bucket/x" is not`},
 		"apply without a plan":      {[]string{"apply"}, "apply needs one of --plan and --rules"},
 		"apply with both":           {[]string{"apply", "--plan", "p.json", "--rules", "r.yaml"}, "apply needs one of --plan and --rules"},
 		"apply with a bad bucket":   {[]string{"apply", "--plan", "p.json", "--record-to", "s3://Bad_Bucket/x"}, `--record-to "s3://Bad_Bucket/x" is not`},
