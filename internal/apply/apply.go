@@ -1,12 +1,18 @@
-// Package apply rewrites the tags of a plan (U6 workflow W1, steps 7 to 13):
-// it takes the lock, asks for the confirmation through the command line,
-// reads the current tags and skips what changed since the plan, works out
-// what to write, saves the record before the first write, writes the
-// regions in parallel in batches, reads back what it wrote, and closes the
-// record and the lock however the run ends.
+// Package apply writes tags for apply and rollback.
 //
-// It reaches AWS only through the interfaces of awsaccess and keeps the
-// record through journal; it prints nothing and reports progress through a
+// Applier rewrites the tags of a plan (U6 workflow W1, steps 7 to 13): it
+// takes the lock, asks for the confirmation through the command line, reads
+// the current tags and skips what changed since the plan, works out what to
+// write, saves the record before the first write, writes the regions in
+// parallel in batches, reads back what it wrote, and closes the record and
+// the lock however the run ends.
+//
+// Rollbacker undoes an apply from its record (U7 workflow W1): it puts the
+// keys apply touched back as they were before apply, with the same regions,
+// batch write, stops and lock as apply (execution.go).
+//
+// Both reach AWS only through the interfaces of awsaccess and keep the
+// record through journal; they print nothing and report progress through a
 // ProgressSink (contract C11).
 package apply
 

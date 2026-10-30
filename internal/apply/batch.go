@@ -51,16 +51,20 @@ func (u unit) targets() []*Target {
 // [key, value] pairs, what it removes and whether it removes first, encoded
 // as JSON, so keys and values with =, commas, line breaks or quotes can never
 // make two different writes look the same.
-func groupKey(t *Target) string {
+func groupKey(t *Target) string { return batchKey(t.TagsToSet, t.KeysToRemove, t.RemoveFirst) }
+
+// batchKey is the key of a write that sets set, removes remove (sorted) and
+// removes first or not; apply and rollback batch by it.
+func batchKey(set map[string]string, remove []string, removeFirst bool) string {
 	var k struct {
 		Set         [][2]string `json:"set"`
 		Remove      []string    `json:"remove"`
 		RemoveFirst bool        `json:"removeFirst"`
 	}
-	for _, key := range slices.Sorted(maps.Keys(t.TagsToSet)) {
-		k.Set = append(k.Set, [2]string{key, t.TagsToSet[key]})
+	for _, key := range slices.Sorted(maps.Keys(set)) {
+		k.Set = append(k.Set, [2]string{key, set[key]})
 	}
-	k.Remove, k.RemoveFirst = t.KeysToRemove, t.RemoveFirst
+	k.Remove, k.RemoveFirst = remove, removeFirst
 	data, err := json.Marshal(k)
 	if err != nil {
 		panic(err) // strings and a bool only
