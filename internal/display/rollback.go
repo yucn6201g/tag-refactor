@@ -49,15 +49,18 @@ func (p *Printer) RollbackSummary(s apply.RollbackSummary) {
 			{"rollback.rowOverLimit", "", s.OverLimit, false, styleChange},
 			{"rollback.rowUnreadable", "", s.Unreadable, false, styleRemove},
 		}
-		labelWidth, countWidth := 0, 0
+		shown := rows[:0]
 		for _, r := range rows {
+			if r.n > 0 || r.always {
+				shown = append(shown, r)
+			}
+		}
+		labelWidth, countWidth := 0, 0
+		for _, r := range shown {
 			labelWidth = max(labelWidth, Width(p.tr(r.label)))
 			countWidth = max(countWidth, Width(p.count("unit.item", r.n)))
 		}
-		for _, r := range rows {
-			if r.n == 0 && !r.always {
-				continue
-			}
+		for _, r := range shown {
 			line := "  " + padRight(p.tr(r.label), labelWidth) + "  " + padLeft(p.count("unit.item", r.n), countWidth)
 			if r.note != "" && r.n > 0 {
 				line += "   " + p.tr(r.note)
