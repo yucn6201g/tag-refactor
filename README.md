@@ -6,18 +6,20 @@ showing which IAM policies and resource policies (S3, KMS, SQS, SNS and
 Secrets Manager) use the tags that would change. It reads every
 enabled region, finds resources that were never tagged, counts missing
 required tags, and drafts a rule file from the tags in use. apply rewrites
-the tags of a plan after a confirmation, keeping a record of every change
-so that it can be undone. (The rest of this README is in Japanese.)
+the tags of a plan after a confirmation, keeping a record of every change,
+and rollback undoes an apply from that record. (The rest of this README is
+in Japanese.)
 
-## できること(U1〜U6)
+## できること(U1〜U7)
 
-AWS に書き込むのは `apply` だけです(タグと、指定したときの記録の S3 のオブジェクト)。ほかのコマンドは読み取りだけで、書き込みの口を持ちません。
+AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定したときの記録の S3 のオブジェクト)。ほかのコマンドは読み取りだけで、書き込みの口を持ちません。
 
 | コマンド | できること |
 |---|---|
 | `scan` | アカウントで有効なすべてのリージョンを読み(`--region` で絞れます)、書き方の違うタグのキーをまとめて示します。大文字・小文字と区切り文字(`-`、`_`、空白)の違いに加えて、略語の辞書(`env`→`environment`、`prod`→`production`、`dev`→`development`、`stg`→`staging`。キー全体が一致するときだけ)でまとめます。辞書を使って初めてまとまったものには `(abbreviation match)` の印を付け、終了コードの理由にしません。`--rules` のルールファイルの `required` のキーが付いていないリソースの数、一度もタグが付いていないリソース、タグを変更できない種類も示します。`aws:` で始まるキーは対象にしません。 |
 | `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、IAM のポリシー(管理ポリシーとインラインポリシー)と、S3、KMS、SQS、SNS、Secrets Manager のリソースポリシーのうち、変更するタグを参照しているものを、影響あり(`!`)か判定できない(`?`)として示します(下の「影響分析」)。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
 | `apply` | 変更案のとおりにタグを書き換えます。保存した変更案(`--plan`)か、その場で作る変更案(`--rules`)のどちらか1つを使います。要約と影響のある変更を示し、`yes` と入力したときだけ書き換えます。書き換える前のタグを記録に保存し、取り消しのコマンドを示します(下の「タグの書き換え(apply)」)。 |
+| `rollback` | `apply` の記録をもとに、その実行で書き換えたキーを書き換える前に戻します。`apply` のあとに変えられたリソースは飛ばし(`--force` で戻せます)、要約を示して `yes` と入力したときだけ戻します。結果は同じ記録に足します(下の「書き換えの取り消し(rollback)」)。 |
 | `rules suggest` | 今使われているタグから、ルールファイルの下書きを作ります。`scan` と同じまとめ方でキーをまとめ、最も多くのリソースで使われている書き方を正しいキー名に、残りを別名にします。値も同じまとめ方でまとめ、書き方が2つ以上ある値を `values` の候補にします。全リージョンを読みます(`--region` で絞れます。一度もタグが付いていないリソースは探しません)。 |
 
 調べる範囲は次のとおりです。どのコマンドも、調べた範囲を `Checked:` で始まる1行で標準エラーに出します。
@@ -33,7 +35,7 @@ AWS に書き込むのは `apply` だけです(タグと、指定したときの
 
 どのコマンドも、英語か日本語で表示でき(`--lang`)、端末では色を付けます(`NO_COLOR` で消せます)。
 
-まだできないこと(後の作業単位): 書き換えの取り消し(`rollback`。`apply` は取り消しに使う記録を書き、コマンドを示します)、IaC への反映。
+まだできないこと(後の作業単位): IaC への反映。
 
 ## インストール
 
@@ -72,6 +74,9 @@ tag-refactor apply --plan plan.json --profile dev
 
 # スクリプトから書き換える(影響のある変更があれば止まる。影響も承知なら --allow-impact を足す)
 tag-refactor apply --plan plan.json --yes
+
+# apply を取り消す(apply が最後に示したコマンドをそのまま使う。要約を見て yes と入力する)
+tag-refactor rollback --run 20261019T211003Z-7f3a --profile dev
 
 # 日本語で表示する / スクリプトから JSON で読む
 tag-refactor scan --lang ja
@@ -246,6 +251,44 @@ Ctrl+C で止めると、動いている書き込みを待ち、新しい書き�
 - 手元の印は、同じ端末の中の同時実行だけを防ぎます。別の端末から同じアカウントに apply しうるときは、記録を S3 に置いてください。条件付きの書き込みに対応しない保存先は、エラーとして止まります。
 - 手元のフォルダとファイルは、Linux と macOS では本人だけが読み書きできる権限(0700、0600)で作り、既にあるフォルダをほかの利用者が読めるときは警告します。Windows ではその場所の権限を引き継ぎます。プロファイルの外のフォルダを `--record-to` に指定すると、ほかの利用者が読める場合があります。
 
+### 書き換えの取り消し(rollback)
+
+```bash
+tag-refactor rollback --run 20261019T211003Z-7f3a                       # 既定の場所の記録から戻す
+tag-refactor rollback --run 20261019T211003Z-7f3a --record-from s3://my-bucket/tag-refactor
+tag-refactor rollback --run 20261019T211003Z-7f3a --force               # apply のあとに変えられたリソースも戻す
+tag-refactor rollback --run 20261019T211003Z-7f3a --yes                 # 確認なし。後から変えられたリソースは飛ばす
+```
+
+`apply` が最後に示す取り消しのコマンド(`--record-from` と `--profile` を含む)は、そのまま使えます。
+
+| オプション | 意味 |
+|---|---|
+| `--run` | 必須。取り消す `apply` の実行 ID(`20261019T211003Z-7f3a` の形)。 |
+| `--record-from` | 記録の置き場所。`apply` の `--record-to` と同じ値を渡します。省略すると `~/.tag-refactor/runs/<アカウントID>/`。S3 の前置きも `apply` と同じにしてください(権限の例の `<record-prefix>` と違うと AccessDenied になります)。 |
+| `--force` | `apply` のあとに変えられたリソースも、記録した状態に戻します(`apply` が触れたキーだけ。ほかのキーは触りません)。 |
+| `--yes` | 確認の入力なしで戻します。後から変えられたリソースは、`--force` もあるときだけ上書きします。標準入力が端末でなく、戻すものがあるときは `--yes` が要ります。 |
+| `--force-unlock` | 強制終了などで残った印を外してから進めます。実行中の apply や rollback がないことを確かめてから使ってください。 |
+| `--profile`、`--lang`、`--debug` | ほかのコマンドと同じです。 |
+
+**判定と戻し方**
+
+1. 同じアカウントの印(apply と同じ印)を取ってから記録を読みます。印があれば、その中身を示して止まります(自動では外しません)。記録がない、版が読めない、アカウントか実行 ID が違うときは、何も戻さずに止まります。記録の中身(ARN の形とアカウントとリージョン、`aws:` のキー、触れたキーが `apply` で値の変わったキーか、キーと値の長さ、タグの数)も、AWS を呼ぶ前に確かめます。
+2. 記録のうち、`apply` が触れたキー(`touchedKeys`)のある項目だけを、今のタグで判定します。比べるのは触れたキーだけです。すべて `apply` の前と同じなら「すでに戻っている」、どれも `apply` の前か後のどちらかと同じなら(途中で止まった状態を含む)戻し、どれかがどちらとも違えば「後から変えられた」として飛ばします。途中で止まった `apply` の記録も同じに扱い、書き換えた分だけを戻します。
+3. 要約(戻す件数、後から変えられた件数、すでに戻っている件数、なくなった件数、50個を超える件数、読めなかった件数。途中で止まった `apply` の記録と、取り消し済みの記録は `!` と文字で)を示し、`yes` の入力を待ちます。戻すものがなければ、確認を求めずに結果を記録に足して終わります(2回目の rollback など)。
+4. 100個ずつ、書く直前に今のタグを読み直して判定し直し、同じ戻し方のリソースを20個ずつまとめて書きます(付けるのが先、消すのが後。途中だけ50個を超えるときは消すのが先)。書いたあとに読み戻し、`apply` の前と違えば 1、2、4 秒おいて読み直し、3回とも違えば失敗(`not restored when read back`)にします。`aws:` で始まるキーと、`apply` が触れていないキーは書きも消しもしません。
+5. 結果は同じ記録の `rollbacks` に足します(`apply` の項目は変えません)。終わりに、戻した・すでに戻っていた・飛ばした・失敗した件数、飛ばしたものと失敗したものの一覧(理由つき)、ログファイル(`~/.tag-refactor/runs/<アカウントID>/<取り消しのID>.log`)、必要なら `--force` を付けたコマンドともう一度 rollback するコマンドを示します。
+
+Ctrl+C の扱いは `apply` と同じ2段です。止めた rollback は記録に未完了として残り、同じ `--run` でもう一度 rollback すると、戻した項目は「すでに戻っている」になり、残りを戻します。
+
+**rollback の限界**
+
+- rollback は記録に書かれたタグに戻します。記録の置き場所(`--record-to`、`--record-from` のフォルダや S3 の前置き)は、自分だけが書ける場所にしてください。ほかの人が書ける場所の記録を使うと、その人が書いたタグを付けることになります(記録の中身の確かめは、別のアカウントのリソースや形の壊れた記録を防ぎますが、同じアカウントの中で形の正しい項目を足す書き換えは防げません)。
+- 判定は今のタグと記録だけで行います。rollback で戻したあとに同じ変更をもう一度 apply し、古い記録でもう一度 rollback すると、新しい apply の書き換えも戻します。取り消し済みの記録では、確認画面で警告します。
+- 書く直前の読み直しから、そのまとまりを書き終えるまでの間に他人が変えたタグは、上書きすることがあります(タグの API には比べてから書く書き込みがありません。値がばらばらな場合で最大約1分)。
+- `--force-unlock` で動いている apply や rollback の印を外して同時に動かすと、どちらかの結果が記録から失われることがあります。
+- タグが1つもないリソースをタグの API が返さない場合に備え、`apply` の前か後のタグが0個の項目は、答えに出なくても「タグなし」として判定します。そのため、`apply` の前にタグがなかった項目は、本当に削除されていても「すでに戻っている」になります(戻すタグがないので害はありません)。
+
 ### ルールファイルの下書き(rules suggest)
 
 ```bash
@@ -353,6 +396,8 @@ remove: [tmp-owner]
 
 `apply` の終了コード: 0 はすべて書き換えた、または確認で `yes` 以外を入力した。1 はエラー、失敗したリソースや結果が分からないリソースがある、止めた、記録を保存できなかった、印を消せなかった、印があった、アカウントが違う、収集が不完全な変更案。2 は飛ばしたリソースがある、変更案に衝突か値が未指定の必須タグがある、または `--yes` だけで影響のある変更があって止まった。
 
+`rollback` の終了コード: 0 はすべて戻した(すでに戻っていたものを含む)、取り消すものがなかった、または確認で `yes` 以外を入力した。1 はエラー、失敗したリソース(読めなかった、書けなかった、一部だけ書いた、結果が分からない、戻らなかった)がある、止めた、記録がない・読めない・アカウントが違う、記録を保存できなかった、印があった、印を消せなかった。2 は飛ばしたリソース(後から変えられた、なくなった、50個を超える)がある。1 と 2 の両方にあたるときは 1 です。
+
 一度もタグが付いていないリソースを探せなかったこと、見つかったこと、タグを変更できない種類があることだけでは、終了コードは変わりません。
 
 エラーは2行(`Error:` 何が起きたか、`Fix:` どう直すか。日本語では `エラー:` と `直し方:`)で出します。AWS の SDK のエラー文はそのまま出しません。
@@ -381,7 +426,7 @@ remove: [tmp-owner]
 | `resource-explorer-2:GetView` | 既定のビューに絞り込みの条件があるか(`scan`) |
 | `resource-explorer-2:Search` | API の `ListResources` に AWS が求める IAM の操作。タグのないリソースを件数の上限なく読みます(`scan`)。1,000 件までに限られる API の `Search` は呼びません |
 
-`apply` には、書き換え用の例 [`docs/iam/apply-policy.json`](docs/iam/apply-policy.json) を使います。読み取り用の例のすべてに、次を足したものです。`<account-id>` はアカウントの ID、`<record-bucket>` と `<record-prefix>` は `--record-to` の S3 のバケットと前置きに置き換えます(S3 に記録しないなら、記録の2つの文は消してかまいません)。
+`apply` と `rollback` には、書き換え用の例 [`docs/iam/apply-policy.json`](docs/iam/apply-policy.json) を使います(どちらにも同じ例を使います)。読み取り用の例のすべてに、次を足したものです。`<account-id>` はアカウントの ID、`<record-bucket>` と `<record-prefix>` は `--record-to` の S3 のバケットと前置きに置き換えます(S3 に記録しないなら、記録の2つの文は消してかまいません)。rollback の `--record-from` の S3 の前置きは、apply の `--record-to` と同じにしてください。例の `<record-prefix>` と違うと AccessDenied になります。
 
 | IAM の操作 | `Resource` | 使う場面 |
 |---|---|---|
@@ -416,9 +461,12 @@ go test -mod=readonly -run 'TestDetectionTable|TestLargeAnalysisU5' ./internal/i
 go test -mod=readonly -run 'TestGolden' ./internal/display/... -update               # 出力の期待のファイルを作り直す(差分を人が見る)
 go test -mod=readonly -run 'TestAcceptanceU6' ./internal/cli/...                    # apply の受け入れ条件
 go test -mod=readonly -run 'TestLargeApplyU6' ./internal/apply/...                  # 1万件の apply(呼び出しの回数、同時の数、30秒)
+go test -mod=readonly -run 'TestAcceptanceU7' ./internal/cli/...                    # rollback の受け入れ条件
+go test -mod=readonly -run 'TestLargeRollbackU7' ./internal/apply/...               # 1万件の rollback(呼び出しの回数、同時の数、30秒)
+go vet scripts/u6check.go                                                           # 検証のスクリプトの確かめの補助(ビルドには入らない)
 ```
 
-- apply と記録のテストは、テストごとの一時のホーム(`HOME`、`USERPROFILE`)で動き、本物の `~/.tag-refactor` には触れません。
+- apply、rollback と記録のテストは、テストごとの一時のホーム(`HOME`、`USERPROFILE`)で動き、本物の `~/.tag-refactor` には触れません。
 
 - CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/`、`internal/impact/testdata/fuzz/FuzzParsePolicy/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。
 - 出力の期待のファイル(`internal/display/testdata/`)は、4つの形式 × 2つの言語と保存した変更案です。`.gitattributes` で LF に固定し、3つの OS で同じバイト列になることを確かめます。
@@ -500,6 +548,7 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 6. U2 の結合テスト(`internal/cli/integration_u2_test.go`)を読み取り用のプロファイルで動かします。飛ばされたテストがあれば失敗にします。
 7. `--debug` の行から求めた操作ごとの95パーセンタイル(L95)と、1万件のときの10分の見積もりを表示します。
 8. U6 の確認をします(U2 のキューを消す前)。U6 のスタックと R3 のプロファイル、手元に印が残っていないことを確かめ、R3 で `plan --rules <ルール> --out` を作って範囲を確かめ(`scripts/u6check.go`: 確かめ専用のキーの追加か削除だけ、U1 の P2(キーにポリシー変数がある条件)がどのキーにも付ける「決められない」以外の影響なし、確認用のリソースだけ、5つの対象がすべて入っている。外れれば何も書き換えずに失敗)、`apply --plan ... --yes --allow-impact --debug` で足して消すことを5回くり返します(3回目は記録を S3 に置く)。合否は記録で決めます(完了している、失敗と未処理がない、5つの対象が `applied`)。そのあと、どのリソースと IAM のロールにもキーが残っていないこと、印が残っていないことを確かめ、U2 の一度もタグのないキューを ARN で指定したときにタグ付けの API が返すかを表示し(`plan` は一度もタグのないリソースを変更案に入れないため、`apply` はそれを書き換えません)、S3 の記録の暗号化と ACL、ないキーが NotFound になることを確かめ、タグの操作の L95 と30分の見積もり(値がばらばらな場合の見積もりも)を表示します。キーを足したあとに失敗したときは、後片付けで R3 を使ってキーを消します(印で止まったときは、印の中身を示して `--force-unlock` を案内します。自動では外しません)。
+9. U7 の確認をします(U6 の確認のすぐあと、R3 で。手順は U7 のインフラの設計 [`cicd-pipeline.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u7-rollback/infrastructure-design/cicd-pipeline.md)。新しいスタックは作りません)。5つの対象のタグの写しを取ってから、U6 のキーを足す apply とその rollback を5回くり返し(3回目は記録を S3 に置き、記録の `entries` が変わらず `rollbacks` に完了した1件が増えたことを確かめる)、`u7-src-rules.yaml` でキーを足して `u7-rename-rules.yaml` でキー名と値を変え、2つの apply を順に rollback します。5回目の実行をもう一度 rollback して、すべて「すでに戻っている」で何も書かないことを確かめます。一時的な SQS のキュー(`tag-refactor-u7-zero-<乱数>`。タグ1つ)を作り、apply でタグを0個にして、タグの API が ARN を指定したときにそれを返すかを表示し、rollback で戻します。`plan` がタグ0個のキューを集めたときは、`u7-zero-add-rules.yaml` で必須タグを付けて0個に戻すことも確かめます。どの rollback のあとも、写しと今のタグ(`aws:` を除く)が同じことを確かめます。最後に、確かめ用のキーと印が残っていないことを確かめ、rollback のタグの操作の L95 と NFR5.21 の30分の見積もり(値がばらばらな場合も)を表示し、チェックポイントで人が `--yes` なしで動かす rollback のコマンドを表示します。途中で失敗したときは、後片付けで R3 の apply(`u7-cleanup-remove-rules.yaml`)で確かめ用のキーを消し、一時的なキューを消します。
 
 | 環境変数 | 意味 |
 |---|---|
