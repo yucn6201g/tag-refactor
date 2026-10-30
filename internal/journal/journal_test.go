@@ -319,7 +319,7 @@ func waitFor(t *testing.T, cond func() bool) {
 func idle(r *Run) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return !r.saving
+	return !r.sv.saving
 }
 
 func TestRecordBeforeSavesEveryEntryInARNOrder(t *testing.T) {

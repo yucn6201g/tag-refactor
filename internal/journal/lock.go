@@ -21,6 +21,9 @@ type LockHandle struct {
 	AccountID string
 	RunID     string
 	Location  Location
+	// Purpose is what holds the lock: OpenForRollback takes only a lock of
+	// rollback (U7 security design §4).
+	Purpose Purpose
 	// local is the path of the local lock; s3 the URI of the S3 lock, or
 	// empty.
 	local, s3 string
@@ -77,7 +80,7 @@ func (j *Journal) Lock(ctx context.Context, accountID string, loc Location, purp
 	if err != nil {
 		return nil, errkind.Ensure(err, "write the lock")
 	}
-	h := &LockHandle{AccountID: accountID, RunID: runID, Location: loc, local: filepath.Join(dir, lockName)}
+	h := &LockHandle{AccountID: accountID, RunID: runID, Location: loc, Purpose: purpose, local: filepath.Join(dir, lockName)}
 	if err := createLocalLock(h.local, data); err != nil {
 		return nil, err
 	}

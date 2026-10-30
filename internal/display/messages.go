@@ -343,6 +343,9 @@ var catalog = map[string]message{
 	"journal.hintStorage":       {en: "check that the folder or the bucket can be written and has free space", ja: "フォルダーかバケットに書き込めることと、空きがあることを確かめてください"},
 	"journal.badLocation":       {en: `--record-to "%s" is not a folder or s3://<bucket>/<prefix>`, ja: `--record-to "%s" はフォルダーでも s3://<バケット>/<前置き> でもありません`},
 	"journal.badLocationFix":    {en: "pass a folder, or s3://<bucket>/<prefix> with a valid bucket name", ja: "フォルダーか、正しいバケット名の s3://<バケット>/<前置き> を渡してください"},
+	"journal.notARecord":        {en: "the file is not a run record of tag-refactor", ja: "このファイルは tag-refactor の記録ではありません"},
+	"journal.notARecordFix": {en: "pass the run ID that apply showed, and the same --record-from as its --record-to",
+		ja: "apply が示した実行 ID と、apply の --record-to と同じ --record-from を渡してください"},
 
 	// The two-line errors of the command line (cli). Values are tool-made
 	// or sanitized when printed.

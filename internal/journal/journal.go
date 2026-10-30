@@ -59,15 +59,17 @@ type Entry struct {
 }
 
 // RollbackResult is the result of one resource of a rollback (contract C4;
-// U7 writes it).
+// U7 writes it). Status is restored, skipped, failed or alreadyRestored;
+// Reason is the name of the reason, never an AWS error text.
 type RollbackResult struct {
 	ARN    string `json:"arn"`
 	Status string `json:"status"`
 	Reason string `json:"reason,omitempty"`
 }
 
-// RollbackRun is one rollback of the record (contract C4; U7 writes it).
-type RollbackRun struct {
+// RollbackRecord is one rollback in the rollbacks of a run record (contract
+// C4; U7 writes it while a RollbackRun runs).
+type RollbackRecord struct {
 	RollbackID string           `json:"rollbackId"`
 	StartedAt  string           `json:"startedAt"`
 	Completed  bool             `json:"completed"`
@@ -76,15 +78,15 @@ type RollbackRun struct {
 
 // RunRecord is the run record of contract C4.
 type RunRecord struct {
-	Version     int           `json:"version"`
-	ToolVersion string        `json:"toolVersion"`
-	RunID       string        `json:"runId"`
-	AccountID   string        `json:"accountId"`
-	PlanID      string        `json:"planId"`
-	StartedAt   string        `json:"startedAt"`
-	Completed   bool          `json:"completed"`
-	Entries     []Entry       `json:"entries"`
-	Rollbacks   []RollbackRun `json:"rollbacks,omitempty"`
+	Version     int              `json:"version"`
+	ToolVersion string           `json:"toolVersion"`
+	RunID       string           `json:"runId"`
+	AccountID   string           `json:"accountId"`
+	PlanID      string           `json:"planId"`
+	StartedAt   string           `json:"startedAt"`
+	Completed   bool             `json:"completed"`
+	Entries     []Entry          `json:"entries"`
+	Rollbacks   []RollbackRecord `json:"rollbacks,omitempty"`
 }
 
 // Purpose says what holds the lock.

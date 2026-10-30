@@ -14,25 +14,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
-)
-
-// The saving while apply writes (NFR6.2, security design §3). The interval,
-// the ticker and the limit are variables for the tests.
-var (
-	autosaveInterval = 5 * time.Second
-	// newTicker starts the clock of the periodic save; stop ends it.
-	newTicker = func(d time.Duration) (ticks <-chan time.Time, stop func()) {
-		t := time.NewTicker(d)
-		return t.C, t.Stop
-	}
-	// failLimit is the number of periodic saves that may fail in a row
-	// before the record counts as unsavable.
-	failLimit = 3
-	// saveTimeout bounds one save to S3 of the periodic saver.
-	saveTimeout = 30 * time.Second
 )
 
 // Run is the record of one apply while it runs (contract C10 Begin to
@@ -45,21 +28,10 @@ type Run struct {
 	mu    sync.Mutex
 	rec   RunRecord
 	index map[string]int
-	// version counts the changes of the record; saved is the version of the
-	// last save that worked.
-	version, saved uint64
 	// first is true until the record has been saved once: an S3 record is
 	// then written only if it does not exist.
-	first  bool
-	saving bool
-	fails  int
-	broken bool
-	closed bool
-
-	saves    sync.WaitGroup
-	stop     chan struct{}
-	stopped  chan struct{}
-	stopOnce sync.Once
+	first bool
+	sv    saver
 }
 
 // Begin starts the record of the run of h for planID (contract C10, BR3.7,
@@ -70,6 +42,7 @@ func (j *Journal) Begin(ctx context.Context, h *LockHandle, planID string) (*Run
 	r := &Run{j: j, h: h, first: true, index: map[string]int{},
 		rec: RunRecord{Version: Version, ToolVersion: j.opts.ToolVersion, RunID: h.RunID, AccountID: h.AccountID,
 			PlanID: planID, StartedAt: j.now(), Entries: []Entry{}}}
+	r.sv = saver{mu: &r.mu, snapshot: r.snapshotLocked, save: r.store}
 	if h.Location.Kind == LocationS3 {
 		// The first save writes the record only if it does not exist, which
 		// refuses a run ID that has one. Reading it here would need the 404
@@ -115,7 +88,7 @@ func (r *Run) RecordBefore(ctx context.Context, entries []Entry) error {
 	for i, e := range r.rec.Entries {
 		r.index[e.ARN] = i
 	}
-	r.version++
+	r.sv.changed()
 	data, v, err := r.snapshotLocked()
 	r.mu.Unlock()
 	if err != nil {
@@ -139,9 +112,9 @@ func (r *Run) RecordAfter(arn string, afterTags map[string]string, status Status
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	switch {
-	case r.closed:
+	case r.sv.closed:
 		return storageError(r.where, "journal.closed", "the run record is closed", nil)
-	case r.broken:
+	case r.sv.broken:
 		return storageError(r.where, "journal.saveFailed", "the run record could not be saved", nil)
 	}
 	i, ok := r.index[arn]
@@ -154,7 +127,7 @@ func (r *Run) RecordAfter(arn string, afterTags map[string]string, status Status
 	}
 	e.Status, e.Reason = status, reason
 	r.rec.Entries[i] = e
-	r.version++
+	r.sv.changed()
 	return nil
 }
 
@@ -166,7 +139,7 @@ func (r *Run) snapshotLocked() ([]byte, uint64, error) {
 	if err != nil {
 		return nil, 0, errkind.Ensure(err, "encode the run record")
 	}
-	return data, r.version, nil
+	return data, r.sv.version, nil
 }
 
 // store saves data, the encoding of version v, and notes the version saved.
@@ -196,7 +169,7 @@ func (r *Run) store(ctx context.Context, data []byte, v uint64) error {
 	}
 	r.mu.Lock()
 	r.first = false
-	r.saved = max(r.saved, v)
+	r.sv.stored(v)
 	r.mu.Unlock()
 	return nil
 }
@@ -205,83 +178,10 @@ func (r *Run) store(ctx context.Context, data []byte, v uint64) error {
 // writes (NFR6.2). A save runs beside the writes; a tick that finds a save
 // still running, or nothing changed, is skipped. After failLimit failures in
 // a row the record counts as unsavable and RecordAfter fails.
-func (r *Run) StartAutosave() {
-	r.stop, r.stopped = make(chan struct{}), make(chan struct{})
-	ticks, stopTicker := newTicker(autosaveInterval)
-	go func() {
-		defer close(r.stopped)
-		defer stopTicker()
-		for {
-			select {
-			case <-r.stop:
-				return
-			case <-ticks:
-				r.autosave()
-			}
-		}
-	}()
-}
-
-// autosave starts one periodic save when one is due.
-func (r *Run) autosave() {
-	r.mu.Lock()
-	if r.closed || r.saving || r.version == r.saved {
-		r.mu.Unlock()
-		return
-	}
-	data, v, err := r.snapshotLocked()
-	if err != nil {
-		r.noteFailureLocked()
-		r.mu.Unlock()
-		return
-	}
-	r.saving = true
-	r.saves.Add(1)
-	r.mu.Unlock()
-	go func() {
-		defer r.saves.Done()
-		ok := false
-		defer func() {
-			// A panic of the save counts as a failed save (security
-			// design §3: no goroutine may take the process down).
-			_ = recover()
-			r.mu.Lock()
-			r.saving = false
-			if ok {
-				r.fails = 0
-			} else {
-				r.noteFailureLocked()
-			}
-			r.mu.Unlock()
-		}()
-		ctx, cancel := context.WithTimeout(context.Background(), saveTimeout)
-		defer cancel()
-		ok = r.store(ctx, data, v) == nil
-	}()
-}
-
-func (r *Run) noteFailureLocked() {
-	r.fails++
-	if r.fails >= failLimit {
-		r.broken = true
-	}
-}
+func (r *Run) StartAutosave() { r.sv.start() }
 
 // Broken reports whether the periodic saves failed failLimit times in a row.
-func (r *Run) Broken() bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.broken
-}
-
-// stopAutosave ends the periodic saves and waits for one that runs.
-func (r *Run) stopAutosave() {
-	if r.stop != nil {
-		r.stopOnce.Do(func() { close(r.stop) })
-		<-r.stopped
-	}
-	r.saves.Wait()
-}
+func (r *Run) Broken() bool { return r.sv.isBroken() }
 
 // Complete marks the record completed, saves it a last time and closes it
 // (contract C10, BR4.6).
@@ -295,16 +195,16 @@ func (r *Run) Close(ctx context.Context) error { return r.finish(ctx, false) }
 // record, so a goroutine that did not wait cannot change it afterwards
 // (security design §3).
 func (r *Run) finish(ctx context.Context, completed bool) error {
-	r.stopAutosave()
+	r.sv.halt()
 	r.mu.Lock()
-	if r.closed {
+	if r.sv.closed {
 		r.mu.Unlock()
 		return storageError(r.where, "journal.closed", "the run record is closed", nil)
 	}
 	r.rec.Completed = completed
-	r.version++
+	r.sv.changed()
 	data, v, err := r.snapshotLocked()
-	r.closed = true
+	r.sv.closed = true
 	r.mu.Unlock()
 	if err != nil {
 		return err
@@ -319,7 +219,8 @@ type LogLine struct {
 }
 
 // WriteLog writes the log file <default folder>/<runId>.log, one
-// tab-separated line per resource, and returns its path.
+// tab-separated line per resource, and returns its path. rollback writes its
+// log under its rollback ID (U7 BR6.4).
 func (j *Journal) WriteLog(accountID, runID string, lines []LogLine) (string, error) {
 	dir := j.defaultDir(accountID)
 	if err := j.prepareDir(dir); err != nil {
@@ -344,6 +245,24 @@ func (j *Journal) WriteLog(accountID, runID string, lines []LogLine) (string, er
 // Load reads the record of runID at the location (contract C10). A missing
 // record is NotFound and a record of another version UnsupportedVersion.
 func (j *Journal) Load(ctx context.Context, accountID, runID string, loc Location) (*RunRecord, error) {
+	data, where, err := j.readRecord(ctx, accountID, runID, loc)
+	if err != nil {
+		return nil, err
+	}
+	var rec RunRecord
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return nil, storageError(where, "journal.readFailed", "the run record could not be read", err)
+	}
+	if rec.Version != Version {
+		return nil, unsupportedVersion(where, rec.Version, rec.ToolVersion)
+	}
+	return &rec, nil
+}
+
+// readRecord reads the bytes of the record of runID at the location, once.
+// A missing record is NotFound; another failure StorageFailed or the error of
+// the store.
+func (j *Journal) readRecord(ctx context.Context, accountID, runID string, loc Location) ([]byte, string, error) {
 	var data []byte
 	var where string
 	var err error
@@ -361,15 +280,12 @@ func (j *Journal) Load(ctx context.Context, accountID, runID string, loc Locatio
 		if errkind.KindOf(err) == errkind.Internal {
 			err = storageError(where, "journal.readFailed", "the run record could not be read", err)
 		}
-		return nil, err
+		return nil, where, err
 	}
-	var rec RunRecord
-	if err := json.Unmarshal(data, &rec); err != nil {
-		return nil, storageError(where, "journal.readFailed", "the run record could not be read", err)
-	}
-	if rec.Version != Version {
-		return nil, &errkind.Error{Kind: errkind.UnsupportedVersion, Subject: where,
-			Detail: fmt.Sprintf("run record version %d (written by tag-refactor %s) is not supported", rec.Version, rec.ToolVersion)}
-	}
-	return &rec, nil
+	return data, where, nil
+}
+
+func unsupportedVersion(where string, version int, toolVersion string) error {
+	return &errkind.Error{Kind: errkind.UnsupportedVersion, Subject: where,
+		Detail: fmt.Sprintf("run record version %d (written by tag-refactor %s) is not supported", version, toolVersion)}
 }
