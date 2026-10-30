@@ -63,7 +63,7 @@ func TestPlanFileMessagesMatchThePlanner(t *testing.T) {
 // Every identifier the sources use is in the catalog; the ones put together
 // at run time (kinds, states, statuses) are checked one by one.
 func TestEveryIdentifierInTheSourcesIsInTheCatalog(t *testing.T) {
-	prefixes := "unit|word|list|stderr|exit|scope|progress|state|result|status|discovery|scan|plan|kind|cause|diff|md|err|planfile|draft|apply|reason|journal"
+	prefixes := "unit|word|list|stderr|exit|scope|progress|state|result|status|discovery|scan|plan|kind|cause|diff|md|err|planfile|draft|apply|reason|journal|rollback"
 	literal := regexp.MustCompile(`"((?:` + prefixes + `)\.[A-Za-z]+)"`)
 	used := 0
 	for _, dir := range []string{".", filepath.Join("..", "cli"), filepath.Join("..", "journal"), filepath.Join("..", "apply")} {

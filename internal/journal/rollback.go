@@ -92,8 +92,9 @@ func (r *RollbackRun) parse(data []byte) error {
 }
 
 func (r *RollbackRun) notARecord(cause error) error {
-	return &errkind.Error{Kind: errkind.InvalidInput, Subject: r.where, Detail: "the file is not a run record of tag-refactor",
-		DetailID: "journal.notARecord", Hint: "pass the run ID that apply showed, and the same --record-from as its --record-to",
+	return &errkind.Error{Kind: errkind.InvalidInput, Subject: r.where, Detail: r.where + " is not a run record of tag-refactor",
+		DetailID: "journal.notARecord", DetailArgs: []any{r.where},
+		Hint:   "pass the run ID that apply showed, and the same --record-from as its --record-to",
 		HintID: "journal.notARecordFix", Cause: cause}
 }
 
