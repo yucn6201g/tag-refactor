@@ -1,0 +1,21 @@
+# Rule file for the U7 checkpoint in the sandbox account
+# (construction/u7-rollback/infrastructure-design/cicd-pipeline.md, step 2):
+# adds the check key tag-refactor-u7-src=a to the five resource types of the
+# fixtures, and only to resources tagged project=tag-refactor-fixture. There
+# is no default, so every other resource only counts as a required tag value
+# not set and is never written. u7-rename-rules.yaml then renames the key and
+# changes its value, and rollback undoes both applies.
+version: 1
+required:
+  tag-refactor-u7-src:
+    when:
+      - match: {resourceType: s3, tags: {project: tag-refactor-fixture}}
+        value: "a"
+      - match: {resourceType: sqs, tags: {project: tag-refactor-fixture}}
+        value: "a"
+      - match: {resourceType: sns, tags: {project: tag-refactor-fixture}}
+        value: "a"
+      - match: {resourceType: "secretsmanager:secret", tags: {project: tag-refactor-fixture}}
+        value: "a"
+      - match: {resourceType: "ec2:security-group", tags: {project: tag-refactor-fixture}}
+        value: "a"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # U2 (scan of every region), U3 (rules suggest), U4 (plan formats and the
-# saved plan), U5 (impact analysis) and U6 (apply) checkpoint verification.
-# It calls the sandbox AWS account, so it only runs locally, never in CI.
+# saved plan), U5 (impact analysis), U6 (apply) and U7 (rollback) checkpoint
+# verification. It calls the sandbox AWS account, so it only runs locally,
+# never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
 # 2. Checks with the admin profile that the account is the sandbox account.
@@ -54,10 +55,28 @@
 #    S3 record (encrypted, the owner's grant only, a missing key NotFound);
 #    and prints the L95 of the tagging calls and the two estimates of
 #    NFR5.15.
+# U7. Right after U6, with R3 too (construction/u7-rollback/
+#    infrastructure-design/cicd-pipeline.md): applies the U6 check key and
+#    rolls each apply back five times, the third with its record in S3
+#    (checks that the record keeps its entries and gains one completed
+#    rollback); adds tag-refactor-u7-src, renames it with its value, and rolls
+#    both applies back in turn; rolls the fifth run back again and checks that
+#    it writes nothing; makes a temporary queue with one tag, removes the tag
+#    with apply, reports whether the tagging API returns the queue without
+#    tags, rolls it back, and, when plan collects the queue without tags,
+#    adds a required tag to it and rolls that back. After every rollback the
+#    tags of the targets are compared with a snapshot taken before the apply
+#    (aws: keys left out; six reads 10 seconds apart). Each apply is judged by
+#    its record, each rollback by the rollbacks of the record
+#    (scripts/u6check.go). Then it checks that no check key and no lock is
+#    left, prints the L95 of the tagging calls of the rollbacks with the two
+#    estimates of NFR5.21, and the rollback command a person runs by hand
+#    at the checkpoint.
 #
-# The temporary folder of U3 and the queue of U2 are removed by one cleanup on
-# every exit; it is defined before the first of them is made. While the U6
-# check key may be on the fixtures, the cleanup first removes it with R3.
+# The temporary folder of U3, the queue of U2 and the temporary queue of U7
+# are removed by one cleanup on every exit; it is defined before the first of
+# them is made. While the U6 or U7 check keys may be on the fixtures, the
+# cleanup first removes them with R3 (apply, never rollback).
 #
 # Environment:
 #   TAG_REFACTOR_SANDBOX_ACCOUNT_ID  the sandbox account ID (required)
@@ -129,7 +148,40 @@ tool=""
 # u6_added is set while the U6 check key may be on the fixtures: the
 # cleanup then removes it with R3 before anything else (U6 cicd-pipeline.md).
 u6_added=""
+# u7_added is set while the U6 or U7 check keys may be on the fixtures after
+# a rollback check; u7_queue_url and u7_queue_arn are set once the temporary
+# queue of U7 exists (U7 cicd-pipeline.md).
+u7_added=""
+u7_queue_url=""
+u7_queue_arn=""
+# check_keys are the keys the U6 and U7 checks add; none may be left.
+check_keys=(tag-refactor-u6-check tag-refactor-u7-src tag-refactor-u7-dst tag-refactor-u7-zero)
 cleanup() {
+  if [ -n "$u7_added" ] && [ -n "$tool" ] && [ -x "$tool" ]; then
+    echo "verify: removing the U6 and U7 check keys after a failure"
+    u7_plan_file="$u3_dir/u7-cleanup-plan.json"
+    rm -f -- "$u7_plan_file"
+    if "$tool" plan --lang en --profile "$apply_profile" --rules test/sandbox/u7-cleanup-remove-rules.yaml --out "$u7_plan_file" >/dev/null 2>&1 ||
+      [ -s "$u7_plan_file" ]; then
+      "$tool" apply --lang en --profile "$apply_profile" --plan "$u7_plan_file" --yes --allow-impact --record-to "$u3_dir/u7-cleanup" \
+        >/dev/null 2>"$u3_dir/u7-cleanup-stderr" || true
+      if grep -q 'another apply or rollback is running' "$u3_dir/u7-cleanup-stderr"; then
+        sed 's/^/  /' "$u3_dir/u7-cleanup-stderr" >&2
+        echo "verify: a lock stopped the cleanup; check that no apply or rollback runs, then remove it with --force-unlock" >&2
+      fi
+    fi
+    left="$(keys_remaining "${check_keys[@]}" 2>/dev/null || true)"
+    if [ -n "$(printf '%s' "$left" | tr -d ' ')" ]; then
+      echo "verify: check keys are still on $left; remove them by hand" >&2
+    fi
+  fi
+  if [ -n "$u7_queue_url" ]; then
+    if aws_admin sqs delete-queue --queue-url "$u7_queue_url" >/dev/null 2>&1; then
+      echo "verify: deleted the temporary queue ${u7_queue_arn:-$u7_queue_url}"
+    else
+      echo "verify: could not delete the temporary queue $u7_queue_url in $region; delete it by hand" >&2
+    fi
+  fi
   if [ -n "$u6_added" ] && [ -n "$tool" ] && [ -x "$tool" ]; then
     echo "verify: removing the U6 check key after a failure"
     u6_plan_file="$u3_dir/u6-cleanup-plan.json"
@@ -143,9 +195,9 @@ cleanup() {
         echo "verify: a lock stopped the cleanup; check that no apply runs, then remove it with --force-unlock" >&2
       fi
     fi
-    left="$(u6_remaining 2>/dev/null || true)"
+    left="$(keys_remaining "${check_keys[@]}" 2>/dev/null || true)"
     if [ -n "$(printf '%s' "$left" | tr -d ' ')" ]; then
-      echo "verify: the check key tag-refactor-u6-check is still on $left; remove it by hand" >&2
+      echo "verify: check keys are still on $left; remove them by hand" >&2
     fi
   fi
   if [ -n "$u3_dir" ] && [ -d "$u3_dir" ]; then
@@ -204,6 +256,9 @@ draft="$u3_dir/tagrules.yaml"
 tool="$u3_dir/tag-refactor$(go env GOEXE)"
 echo "verify: building tag-refactor for the U3 check"
 go build -mod=readonly -o "$tool" ./cmd/tag-refactor || fail "cannot build tag-refactor"
+# The helper of the U6 and U7 checks is not built with the tool (go:build
+# ignore): vet it now, so a mistake in it stops before any change in AWS.
+go vet scripts/u6check.go || fail "scripts/u6check.go does not pass go vet"
 
 echo "verify: running rules suggest (profile $readonly_profile)"
 # --lang en: the checks below read the English comments and messages, which
@@ -514,30 +569,38 @@ done
 
 # U6 step 4: nothing keeps the check key (eventually consistent: six reads
 # 10 seconds apart), and no lock is left.
-u6_remaining() {
-  local r left=""
-  for r in ap-northeast-1 us-east-1; do
-    left="$left $(aws --profile "$admin" --region "$r" resourcegroupstaggingapi get-resources \
-      --tag-filters Key=tag-refactor-u6-check --query 'ResourceTagMappingList[].ResourceARN' --output text)"
+# keys_remaining names the resources and roles that keep one of the given
+# keys, as "<arn> (<key>)" (U7 widened it from the U6 check key to every
+# check key).
+keys_remaining() {
+  local r key role arn left=""
+  for key in "$@"; do
+    for r in ap-northeast-1 us-east-1; do
+      for arn in $(aws --profile "$admin" --region "$r" resourcegroupstaggingapi get-resources \
+        --tag-filters Key="$key" --query 'ResourceTagMappingList[].ResourceARN' --output text); do
+        [ "$arn" = "None" ] || left="$left $arn ($key)"
+      done
+    done
+    for role in "${u5_role##*/}" "${r3_arn##*/}" "${r2_arn##*/}"; do
+      if aws_admin iam list-role-tags --role-name "$role" --query 'Tags[].Key' --output text | tr '\t' '\n' | grep -qx "$key"; then
+        left="$left role/$role ($key)"
+      fi
+    done
   done
-  for role in "${u5_role##*/}" "${r3_arn##*/}" "${r2_arn##*/}"; do
-    if aws_admin iam list-role-tags --role-name "$role" --query 'Tags[].Key' --output text | tr '\t' '\n' | grep -qx tag-refactor-u6-check; then
-      left="$left role/$role"
-    fi
-  done
-  printf '%s' "$left" | tr -s ' \t' ' ' | sed 's/^ //; s/ $//; s/None//g'
+  printf '%s' "$left" | tr -s ' \t' ' ' | sed 's/^ //; s/ $//'
 }
-u6_check_removed() {
+# check_removed waits until no resource keeps the given keys.
+check_removed() {
   local attempt left
   for attempt in 1 2 3 4 5 6; do
-    left="$(u6_remaining)"
+    left="$(keys_remaining "$@")"
     [ -z "$(printf '%s' "$left" | tr -d ' ')" ] && return 0
-    echo "verify: the check key is still on $left (read $attempt of 6)"
+    echo "verify: a check key is still on $left (read $attempt of 6)"
     sleep 10
   done
-  fail "the check key is left on $left"
+  fail "a check key is left on $left"
 }
-u6_check_removed
+check_removed tag-refactor-u6-check
 [ ! -e "$local_lock" ] || fail "the local lock $local_lock is left"
 if aws_admin s3api head-object --bucket "$u6_bucket" --key "runs/$account/.lock" >/dev/null 2>&1; then
   fail "the S3 lock s3://$u6_bucket/runs/$account/.lock is left"
@@ -604,4 +667,270 @@ awk '
   }
 ' "$u6_debug"
 echo "verify: record these values and the limits of the small samples at the U6 checkpoint"
+
+# U7. rollback with the role R3 right after the U6 check (U7
+# cicd-pipeline.md). Nothing here runs if the U6 check failed.
+u7_dir="$u3_dir/u7"
+mkdir -p "$u7_dir"
+u7_debug="$u7_dir/debug-lines"
+: >"$u7_debug"
+u7_snaps=0
+
+# u7_snapshot writes to $1 the tags of the ARNs that follow, as the admin
+# profile reads them by ARN in the region of the fixtures (the JSON answer;
+# scripts/u6check.go leaves out the aws: keys).
+u7_snapshot() {
+  local file="$1"
+  shift
+  aws_admin resourcegroupstaggingapi get-resources --resource-arn-list "$@" --output json >"$file" ||
+    fail "cannot read the tags of the targets in $region"
+}
+
+# u7_same checks that the tags of the ARNs are those of the snapshot $1
+# (eventually consistent: six reads 10 seconds apart).
+u7_same() {
+  local before="$1" attempt now
+  shift
+  for attempt in 1 2 3 4 5 6; do
+    u7_snaps=$((u7_snaps + 1))
+    now="$u7_dir/now-$u7_snaps.json"
+    u7_snapshot "$now" "$@"
+    if go run scripts/u6check.go same "$before" "$now" "$@" 2>"$u7_dir/same-stderr"; then
+      return 0
+    fi
+    echo "verify: the tags are not yet those before the apply (read $attempt of 6)"
+    sleep 10
+  done
+  sed 's/^/  /' "$u7_dir/same-stderr" >&2
+  fail "rollback left a difference from the tags before the apply"
+}
+
+# u7_rollback runs rollback of the run $1 with R3, --yes and --debug, with
+# the record where apply kept it ($2), and keeps the --debug lines of the
+# tagging API and S3. It fails on a lock and on any exit code but 0, and
+# copies the record to U6_RECORD.
+u7_rollback() {
+  local run="$1" record_from="$2"
+  run_tool rollback --lang en --profile "$apply_profile" --run "$run" --record-from "$record_from" --yes --debug
+  if grep -q 'another apply or rollback is running' "$u3_dir/stderr"; then
+    sed 's/^/  /' "$u3_dir/stderr" >&2
+    fail "rollback stopped at a lock; check that no apply or rollback runs, then remove it with --force-unlock"
+  fi
+  if [ "$TOOL_STATUS" -ne 0 ]; then
+    sed 's/^/  /' "$u3_dir/stderr" >&2
+    fail "rollback of $run ended with exit code $TOOL_STATUS, not 0"
+  fi
+  U6_RUN="$run"
+  u6_record "$record_from"
+}
+
+# queue_arn_of reads the ARN of the queue $2 of the stack $1.
+queue_arn_of() {
+  local url
+  url="$(aws_admin cloudformation describe-stack-resource --stack-name "$1" --logical-resource-id "$2" \
+    --query StackResourceDetail.PhysicalResourceId --output text)" || fail "cannot read $2 of $1"
+  aws_admin sqs get-queue-attributes --queue-url "$url" --attribute-names QueueArn --query Attributes.QueueArn --output text ||
+    fail "cannot read the ARN of $2"
+}
+
+# U7 step 1: add the U6 check key and roll it back, five times; the third
+# run keeps its record in S3. The flag tells the cleanup to remove the keys.
+u7_targets=("${u6_targets[@]}")
+u7_s3_run=""
+u7_s3_bytes=0
+u7_last_run=""
+u7_last_from=""
+u7_added=yes
+for round in 1 2 3 4 5; do
+  record_to="$u6_dir/records"
+  [ "$round" -eq 3 ] && record_to="s3://$u6_bucket/runs"
+  u7_snapshot "$u7_dir/round-$round.json" "${u7_targets[@]}"
+  u6_plan test/sandbox/u6-add-rules.yaml add "${u7_targets[@]}"
+  add_plan="$U6_PLAN"
+  u6_apply "$record_to"
+  u6_record "$record_to"
+  go run scripts/u6check.go record "$U6_RECORD" "$add_plan" "${u7_targets[@]}" || fail "the add of U7 round $round is not complete"
+  add_run="$U6_RUN"
+  if [ "$round" -eq 3 ]; then
+    cp "$U6_RECORD" "$u7_dir/s3-before.json"
+    u7_s3_run="$add_run"
+    u7_s3_bytes="$(wc -c <"$u7_dir/s3-before.json" | tr -d ' ')"
+  fi
+  u7_rollback "$add_run" "$record_to"
+  grep -E '^debug: (tag|s3):[A-Za-z]+ ' "$u3_dir/stderr" >>"$u7_debug" || true
+  go run scripts/u6check.go rollback "$U6_RECORD" --restored-min 1 || fail "the rollback of U7 round $round is not complete"
+  if [ "$round" -eq 3 ]; then
+    go run scripts/u6check.go entries "$u7_dir/s3-before.json" "$U6_RECORD" || fail "the rollback changed more than its own result in the S3 record"
+  fi
+  u7_same "$u7_dir/round-$round.json" "${u7_targets[@]}"
+  u7_last_run="$add_run"
+  u7_last_from="$record_to"
+done
+
+# U7 step 2: add tag-refactor-u7-src, rename it with its value, then roll
+# back the rename and the add in turn.
+u7_snapshot "$u7_dir/snap-a.json" "${u7_targets[@]}"
+u6_plan test/sandbox/u7-src-rules.yaml add --key tag-refactor-u7-src "${u7_targets[@]}"
+src_plan="$U6_PLAN"
+u6_apply "$u6_dir/records"
+u6_record "$u6_dir/records"
+go run scripts/u6check.go record "$U6_RECORD" "$src_plan" "${u7_targets[@]}" || fail "the add of tag-refactor-u7-src is not complete"
+src_run="$U6_RUN"
+u7_snapshot "$u7_dir/snap-b.json" "${u7_targets[@]}"
+u6_plan test/sandbox/u7-rename-rules.yaml rename --key tag-refactor-u7-src --dst tag-refactor-u7-dst "${u7_targets[@]}"
+rename_plan="$U6_PLAN"
+u6_apply "$u6_dir/records"
+u6_record "$u6_dir/records"
+go run scripts/u6check.go record "$U6_RECORD" "$rename_plan" "${u7_targets[@]}" || fail "the rename of tag-refactor-u7-src is not complete"
+rename_run="$U6_RUN"
+u7_rollback "$rename_run" "$u6_dir/records"
+go run scripts/u6check.go rollback "$U6_RECORD" --restored-min 1 || fail "the rollback of the rename is not complete"
+u7_same "$u7_dir/snap-b.json" "${u7_targets[@]}"
+u7_rollback "$src_run" "$u6_dir/records"
+go run scripts/u6check.go rollback "$U6_RECORD" --restored-min 1 || fail "the rollback of tag-refactor-u7-src is not complete"
+u7_same "$u7_dir/snap-a.json" "${u7_targets[@]}"
+
+# U7 step 3: the fifth run again: everything already restored, no write.
+u7_rollback "$u7_last_run" "$u7_last_from"
+go run scripts/u6check.go rollback "$U6_RECORD" --all-already || fail "the second rollback of $u7_last_run found something to restore"
+if grep -qE '^debug: tag:(TagResources|UntagResources) ' "$u3_dir/stderr"; then
+  fail "the second rollback of $u7_last_run wrote tags"
+fi
+
+# U7 step 4: a temporary queue with one tag, made with the admin profile.
+u7_suffix="$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')"
+u7_queue_url="$(aws_admin sqs create-queue --queue-name "tag-refactor-u7-zero-$u7_suffix" --tags tag-refactor-u7-only=1 \
+  --query QueueUrl --output text)" || fail "cannot create the temporary queue"
+u7_queue_arn="$(aws_admin sqs get-queue-attributes --queue-url "$u7_queue_url" --attribute-names QueueArn \
+  --query Attributes.QueueArn --output text)" || fail "cannot read the ARN of the temporary queue"
+echo "verify: created the temporary queue $u7_queue_arn"
+listed=""
+for attempt in 1 2 3 4 5 6; do
+  if aws_admin resourcegroupstaggingapi get-resources --tag-filters Key=tag-refactor-u7-only \
+    --query 'ResourceTagMappingList[].ResourceARN' --output text | tr '\t' '\n' | grep -qxF "$u7_queue_arn"; then
+    listed=yes
+    break
+  fi
+  echo "verify: the tagging API does not list the temporary queue yet (read $attempt of 6)"
+  sleep 10
+done
+[ -n "$listed" ] || fail "the tagging API did not list the temporary queue within a minute; run the verification again"
+# Step 4.1 and 4.2: its snapshot, then apply removes its only tag.
+u7_snapshot "$u7_dir/snap-q.json" "$u7_queue_arn"
+u6_plan test/sandbox/u7-only-remove-rules.yaml remove --key tag-refactor-u7-only "$u7_queue_arn"
+only_plan="$U6_PLAN"
+u6_apply "$u6_dir/records"
+u6_record "$u6_dir/records"
+go run scripts/u6check.go record "$U6_RECORD" "$only_plan" "$u7_queue_arn" || fail "the removal of the only tag is not complete"
+only_run="$U6_RUN"
+# Step 4.3: whether the tagging API returns the queue without tags when it
+# is named.
+u7_answer="returned with its old tag six times (not checked)"
+for attempt in 1 2 3 4 5 6; do
+  answered="$(aws_admin resourcegroupstaggingapi get-resources --resource-arn-list "$u7_queue_arn" \
+    --query 'ResourceTagMappingList[].ResourceARN' --output text)"
+  keys="$(aws_admin resourcegroupstaggingapi get-resources --resource-arn-list "$u7_queue_arn" \
+    --query 'ResourceTagMappingList[].Tags[].Key' --output text)"
+  if ! printf '%s\n' "$answered" | tr '\t' '\n' | grep -qxF "$u7_queue_arn"; then
+    u7_answer="left out of the answer"
+    break
+  fi
+  if ! printf '%s\n' "$keys" | tr '\t' '\n' | grep -qx tag-refactor-u7-only; then
+    u7_answer="returned with no tags"
+    break
+  fi
+  sleep 10
+done
+echo "verify: U7 the tagging API, asked for the queue without tags by its ARN: $u7_answer"
+# Step 4.4: rollback puts the tag back.
+u7_rollback "$only_run" "$u6_dir/records"
+go run scripts/u6check.go rollback "$U6_RECORD" || fail "the rollback of the queue without tags is not complete"
+u7_same "$u7_dir/snap-q.json" "$u7_queue_arn"
+# Step 4.5: the way back to no tags: the queue without tags again, then a
+# required tag added by plan when plan collects it, and rolled back.
+u6_plan test/sandbox/u7-only-remove-rules.yaml remove --key tag-refactor-u7-only "$u7_queue_arn"
+only_plan="$U6_PLAN"
+u6_apply "$u6_dir/records"
+u6_record "$u6_dir/records"
+go run scripts/u6check.go record "$U6_RECORD" "$only_plan" "$u7_queue_arn" || fail "the second removal of the only tag is not complete"
+qa_arn="$(queue_arn_of "$u1_stack" QA)" || fail "cannot read the ARN of QA"
+qb_arn="$(queue_arn_of "$u1_stack" QB)" || fail "cannot read the ARN of QB"
+qc_arn="$(queue_arn_of "$u1_stack" QC)" || fail "cannot read the ARN of QC"
+u1_queues=("$qa_arn" "$qb_arn" "$qc_arn" "$qu5_arn")
+u7_snapshot "$u7_dir/snap-c.json" "$u7_queue_arn" "${u1_queues[@]}"
+u6_plan test/sandbox/u7-zero-add-rules.yaml add --key tag-refactor-u7-zero --optional "$u7_queue_arn" "${u1_queues[@]}"
+zero_plan="$U6_PLAN"
+if grep -qF "\"$u7_queue_arn\"" "$zero_plan"; then
+  echo "verify: U7 plan collected the queue without tags; adding a required tag and rolling it back"
+  u6_apply "$u6_dir/records"
+  u6_record "$u6_dir/records"
+  go run scripts/u6check.go record "$U6_RECORD" "$zero_plan" "$u7_queue_arn" "${u1_queues[@]}" || fail "the add of tag-refactor-u7-zero is not complete"
+  zero_run="$U6_RUN"
+  u7_rollback "$zero_run" "$u6_dir/records"
+  go run scripts/u6check.go rollback "$U6_RECORD" --restored-min 1 || fail "the rollback to no tags is not complete"
+  u7_same "$u7_dir/snap-c.json" "$u7_queue_arn" "${u1_queues[@]}"
+  u7_rollback "$zero_run" "$u6_dir/records"
+  go run scripts/u6check.go rollback "$U6_RECORD" --all-already || fail "the second rollback to no tags found something to restore"
+else
+  echo "verify: U7 plan did not collect the queue without tags (plan reads whole regions, which leave it out); the way back to no tags is left to the fake AWS tests"
+fi
+
+# U7 step 5: no check key and no lock is left.
+check_removed "${check_keys[@]}"
+[ ! -e "$local_lock" ] || fail "the local lock $local_lock is left"
+if aws_admin s3api head-object --bucket "$u6_bucket" --key "runs/$account/.lock" >/dev/null 2>&1; then
+  fail "the S3 lock s3://$u6_bucket/runs/$account/.lock is left"
+fi
+u7_added=""
+
+# U7 step 6: L95 of the tagging calls of the five rollbacks of step 1, the
+# read-again units M, the last save, and the two estimates of NFR5.21 for the
+# skewed region (2,000 resources, R = 20 units): usual changes W = 120 writes
+# of each kind, values that differ on every resource W = 2,000.
+awk -v bytes="$u7_s3_bytes" '
+  {
+    op = $2; region = $3; ms = $4; sub(/ms$/, "", ms)
+    n[op]++; t[op, n[op]] = ms + 0
+    retries = $5; sub(/^retries=/, "", retries)
+    if (retries + 0 >= 1) retried++
+    calls++
+    if (op == "tag:GetResources") regions[region] = 1
+    if (op == "s3:PutObject" && ms + 0 > save) save = ms + 0
+  }
+  END {
+    for (op in n) {
+      for (i = 2; i <= n[op]; i++) {
+        v = t[op, i]
+        for (j = i - 1; j >= 1 && t[op, j] > v; j--) t[op, j + 1] = t[op, j]
+        t[op, j + 1] = v
+      }
+      k = int(0.95 * n[op] + 0.999999); if (k < 1) k = 1
+      l95[op] = t[op, k]
+      note = (n[op] < 20) ? " (few samples: the largest)" : ""
+      printf "  L95 %s: %d ms, %d samples%s\n", op, l95[op], n[op], note
+    }
+    nr = 0; for (r in regions) nr++
+    base = 5 * nr * 3
+    m = (n["tag:GetResources"] - base) / 3; if (m < 0) m = 0
+    ratio = (nr > 0) ? m / (5 * nr) : 0
+    M = ratio * 20
+    scaled = (bytes > 0) ? save * 12000000 / bytes : save
+    last = (scaled > save) ? scaled : save
+    g = l95["tag:GetResources"]; tg = l95["tag:TagResources"]; ut = l95["tag:UntagResources"]
+    for (d = 1; d <= 2; d++) {
+      w = (d == 1) ? 120 : 2000
+      all = 20 + 40 + 3 * M + 2 * w
+      wait = (calls > 0) ? retried / calls * all * 20000 : 0
+      est[d] = (((20 + 2 * 20 + 3 * M) * g + w * tg + w * ut) * 1.2 + 7000 * M + wait + last) / 60000
+    }
+    printf "  retried calls: %d of %d\n", retried, calls
+    printf "  read-again units: %.1f measured, M = %.1f for R = 20\n", m, M
+    printf "  last save: %d ms measured for %d bytes, %d ms for 12 MB by size; %d ms used\n", save, bytes, scaled, last
+    printf "  NFR5.21 estimate, usual changes: %.1f minutes (limit 30)\n", est[1]
+    printf "  NFR5.21 estimate, values differing on every resource: %.1f minutes (recorded, not judged)\n", est[2]
+  }
+' "$u7_debug"
+echo "verify: record these values, the answer of the tagging API and the limits of the small samples at the U7 checkpoint"
+echo "verify: run this by hand in PowerShell, without --yes, and check the warning of a record already undone and the Japanese result:"
+echo "  tag-refactor rollback --run $u7_s3_run --record-from s3://$u6_bucket/runs --profile $apply_profile --lang ja"
 echo "verify: OK"
