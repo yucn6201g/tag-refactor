@@ -690,7 +690,7 @@ func (l *lateAWS) remember(arns []string) {
 	defer l.memAWS.mu.Unlock()
 	for _, a := range arns {
 		if _, ok := l.late[a]; !ok {
-			l.late[a] = maps.Clone(l.memAWS.tags[a])
+			l.late[a] = maps.Clone(l.tags[a])
 		}
 	}
 }

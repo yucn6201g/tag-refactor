@@ -229,10 +229,10 @@ func (a *app) showRollback(out *apply.RollbackOutcome, cmds display.RollbackComm
 	if (out.NothingToUndo || out.Cancelled) && out.ReleaseErr != nil {
 		a.p.LockNotReleased(out.ReleaseErr)
 	}
-	switch {
-	case code == ExitError:
+	switch code {
+	case ExitError:
 		meaning = display.ExitMeaningRollbackFailed
-	case code == ExitNeedsReview:
+	case ExitNeedsReview:
 		meaning = display.ExitMeaningRollbackSkipped
 	}
 	a.result.fixed = &fixedExit{code, meaning}
