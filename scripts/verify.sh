@@ -426,7 +426,9 @@ qu5_url="$(aws_admin cloudformation describe-stack-resource --stack-name "$u5_st
   --query StackResourceDetail.PhysicalResourceId --output text)" || fail "cannot read QU5 of $u5_stack"
 qu5_arn="$(aws_admin sqs get-queue-attributes --queue-url "$qu5_url" --attribute-names QueueArn --query Attributes.QueueArn --output text)" ||
   fail "cannot read the ARN of QU5"
-u6_targets=("$u5_bucket" "$qu5_arn" "$u5_topic" "$u5_secret" "$u5_role" "$u6_sg")
+# RU5 is not a target: tag:GetResources does not return IAM roles, so scan
+# never collects them (step 4 still checks that no role keeps the key).
+u6_targets=("$u5_bucket" "$qu5_arn" "$u5_topic" "$u5_secret" "$u6_sg")
 apply_profile="${TAG_REFACTOR_APPLY_PROFILE:-tag-refactor-apply}"
 apply_caller="$(aws --profile "$apply_profile" --region "$region" sts get-caller-identity --query Arn --output text)" ||
   fail "cannot use the profile $apply_profile; add a profile that assumes $r3_arn (README.md, apply)"
