@@ -144,6 +144,89 @@ func TestTagAccountListsPagesAndHooks(t *testing.T) {
 	}
 }
 
+// readARNs reads the ARNs by list in us-east-1 and returns the tags found.
+func readARNs(t *testing.T, a *TagAccount, arns ...string) map[string]map[string]string {
+	t.Helper()
+	list := make([]any, len(arns))
+	for i, arn := range arns {
+		list[i] = arn
+	}
+	var page struct {
+		ResourceTagMappingList []struct {
+			ResourceARN string
+			Tags        []struct{ Key, Value string }
+		}
+	}
+	decodeJSON(t, a.getResources(tagCall(OpGetResources, "us-east-1", map[string]any{"ResourceARNList": list})), &page)
+	out := map[string]map[string]string{}
+	for _, m := range page.ResourceTagMappingList {
+		tags := map[string]string{}
+		for _, tag := range m.Tags {
+			tags[tag.Key] = tag.Value
+		}
+		out[m.ResourceARN] = tags
+	}
+	return out
+}
+
+// U7: a resource whose last tag was removed is returned with no tags by
+// default, and left out, by ARN and by page, once the account hides them.
+func TestTagAccountCanHideResourcesWithoutTags(t *testing.T) {
+	a := NewTagAccount()
+	a.Add("us-east-1", "arn:empty", map[string]string{"k": "v"})
+	a.Add("us-east-1", "arn:tagged", map[string]string{"k": "v"})
+	a.write(tagCall(OpUntagResources, "us-east-1", map[string]any{"ResourceARNList": []any{"arn:empty"}, "TagKeys": []any{"k"}}))
+
+	if got := readARNs(t, a, "arn:empty", "arn:tagged"); len(got) != 2 || len(got["arn:empty"]) != 0 {
+		t.Fatalf("default: %v", got)
+	}
+	a.HideEmpty(true)
+	if got := readARNs(t, a, "arn:empty", "arn:tagged"); len(got) != 1 || got["arn:tagged"]["k"] != "v" {
+		t.Fatalf("hidden: %v", got)
+	}
+	page := a.getResources(tagCall(OpGetResources, "us-east-1", map[string]any{}))
+	if strings.Contains(page.Body, "arn:empty") || !strings.Contains(page.Body, "arn:tagged") {
+		t.Fatalf("paged read while hidden: %s", page.Body)
+	}
+	// Tagging it again makes it visible.
+	a.write(tagCall(OpTagResources, "us-east-1", map[string]any{"ResourceARNList": []any{"arn:empty"}, "Tags": map[string]any{"k": "w"}}))
+	if got := readARNs(t, a, "arn:empty"); got["arn:empty"]["k"] != "w" {
+		t.Fatalf("tagged again: %v", got)
+	}
+}
+
+// U7: the reads by ARN of a lagging resource give its tags of before its
+// first write as many times as asked, then the real ones; reads before that
+// write and other resources are not late.
+func TestTagAccountLagsTheReadsAfterAWrite(t *testing.T) {
+	a := NewTagAccount()
+	a.Add("us-east-1", "arn:late", map[string]string{"k": "old"})
+	a.Add("us-east-1", "arn:other", map[string]string{"k": "old"})
+	a.LagReads(2, "arn:late")
+	if got := readARNs(t, a, "arn:late"); got["arn:late"]["k"] != "old" || a.LaggedReads() != 0 {
+		t.Fatalf("before the write: %v, lagged %d", got, a.LaggedReads())
+	}
+	for _, op := range []string{OpTagResources, OpUntagResources} {
+		body := map[string]any{"ResourceARNList": []any{"arn:late", "arn:other"}, "Tags": map[string]any{"n": "new"}}
+		if op == OpUntagResources {
+			body = map[string]any{"ResourceARNList": []any{"arn:late", "arn:other"}, "TagKeys": []any{"k"}}
+		}
+		a.write(tagCall(op, "us-east-1", body))
+	}
+	for i := range 2 {
+		got := readARNs(t, a, "arn:late", "arn:other")
+		if got["arn:late"]["k"] != "old" || got["arn:late"]["n"] != "" || got["arn:other"]["n"] != "new" {
+			t.Fatalf("late read %d: %v", i+1, got)
+		}
+	}
+	if got := readARNs(t, a, "arn:late"); got["arn:late"]["n"] != "new" || got["arn:late"]["k"] != "" || a.LaggedReads() != 2 {
+		t.Fatalf("after the late reads: %v, lagged %d", got, a.LaggedReads())
+	}
+	if a.Tags("arn:late")["n"] != "new" {
+		t.Fatal("the account itself is never late")
+	}
+}
+
 func TestS3BucketConditionalWritesAndACLs(t *testing.T) {
 	fake := NewFakeAWS(t)
 	b := NewS3Bucket("records", "eu-west-1")
