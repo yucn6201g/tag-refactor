@@ -222,7 +222,8 @@ func (a *app) rootCommand() *cobra.Command {
 		Long: "tag-refactor reads the tags of every enabled AWS region, groups tag keys that are written in\n" +
 			"different ways, counts missing required tags, drafts a rule file from the tags in use, and plans\n" +
 			"key renames, value changes, required tags and removals from a rule file, showing which IAM\n" +
-			"policies use the tags. It only reads from AWS.",
+			"policies use the tags. Only apply and rollback write to AWS: they change tags and keep a record\n" +
+			"of each run.",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},

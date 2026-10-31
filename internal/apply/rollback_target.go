@@ -224,7 +224,9 @@ func (t *RollbackTarget) restored(tags map[string]string) bool {
 
 // result is the result of the target for the record (contract C4): restored
 // without confirmation has the reason notConfirmed, and a failure its error
-// kind, as "writeFailed:AccessDenied". No error text.
+// kind, as "writeFailed:AccessDenied". A skip keeps its reason alone, so a
+// resource gone at the write reads like one gone at the first read. No error
+// text.
 func (t *RollbackTarget) result() journal.RollbackResult {
 	reason := string(t.Reason)
 	switch {
@@ -232,7 +234,7 @@ func (t *RollbackTarget) result() journal.RollbackResult {
 		reason = string(ReasonNotConfirmed)
 	case t.Status == RollbackRestored || t.Status == RollbackAlreadyRestored:
 		reason = ""
-	case t.ErrorKind != "" && t.Reason != ReasonNone:
+	case t.Status == RollbackFailed && t.ErrorKind != "" && t.Reason != ReasonNone:
 		reason += ":" + t.ErrorKind
 	}
 	return journal.RollbackResult{ARN: t.ARN, Status: string(t.Status), Reason: reason}

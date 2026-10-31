@@ -456,6 +456,9 @@ func TestTheTableOfTheResults(t *testing.T) {
 	if r := (&RollbackTarget{ARN: "a", Status: RollbackFailed, Reason: ReasonWriteFailed, ErrorKind: "AccessDenied"}).result(); r.Reason != "writeFailed:AccessDenied" {
 		t.Errorf("failed result %+v", r)
 	}
+	if r := (&RollbackTarget{ARN: "a", Status: RollbackSkipped, Reason: ReasonResourceNotFound, ErrorKind: "NotFound"}).result(); r.Reason != "resourceNotFound" {
+		t.Errorf("a resource gone at the write: %+v", r)
+	}
 	defer func() {
 		if recover() == nil {
 			t.Error("a write without an outcome must panic")

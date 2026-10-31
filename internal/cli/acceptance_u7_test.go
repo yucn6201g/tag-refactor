@@ -21,11 +21,13 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/yucn6201g/tag-refactor/internal/awsaccess"
 	"github.com/yucn6201g/tag-refactor/internal/cli"
 	"github.com/yucn6201g/tag-refactor/internal/testutil"
 )
@@ -435,9 +437,15 @@ func TestAcceptanceU7_BR7_4_TheCommandApplyShowsUndoesIt(t *testing.T) {
 
 			r.requireExit(t, 0)
 			w.requireSnapshot(before)
+			allowed := awsaccess.ApplyPermissions()
 			for _, c := range w.fake.Calls()[calls:] {
 				if c.AccessKeyID != "" && c.AccessKeyID != "AKIAOPSPROFILE000000" {
 					t.Fatalf("%s was signed with %s, not the ops profile", c.Op, c.AccessKeyID)
+				}
+				// NFR3.13: rollback needs nothing beyond the example policy
+				// of apply (sts:GetCallerIdentity needs no permission).
+				if c.Op != "sts:GetCallerIdentity" && !slices.Contains(allowed, c.Op) {
+					t.Errorf("rollback called %s, which docs/iam/apply-policy.json does not allow", c.Op)
 				}
 			}
 			for _, out := range []string{r.stdout, r.stderr} {
