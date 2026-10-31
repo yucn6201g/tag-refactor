@@ -1,0 +1,5 @@
+# Rule file for the U7 checkpoint in the sandbox account (cicd-pipeline.md,
+# step 4): removes the only tag of the temporary queue the verification
+# makes, so the queue has no tag left; rollback then puts it back.
+version: 1
+remove: [tag-refactor-u7-only]

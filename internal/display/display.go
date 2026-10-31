@@ -332,6 +332,12 @@ const (
 	ExitMeaningApplySkipped = "exit.applySkipped"
 	ExitMeaningApplyFailed  = "exit.applyFailed"
 	ExitMeaningImpactStop   = "exit.impactStop"
+	// The meanings of rollback (U7 BR7.2).
+	ExitMeaningRestored        = "exit.restored"
+	ExitMeaningNotUndone       = "exit.notUndone"
+	ExitMeaningNothingToUndo   = "exit.nothingToUndo"
+	ExitMeaningRollbackSkipped = "exit.rollbackSkipped"
+	ExitMeaningRollbackFailed  = "exit.rollbackFailed"
 )
 
 // ExitCode prints the exit code line with its meaning, one of the

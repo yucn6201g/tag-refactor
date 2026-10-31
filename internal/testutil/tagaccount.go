@@ -17,12 +17,29 @@ import (
 // afterwards. Like the real API it is regional, rejects keys starting with
 // aws:, writes at most 20 resources per call, reads at most 100 ARNs per
 // call, and does not return a resource that never had a tag.
+//
+// Two switches serve the tests of rollback (U7): HideEmpty makes it leave out
+// the resources that have no tag at all, as the real API may (U7 NFR4.2 (c));
+// LagReads makes the reads by ARN of some resources return their tags of
+// before a write a few times, as an API that shows writes late does (U7
+// NFR5.20, NFR5.24).
 type TagAccount struct {
 	mu        sync.Mutex
 	resources map[string]*accountResource
 	failure   func(op, arn string) *ResourceFailure
 	callReply func(c Call) *Reply
 	onWrite   func(c Call)
+	hideEmpty bool
+	lag       map[string]*readLag
+	lagged    int
+}
+
+// readLag is the late view of one resource: from its first write after
+// LagReads, the next reads by ARN return tags, the tags of before that write.
+type readLag struct {
+	reads int
+	tags  map[string]string
+	armed bool
 }
 
 type accountResource struct {
@@ -131,6 +148,38 @@ func (a *TagAccount) OnWrite(f func(c Call)) {
 	a.onWrite = f
 }
 
+// HideEmpty makes GetResources leave out the resources that have no tag,
+// even those that had tags before (true), or return them with no tags, which
+// is the default (false). Whether the real API returns them is checked in the
+// sandbox account (U7 NFR4.3).
+func (a *TagAccount) HideEmpty(hide bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.hideEmpty = hide
+}
+
+// LagReads makes the reads by ARN of the given resources late: from the first
+// write of each of them after this call, that many reads by ARN return its
+// tags of before that write, then the real ones. The paged reads are not
+// late.
+func (a *TagAccount) LagReads(reads int, arns ...string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.lag == nil {
+		a.lag = map[string]*readLag{}
+	}
+	for _, arn := range arns {
+		a.lag[arn] = &readLag{reads: reads}
+	}
+}
+
+// LaggedReads returns how many answers of reads by ARN gave late tags.
+func (a *TagAccount) LaggedReads() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lagged
+}
+
 // HandleTagAccount makes the fake answer the tagging API from the account and
 // allows its writes.
 func (f *FakeAWS) HandleTagAccount(a *TagAccount) {
@@ -157,10 +206,28 @@ func (a *TagAccount) replyInstead(c Call) *Reply {
 	return f(c)
 }
 
-// visible reports whether GetResources returns the resource: it is in the
-// region of the call and has, or had, a tag.
-func (r *accountResource) visible(region string) bool {
-	return r.region == region && (r.everTagged || len(r.tags) > 0)
+// visible reports whether GetResources returns the resource with tags: it is
+// in the region of the call and has a tag, or had one unless the account
+// hides the resources without tags. The caller holds the lock.
+func (a *TagAccount) visible(r *accountResource, region string, tags map[string]string) bool {
+	if r.region != region {
+		return false
+	}
+	if len(tags) > 0 {
+		return true
+	}
+	return r.everTagged && !a.hideEmpty
+}
+
+// readByARN returns the tags a read by ARN sees: late ones while the
+// resource lags (LagReads). The caller holds the lock.
+func (a *TagAccount) readByARN(arn string, r *accountResource) map[string]string {
+	if l := a.lag[arn]; l != nil && l.armed && l.reads > 0 {
+		l.reads--
+		a.lagged++
+		return maps.Clone(l.tags)
+	}
+	return maps.Clone(r.tags)
 }
 
 func (a *TagAccount) getResources(c Call) Reply {
@@ -182,8 +249,12 @@ func (a *TagAccount) getResources(c Call) Reply {
 		defer a.mu.Unlock()
 		var found []TaggedResource
 		for _, arn := range arns {
-			if r, ok := a.resources[arn]; ok && r.visible(c.Region) {
-				found = append(found, TaggedResource{ARN: arn, Tags: maps.Clone(r.tags)})
+			r, ok := a.resources[arn]
+			if !ok {
+				continue
+			}
+			if tags := a.readByARN(arn, r); a.visible(r, c.Region, tags) {
+				found = append(found, TaggedResource{ARN: arn, Tags: tags})
 			}
 		}
 		return TagPage("", found...)
@@ -191,7 +262,7 @@ func (a *TagAccount) getResources(c Call) Reply {
 	a.mu.Lock()
 	var all []TaggedResource
 	for arn, r := range a.resources {
-		if r.visible(c.Region) {
+		if a.visible(r, c.Region, r.tags) {
 			all = append(all, TaggedResource{ARN: arn, Tags: maps.Clone(r.tags)})
 		}
 	}
@@ -301,6 +372,9 @@ func (a *TagAccount) write(c Call) Reply {
 		if userTagCount(next) > MaxUserTags {
 			failed[arn] = ResourceFailure{StatusCode: http.StatusBadRequest, Code: "InvalidParameterException", Message: "too many tags"}
 			continue
+		}
+		if l := a.lag[arn]; l != nil && !l.armed {
+			l.tags, l.armed = maps.Clone(r.tags), true
 		}
 		r.tags = next
 		r.everTagged = true

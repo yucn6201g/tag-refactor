@@ -1,0 +1,10 @@
+# Rule file for the U7 checkpoint in the sandbox account (cicd-pipeline.md,
+# step 2): renames the check key tag-refactor-u7-src that u7-src-rules.yaml
+# added to tag-refactor-u7-dst and changes its value a to b, a key rename and
+# a value change of one plan (U4 renameKey and changeValue).
+version: 1
+keys:
+  tag-refactor-u7-dst:
+    aliases: [tag-refactor-u7-src]
+    values:
+      b: [a]

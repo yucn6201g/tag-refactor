@@ -1,0 +1,12 @@
+# Rule file for the U7 checkpoint in the sandbox account (cicd-pipeline.md,
+# step 4.5): adds the required key tag-refactor-u7-zero=1 to the SQS queues of
+# ap-northeast-1. A queue without tags cannot be matched by its tags, so the
+# condition is the type and the region; the tagged queues of the fixtures
+# there (QA, QB, QC of U1 and QU5 of U5) match too, and the verification
+# checks that rollback puts them back. There is no default.
+version: 1
+required:
+  tag-refactor-u7-zero:
+    when:
+      - match: {resourceType: sqs, region: ap-northeast-1}
+        value: "1"

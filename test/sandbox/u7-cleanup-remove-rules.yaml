@@ -1,0 +1,6 @@
+# Rule file for the cleanup of the U7 checkpoint in the sandbox account
+# (cicd-pipeline.md, cleanup): removes every check key the U6 and U7 checks
+# add, when a check stopped half way. The cleanup applies it rather than
+# rolling back, so it never depends on the record of a rollback that failed.
+version: 1
+remove: [tag-refactor-u6-check, tag-refactor-u7-src, tag-refactor-u7-dst, tag-refactor-u7-zero]

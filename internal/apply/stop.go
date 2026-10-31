@@ -70,6 +70,10 @@ func (s *stopper) stopped() bool {
 	}
 }
 
+// done is closed once the signal is up (once watchStop saw the caller's
+// stop, for the first Ctrl+C).
+func (s *stopper) done() <-chan struct{} { return s.ch }
+
 func (s *stopper) why() (StopReason, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

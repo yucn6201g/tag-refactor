@@ -417,6 +417,52 @@ func TestSandboxU6RuleFilesAreValid(t *testing.T) {
 	}
 }
 
+// The rule files of the U7 checkpoint (construction/u7-rollback/
+// infrastructure-design/cicd-pipeline.md) read without a warning other than
+// the one for a file without key rules: the rename file renames the source
+// key to the destination key and changes its value a to b (renameKey and
+// changeValue), and the zero file matches by type and region, since a queue
+// without tags cannot be matched by its tags.
+func TestSandboxU7RuleFilesAreValid(t *testing.T) {
+	for name, check := range map[string]func(*RuleSet) bool{
+		"u7-src-rules.yaml": func(rs *RuleSet) bool {
+			r := rs.RequiredTags
+			return len(r) == 1 && r[0].Key == "tag-refactor-u7-src" && !r[0].HasDefault && len(r[0].When) == 5 &&
+				r[0].When[0].Value == "a" && r[0].When[0].Tags["project"] == "tag-refactor-fixture"
+		},
+		"u7-rename-rules.yaml": func(rs *RuleSet) bool {
+			k := rs.KeyRules
+			return len(k) == 1 && k[0].CanonicalKey == "tag-refactor-u7-dst" && strings.Join(k[0].Aliases, ",") == "tag-refactor-u7-src" &&
+				len(k[0].Values) == 1 && k[0].Values[0].CanonicalValue == "b" && strings.Join(k[0].Values[0].Spellings, ",") == "a" &&
+				len(rs.RequiredTags) == 0 && len(rs.RemoveKeys) == 0
+		},
+		"u7-only-remove-rules.yaml": func(rs *RuleSet) bool {
+			return len(rs.RemoveKeys) == 1 && rs.RemoveKeys[0].Key == "tag-refactor-u7-only"
+		},
+		"u7-zero-add-rules.yaml": func(rs *RuleSet) bool {
+			r := rs.RequiredTags
+			return len(r) == 1 && r[0].Key == "tag-refactor-u7-zero" && !r[0].HasDefault && len(r[0].When) == 1 &&
+				r[0].When[0].ResourceType == "sqs" && r[0].When[0].Region == "ap-northeast-1" && len(r[0].When[0].Tags) == 0
+		},
+		"u7-cleanup-remove-rules.yaml": func(rs *RuleSet) bool {
+			var keys []string
+			for _, k := range rs.RemoveKeys {
+				keys = append(keys, k.Key)
+			}
+			return strings.Join(keys, ",") == "tag-refactor-u6-check,tag-refactor-u7-src,tag-refactor-u7-dst,tag-refactor-u7-zero"
+		},
+	} {
+		rs, err := load(filepath.Join("..", "..", "test", "sandbox", name))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		withKeys := len(rs.KeyRules) > 0
+		if !check(rs) || withKeys && len(rs.Warnings) != 0 || !withKeys && (len(rs.Warnings) != 1 || rs.Warnings[0].Key != "keys") {
+			t.Errorf("%s: rule set = %+v", name, rs)
+		}
+	}
+}
+
 func TestSuggestAndEditDistance(t *testing.T) {
 	if got := suggest("Aliases", keyRuleKeys); got != "aliases" {
 		t.Fatalf("suggest = %q", got)
