@@ -1,0 +1,31 @@
+--- a/main.tf
++++ b/main.tf
+@@ -1,1 +1,1 @@
+-  env = "Prod"
++  Environment = "prod"
+
+--- a/stacks/orders.yaml
++++ b/stacks/orders.yaml
+@@ -3,4 +3,4 @@
+     Type: AWS::SQS::Queue
+-        - Key: env
++        - Key: Environment
+\ No newline at end of file
+
+main.tf: 4 changes can be reflected
+stacks/orders.yaml: 1 change can be reflected
+already reflected: 3
+
+Removals counted as reflected because the key is not in the source (1; if a stack tag or default_tags adds the key, change it there):
+  arn:aws:sqs:ap-northeast-1:111122223333:audit  obsolete  stacks/audit.yaml
+
+To fix by hand (7):
+  arn:aws:s3:::logs-bucket  env  (no place)  the resource is inside a Terraform module (module.logs.aws_s3_bucket.this)
+  arn:aws:s3:::twice  env  (no place)  more than one place could define it (a.b, c.d)
+  arn:aws:sqs:ap-northeast-1:111122223333:billing  Owner  stacks/billing.yaml:20  the value is an expression (!Ref, var.x, a block scalar and so on)
+  arn:aws:sqs:ap-northeast-1:111122223333:c  k  (no place)  more than one place could define it (candidates: dev/a.yaml, prod/a.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:d  k  (no place)  no template in --dir has this logical ID and type (CDK and SAM generate their names; CDK is later work) (another Type in: a.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:e  k  (no place)  no template in --dir has this logical ID and type (CDK and SAM generate their names; CDK is later work) (files left out: bad.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:f  k  a.yaml:3  the key is not in the source; it may come from a stack tag or default_tags
+
+Not managed by IaC: 12 resources (no CloudFormation tags and not in --tf-state)

@@ -1,0 +1,37 @@
+{
+  "format_version": "1.0",
+  "terraform_version": "1.9.0",
+  "values": {
+    "outputs": {
+      "secret": {"sensitive": true, "value": "example-output-value"}
+    },
+    "root_module": {
+      "resources": [
+        {"address": "aws_s3_bucket.example", "mode": "managed", "type": "aws_s3_bucket", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:s3:::example", "bucket": "example", "tags": {"env": "Prod"}, "tags_all": {"env": "Prod"}}, "sensitive_values": {"tags": {}, "tags_all": {}}},
+        {"address": "aws_sqs_queue.example", "mode": "managed", "type": "aws_sqs_queue", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sqs:ap-northeast-1:111122223333:example", "name": "example"}, "sensitive_values": {}},
+        {"address": "aws_sns_topic.example", "mode": "managed", "type": "aws_sns_topic", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:example"}, "sensitive_values": {}},
+        {"address": "aws_secretsmanager_secret.example", "mode": "managed", "type": "aws_secretsmanager_secret", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:example-AbCdEf"}, "sensitive_values": {}},
+        {"address": "aws_kms_key.example", "mode": "managed", "type": "aws_kms_key", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:kms:ap-northeast-1:111122223333:key/1234"}, "sensitive_values": {}},
+        {"address": "aws_lambda_function.example", "mode": "managed", "type": "aws_lambda_function", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:lambda:ap-northeast-1:111122223333:function:example"}, "sensitive_values": {}},
+        {"address": "aws_dynamodb_table.example", "mode": "managed", "type": "aws_dynamodb_table", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 1, "values": {"arn": "arn:aws:dynamodb:ap-northeast-1:111122223333:table/example"}, "sensitive_values": {}},
+        {"address": "aws_cloudwatch_log_group.example", "mode": "managed", "type": "aws_cloudwatch_log_group", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:logs:ap-northeast-1:111122223333:log-group:example"}, "sensitive_values": {}},
+        {"address": "aws_security_group.example", "mode": "managed", "type": "aws_security_group", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 1, "values": {"arn": "arn:aws:ec2:ap-northeast-1:111122223333:security-group/sg-1"}, "sensitive_values": {}},
+        {"address": "aws_vpc.example", "mode": "managed", "type": "aws_vpc", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 1, "values": {"arn": "arn:aws:ec2:ap-northeast-1:111122223333:vpc/vpc-1"}, "sensitive_values": {}},
+        {"address": "aws_subnet.example", "mode": "managed", "type": "aws_subnet", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 1, "values": {"arn": "arn:aws:ec2:ap-northeast-1:111122223333:subnet/subnet-1"}, "sensitive_values": {}},
+        {"address": "aws_instance.example", "mode": "managed", "type": "aws_instance", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 1, "values": {"arn": "arn:aws:ec2:ap-northeast-1:111122223333:instance/i-1"}, "sensitive_values": {}},
+        {"address": "aws_ebs_volume.example", "mode": "managed", "type": "aws_ebs_volume", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:ec2:ap-northeast-1:111122223333:volume/vol-1"}, "sensitive_values": {}},
+        {"address": "aws_db_instance.example", "mode": "managed", "type": "aws_db_instance", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 2, "values": {"arn": "arn:aws:rds:ap-northeast-1:111122223333:db:example", "password": "example-secret-value"}, "sensitive_values": {"password": true}},
+        {"address": "aws_rds_cluster.example", "mode": "managed", "type": "aws_rds_cluster", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:rds:ap-northeast-1:111122223333:cluster:example"}, "sensitive_values": {}},
+        {"address": "aws_iam_role.example", "mode": "managed", "type": "aws_iam_role", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:iam::111122223333:role/example"}, "sensitive_values": {}},
+        {"address": "aws_iam_user.example", "mode": "managed", "type": "aws_iam_user", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:iam::111122223333:user/example"}, "sensitive_values": {}},
+        {"address": "aws_iam_policy.example", "mode": "managed", "type": "aws_iam_policy", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:iam::111122223333:policy/example"}, "sensitive_values": {}},
+        {"address": "data.aws_caller_identity.me", "mode": "data", "type": "aws_caller_identity", "name": "me", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sts::111122223333:assumed-role/x/y"}, "sensitive_values": {}}
+      ],
+      "child_modules": [
+        {"address": "module.logs", "resources": [
+          {"address": "module.logs.aws_s3_bucket.this", "mode": "managed", "type": "aws_s3_bucket", "name": "this", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:s3:::logs-bucket"}, "sensitive_values": {}}
+        ]}
+      ]
+    }
+  }
+}

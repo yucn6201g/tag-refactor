@@ -417,6 +417,23 @@ func TestSandboxU6RuleFilesAreValid(t *testing.T) {
 	}
 }
 
+// The rule file of the U8 checkpoint (construction/u8-iac/infrastructure-design/
+// cicd-pipeline.md) reads without a warning: it renames project to Project and
+// changes its value (renameKey and changeValue).
+func TestSandboxU8RuleFilesAreValid(t *testing.T) {
+	rs, err := load(filepath.Join("..", "..", "test", "sandbox", "u8-rules.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := rs.KeyRules
+	if len(k) != 1 || k[0].CanonicalKey != "Project" || strings.Join(k[0].Aliases, ",") != "project" ||
+		len(k[0].Values) != 1 || k[0].Values[0].CanonicalValue != "tag-refactor-fixture-u8" ||
+		strings.Join(k[0].Values[0].Spellings, ",") != "tag-refactor-fixture" ||
+		len(rs.RequiredTags) != 0 || len(rs.RemoveKeys) != 0 || len(rs.Warnings) != 0 {
+		t.Fatalf("rule set = %+v", rs)
+	}
+}
+
 // The rule files of the U7 checkpoint (construction/u7-rollback/
 // infrastructure-design/cicd-pipeline.md) read without a warning other than
 // the one for a file without key rules: the rename file renames the source
