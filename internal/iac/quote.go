@@ -140,8 +140,15 @@ func hclKey(q quoteStyle, s string) string {
 	return hclText(s)
 }
 
+// writeTextForTest, when set, replaces what writeText writes, so that a test can
+// see a fault of this tool end at the check after the edits.
+var writeTextForTest func(string) string
+
 // writeText writes a new key or value in the quote of the text it replaces.
 func writeText(format fileFormat, q quoteStyle, s string, isKey bool) string {
+	if writeTextForTest != nil {
+		return writeTextForTest(s)
+	}
 	switch format {
 	case formatJSON:
 		return jsonText(s)

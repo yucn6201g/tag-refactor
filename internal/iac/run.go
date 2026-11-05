@@ -440,7 +440,7 @@ func (r *runner) finish(ctx context.Context, outs []*fileOutcome) error {
 	for i, o := range toWrite {
 		blobs[i] = o.blob
 	}
-	if err := checkGit(ctx, r.root, blobs, &res.Debug); err != nil {
+	if err := gitCheck(ctx, r.root, blobs, &res.Debug); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}

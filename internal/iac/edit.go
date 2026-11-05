@@ -281,7 +281,12 @@ func fileLineBreak(src []byte) string {
 // design §4).
 func canReplaceWhole(src []byte, format fileFormat, site *tagSite) bool {
 	entries := site.entries
-	gaps := [][]byte{src[site.value.start:entries[0].elem.start], src[entries[len(entries)-1].elem.end:site.value.end]}
+	// The value of JSON and Terraform starts and ends with its brackets.
+	inner := site.value
+	if format != formatYAML {
+		inner = span{inner.start + 1, inner.end - 1}
+	}
+	gaps := [][]byte{src[inner.start:entries[0].elem.start], src[entries[len(entries)-1].elem.end:inner.end]}
 	for i := 0; i+1 < len(entries); i++ {
 		gaps = append(gaps, src[entries[i].elem.end:entries[i+1].elem.start])
 	}

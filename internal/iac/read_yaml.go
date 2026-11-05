@@ -329,11 +329,15 @@ func (f *yamlFile) readEntry(e *tagEntry, key, value *yaml.Node, repeated bool) 
 // or the keys of a map, whose position starts the element.
 func (f *yamlFile) finish(s *tagSite, tagsKey *yaml.Node, nodes []*yaml.Node, bound int, list bool) *tagSite {
 	s.markDuplicates()
-	if !s.multiline || len(s.entries) == 0 {
-		return s
-	}
 	t := f.table()
 	raw := f.ct.raw
+	if len(s.entries) == 0 {
+		s.others = t.outsideLines(raw, tagsKey.Line, bound, nil)
+		return s
+	}
+	if !s.multiline {
+		return s
+	}
 	starts := make([]int, len(nodes))
 	for i, n := range nodes {
 		pos, ok := f.offset(n)

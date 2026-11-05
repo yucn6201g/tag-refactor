@@ -107,7 +107,21 @@ func changedLines(oldLines, newLines *textLines, edits []edit) []diffChange {
 			r.d--
 		}
 	}
-	return runs
+	return joinTouching(runs)
+}
+
+// joinTouching makes one run of runs with no line between them, so a change
+// shows its old lines and then its new lines, as differences usually do.
+func joinTouching(runs []diffChange) []diffChange {
+	joined := runs[:0]
+	for _, r := range runs {
+		if n := len(joined); n > 0 && r.a == joined[n-1].b+1 && r.c == joined[n-1].d+1 {
+			joined[n-1].b, joined[n-1].d = r.b, r.d
+			continue
+		}
+		joined = append(joined, r)
+	}
+	return joined
 }
 
 // writeHunk writes the runs of one hunk with their context.

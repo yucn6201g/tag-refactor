@@ -211,6 +211,9 @@ func (t lineTable) outsideLines(raw []byte, from, to int, entries []tagEntry) st
 	next := 0
 	for line := from + 1; line < to && line <= t.count(); line++ {
 		start := t.start(line)
+		if start == len(raw) {
+			break
+		}
 		for next < len(entries) && t.lineOf(entries[next].elem.end) < line {
 			next++
 		}

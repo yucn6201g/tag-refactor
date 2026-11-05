@@ -33,8 +33,9 @@ const maxGitArgsLength = 30000
 
 // The functions that reach git; the tests stand in for them.
 var (
-	lookGit = exec.LookPath
-	runGit  = runGitCommand
+	lookGit  = exec.LookPath
+	runGit   = runGitCommand
+	gitCheck = checkGit
 )
 
 // runGitCommand runs git with no shell, with a time limit on the process and on
@@ -186,9 +187,9 @@ func (c *gitChecker) batches(files []gitFile) [][]string {
 	return out
 }
 
-// indexEntry is one line of ls-files -s.
+// indexEntry is one line of ls-files -s. path is the path as git answered it.
 type indexEntry struct {
-	mode, hash, stage string
+	mode, hash, stage, path string
 }
 
 // listIndex reads ls-files -s for the files. A path not in the answer gets one
@@ -238,7 +239,7 @@ func parseIndex(out []byte, index map[string]indexEntry) {
 		if have, seen := index[string(path)]; seen && have.stage != "0" {
 			continue
 		}
-		index[string(path)] = indexEntry{mode: fields[0], hash: fields[1], stage: fields[2]}
+		index[string(path)] = indexEntry{mode: fields[0], hash: fields[1], stage: fields[2], path: string(path)}
 	}
 }
 
@@ -282,9 +283,9 @@ func checkFile(f *gitFile, format string, index map[string]indexEntry, tree map[
 	}
 	head, ok := tree[f.rel]
 	if !ok {
-		return gitStop("iac.notCommitted", f.rel)
+		head, ok = tree[e.path]
 	}
-	if head != e.hash {
+	if !ok || head != e.hash {
 		return gitStop("iac.notCommitted", f.rel)
 	}
 	blob, lf := f.blobSHA1, f.lfSHA1
