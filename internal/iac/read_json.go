@@ -55,7 +55,11 @@ func (n *jsonNode) isIntrinsic() bool {
 type jsonFile struct {
 	ct        *content
 	resources *jsonNode
-	lines     lineTable
+	// byKey finds a resource: the index of its first key; repeated holds the
+	// logical IDs written more than once.
+	byKey    map[string]int
+	repeated map[string]bool
+	lines    lineTable
 }
 
 // jsonParser reads the tokens of the body.
@@ -75,6 +79,16 @@ func parseJSON(ct *content) (parsedFile, *parseFailure) {
 	f := &jsonFile{ct: ct}
 	if err := p.top(f); err != nil {
 		return nil, p.failure(err)
+	}
+	if f.resources != nil && f.resources.kind == jsonObject {
+		f.byKey, f.repeated = make(map[string]int, len(f.resources.keys)), map[string]bool{}
+		for i, key := range f.resources.keys {
+			if _, seen := f.byKey[key.str]; seen {
+				f.repeated[key.str] = true
+			} else {
+				f.byKey[key.str] = i
+			}
+		}
 	}
 	return f, nil
 }
@@ -277,15 +291,14 @@ func (f *jsonFile) allTags() []resourceTags {
 
 // site finds the place of the tags of a resource (BR4.1).
 func (f *jsonFile) site(key string) *tagSite {
-	if f.resources == nil || f.resources.kind != jsonObject {
+	at, found := f.byKey[key]
+	if !found {
 		return nil
 	}
-	res, count := f.resources.get(key)
+	res := f.resources.vals[at]
 	notLiteral := &tagSite{issue: ReasonTagsNotLiteral}
 	switch {
-	case res == nil:
-		return nil
-	case count > 1:
+	case f.repeated[key]:
 		return notLiteral
 	case res.kind != jsonObject:
 		return &tagSite{issue: ReasonUnsupportedTagShape}

@@ -23,7 +23,9 @@ type yamlFile struct {
 	resourcesAt int
 	// byKey finds a resource: the index of its key in resources.Content.
 	byKey map[string]int
-	lines lineTable
+	// repeated holds the logical IDs written more than once.
+	repeated map[string]bool
+	lines    lineTable
 }
 
 // parseYAML parses a template. A file without a mapping of Resources at the top
@@ -33,7 +35,7 @@ func parseYAML(ct *content) (parsedFile, *parseFailure) {
 	if err := yaml.Unmarshal(ct.body, &doc); err != nil {
 		return nil, &parseFailure{line: lineFromError(err.Error()), kind: "yaml"}
 	}
-	f := &yamlFile{ct: ct, byKey: map[string]int{}}
+	f := &yamlFile{ct: ct, byKey: map[string]int{}, repeated: map[string]bool{}}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
 		return f, nil
 	}
@@ -45,7 +47,9 @@ func parseYAML(ct *content) (parsedFile, *parseFailure) {
 	f.resourcesAt, f.resources = at, f.root.Content[at+1]
 	for i := 0; i+1 < len(f.resources.Content); i += 2 {
 		if key := f.resources.Content[i]; key.Kind == yaml.ScalarNode {
-			if _, seen := f.byKey[key.Value]; !seen {
+			if _, seen := f.byKey[key.Value]; seen {
+				f.repeated[key.Value] = true
+			} else {
 				f.byKey[key.Value] = i
 			}
 		}
@@ -191,7 +195,7 @@ func (f *yamlFile) site(key string) *tagSite {
 		return nil
 	}
 	notLiteral := &tagSite{issue: ReasonTagsNotLiteral}
-	if countKey(f.resources, key) > 1 {
+	if f.repeated[key] {
 		return notLiteral
 	}
 	keyNode, res := f.resources.Content[at], f.resources.Content[at+1]

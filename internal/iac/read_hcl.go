@@ -16,7 +16,9 @@ import (
 type hclFile struct {
 	ct     *content
 	blocks []*hclsyntax.Block
-	lines  lineTable
+	// byKey finds the first block of an address.
+	byKey map[string]*hclsyntax.Block
+	lines lineTable
 }
 
 // parseHCL parses a .tf file.
@@ -32,7 +34,7 @@ func parseHCL(ct *content) (parsedFile, *parseFailure) {
 		}
 		return nil, failure
 	}
-	f := &hclFile{ct: ct}
+	f := &hclFile{ct: ct, byKey: map[string]*hclsyntax.Block{}}
 	body, ok := file.Body.(*hclsyntax.Body)
 	if !ok {
 		return f, nil
@@ -40,6 +42,9 @@ func parseHCL(ct *content) (parsedFile, *parseFailure) {
 	for _, b := range body.Blocks {
 		if b.Type == "resource" && len(b.Labels) == 2 {
 			f.blocks = append(f.blocks, b)
+			if _, seen := f.byKey[blockKey(b)]; !seen {
+				f.byKey[blockKey(b)] = b
+			}
 		}
 	}
 	return f, nil
@@ -64,10 +69,8 @@ func (f *hclFile) allTags() []resourceTags {
 }
 
 func (f *hclFile) site(key string) *tagSite {
-	for _, b := range f.blocks {
-		if blockKey(b) == key {
-			return f.blockSite(b)
-		}
+	if b, ok := f.byKey[key]; ok {
+		return f.blockSite(b)
 	}
 	return nil
 }

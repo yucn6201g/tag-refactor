@@ -332,6 +332,46 @@ func TestYAMLAliasBombIsNotExpanded(t *testing.T) {
 	requireReasons(t, res, "a tagsNotLiteral")
 }
 
+// One big file of many resources must not take time in the square of them: the
+// readers find a resource through a map.
+func TestManyResourcesInOneFile(t *testing.T) {
+	const n = 20000
+	var yamlText, jsonText, hcl strings.Builder
+	var resources []resource
+	yamlText.WriteString("Resources:\n")
+	jsonText.WriteString("{\"Resources\": {\n")
+	for i := range n {
+		id := "Q" + strconv.Itoa(i)
+		yamlText.WriteString("  " + id + ":\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags:\n        - Key: a\n          Value: b\n")
+		if i > 0 {
+			jsonText.WriteString(",\n")
+		}
+		jsonText.WriteString(`"J` + id + `": {"Type": "AWS::SQS::Queue", "Properties": {"Tags": [{"Key": "a", "Value": "b"}]}}`)
+		hcl.WriteString("resource \"aws_sqs_queue\" \"t" + id + "\" {\n  tags = {\n    a = \"b\"\n  }\n}\n")
+		resources = append(resources, stackResource("arn:aws:sqs:ap-northeast-1:111122223333:"+id, id, setValue("a", "b", "c")))
+		resources = append(resources, stackResource("arn:aws:sqs:ap-northeast-1:111122223333:J"+id, "J"+id, setValue("a", "b", "c")))
+	}
+	jsonText.WriteString("\n}}\n")
+	f := newFixture(t)
+	f.file("big.yaml", yamlText.String())
+	f.file("big.json", jsonText.String())
+	f.file("big.tf", hcl.String())
+	plan := f.plan(resources...)
+	start := time.Now()
+
+	res := f.run(plan)
+
+	if elapsed := time.Since(start); elapsed > 30*time.Second*largeTimeFactor {
+		t.Fatalf("took %v", elapsed)
+	}
+	if res.Reflected != 2*n || len(res.Files) != 2 {
+		t.Fatalf("reflected %d, files %d, manual %d", res.Reflected, len(res.Files), len(res.Manual))
+	}
+	if parsed := parseFor(t, formatTerraform, hcl.String()); parsed.site("aws_sqs_queue.tQ19999") == nil {
+		t.Fatal("no block")
+	}
+}
+
 func TestUTF16FileIsLeftOutAndCounted(t *testing.T) {
 	f := newFixture(t)
 	f.file("wide.yaml", "\xff\xfeR\x00")

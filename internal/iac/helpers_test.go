@@ -246,27 +246,8 @@ func requireReasons(t *testing.T, res *Result, want ...string) {
 	}
 }
 
-// expectUpdated applies the edits of a run to require the new content.
-func requireDiffOnly(t *testing.T, f *fixture, rel, want string) {
-	t.Helper()
-	if got := f.read(rel); got != want {
-		t.Fatalf("%s changed without --write:\n%s", rel, got)
-	}
-}
-
 // yamlTemplate makes a template of one queue with the given lines below Tags,
 // indented by the caller, with the line break of the text.
 func yamlTemplate(logicalID, tags string) string {
 	return "Resources:\n  " + logicalID + ":\n    Type: AWS::SQS::Queue\n    Properties:\n      Tags:\n" + tags
-}
-
-// writeAndRead runs iac with --write on a committed folder and returns the file.
-func writeAndRead(t *testing.T, f *fixture, rel, plan string) string {
-	t.Helper()
-	f.commit()
-	res := f.runWrite(plan)
-	if res.WriteErr != nil {
-		t.Fatalf("write stopped: %v", res.WriteErr)
-	}
-	return f.read(rel)
 }

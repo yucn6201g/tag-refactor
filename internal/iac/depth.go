@@ -35,9 +35,10 @@ func jsonTooDeep(data []byte) bool {
 		c := data[i]
 		switch {
 		case inString:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				i++
-			} else if c == '"' {
+			case '"':
 				inString = false
 			}
 		case c == '"':

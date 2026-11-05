@@ -174,9 +174,9 @@ func TestIacGuidanceOnTerraformAndNothingReflected(t *testing.T) {
 // show as they are.
 func TestIacSanitizesTheDifference(t *testing.T) {
 	res := &iac.Result{Files: []iac.FileResult{{File: "a\x1b[31m.yaml", Reflected: 1,
-		Diff: "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-\tkey: a\\b\n+\tkey: \x1b[31mred‮"}}}
+		Diff: "--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-\tkey: a\\b\n+\tkey: \x1b[31mred\xe2\x80\xae"}}}
 	out, _ := iacOutput(t, English, res, false)
-	if strings.Contains(out, "\x1b") || strings.Contains(out, "‮") {
+	if strings.Contains(out, "\x1b") || strings.Contains(out, "\xe2\x80\xae") {
 		t.Fatalf("control characters reached the terminal: %q", out)
 	}
 	if !strings.Contains(out, "-\tkey: a\\b\n") || !strings.Contains(out, `\u{1B}[31mred\u{202E}`) {
