@@ -1,7 +1,6 @@
 package iac
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 
@@ -207,29 +206,4 @@ func loadPlan(path string) (*planner.Plan, error) {
 		return nil, usageError("--plan", "iac.planTooLarge", "iac.planTooLargeFix", path)
 	}
 	return planner.LoadPlan(path)
-}
-
-// Run does workflow W1: the input, the targets, the places, the edits, the
-// difference and, with --write, the checks and the writing. An error is a
-// wrong input or a stop before anything was decided; once there is a result,
-// the problems of --write are in Result.WriteErr (BR6.2).
-func (w *Writer) Run(_ context.Context, req Request) (*Result, error) {
-	if _, err := resolveRoot(req.Dir); err != nil {
-		return nil, err
-	}
-	plan, err := loadPlan(req.PlanPath)
-	if err != nil {
-		return nil, err
-	}
-	var state stateIndex
-	if req.TFStatePath != "" {
-		if state, err = readTFState(req.TFStatePath); err != nil {
-			return nil, err
-		}
-	}
-	targets, res := buildTargets(plan, state)
-	res.HasTFState = req.TFStatePath != ""
-	res.WriteRequested = req.Write
-	_ = targets
-	return res, nil
 }
