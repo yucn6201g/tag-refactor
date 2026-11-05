@@ -49,7 +49,7 @@ require (
 	github.com/zclconf/go-cty v1.19.0 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/telemetry v0.0.0-20261010193011-f71dc92da45e // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	golang.org/x/vuln v1.9.0 // indirect
 )
