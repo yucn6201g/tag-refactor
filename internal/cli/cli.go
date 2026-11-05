@@ -55,6 +55,9 @@ type Deps struct {
 	// interrupts, when set, replaces the subscription to Ctrl+C of apply
 	// (the second stage of the stop). The tests of this package use it.
 	interrupts func() (<-chan os.Signal, func())
+	// iac, when set, replaces the writer of the iac command. The tests of this
+	// package use it.
+	iac iacRunner
 }
 
 // Exit codes (contract C5, BR6.3).
@@ -223,7 +226,8 @@ func (a *app) rootCommand() *cobra.Command {
 			"different ways, counts missing required tags, drafts a rule file from the tags in use, and plans\n" +
 			"key renames, value changes, required tags and removals from a rule file, showing which IAM\n" +
 			"policies use the tags. Only apply and rollback write to AWS: they change tags and keep a record\n" +
-			"of each run.",
+			"of each run. iac reflects a saved plan in CloudFormation templates and Terraform files, without\n" +
+			"calling AWS.",
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -239,8 +243,7 @@ func (a *app) rootCommand() *cobra.Command {
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
-	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand(), a.applyCommand(), a.rollbackCommand())
-	root.AddCommand(unavailableCommand("iac"))
+	root.AddCommand(a.scanCommand(), a.planCommand(), a.rulesCommand(), a.applyCommand(), a.rollbackCommand(), a.iacCommand())
 	return root
 }
 
@@ -270,17 +273,6 @@ func (a *app) parseFormat(value string, allowed []display.Format) (display.Forma
 			Detail: display.T(l, "err.badFormat", value, list), Hint: display.T(l, "err.badFormatFix", list)}
 	}
 	return f, nil
-}
-
-func unavailableCommand(name string) *cobra.Command {
-	return &cobra.Command{
-		Use:                name,
-		Hidden:             true,
-		DisableFlagParsing: true,
-		RunE: func(*cobra.Command, []string) error {
-			return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOptionNotAvailable, Subject: name}
-		},
-	}
 }
 
 // regionFlagHelp is the help of --region for scan and plan (BR1.1).

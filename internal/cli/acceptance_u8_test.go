@@ -335,7 +335,7 @@ func TestAcceptanceU8ManualItemsExitTwo(t *testing.T) {
 	r.requireExit(t, 2)
 	w.requireFile("stacks/orders.yaml", strings.ReplaceAll(ordersYAMLAfter, "Value: team-a", "Value: !Ref OwnerParam"))
 	requireContains(t, "stdout", r.stdout, "To fix by hand (1):\n")
-	requireContains(t, "stdout", r.stdout, arnOrders+"  Owner  stacks/orders.yaml:11  ")
+	requireContains(t, "stdout", r.stdout, arnOrders+"  Owner  stacks/orders.yaml:10  ")
 	requireContains(t, "stdout", r.stdout, "the value is an expression")
 }
 

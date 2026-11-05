@@ -36,8 +36,8 @@ func TestUsageErrorsAreTwoLinesAndExitOne(t *testing.T) {
 		"unknown flag":        {[]string{"scan", "--bogus"}, "unknown flag: --bogus"},
 		"positional argument": {[]string{"scan", "extra"}, `unknown command "extra"`},
 		"unknown command":     {[]string{"nope"}, `unknown command "nope"`},
-		// U6 made apply and U7 rollback available; iac (U8) is not yet.
-		"iac":                       {[]string{"iac", "--plan", "p.json"}, "iac is not available in this version"},
+		// U8 made iac available, the last command that was not.
+		"iac without --dir":         {[]string{"iac", "--plan", "p.json"}, "iac needs --dir"},
 		"rollback without --run":    {[]string{"rollback"}, "rollback needs --run with the run ID that apply showed"},
 		"rollback with a bad run":   {[]string{"rollback", "--run", "x"}, `--run "x" is not a run ID`},
 		"rollback with a bad place": {[]string{"rollback", "--run", "20261019T211003Z-7f3a", "--record-from", "s3://Bad_Bucket/x"}, `--record-from "s3://Bad_Bucket/x" is not`},
