@@ -41,7 +41,7 @@ type ReplaceOptions struct {
 	// Waits are the waits of the rename; nil means UserFileWaits.
 	Waits []time.Duration
 	// Opened, when set, is called for each file Replace opens: the temporary
-	// file when it is created and when it is read back (U8 NFR5.26).
+	// file, which it also reads back (U8 NFR5.26).
 	Opened func()
 }
 
@@ -49,7 +49,7 @@ type ReplaceOptions struct {
 var (
 	replaceRename = os.Rename
 	replaceSleep  = time.Sleep
-	replaceRead   = os.ReadFile
+	replaceRead   = func(f *os.File) ([]byte, error) { return io.ReadAll(f) }
 	randomHex     = func() (string, error) {
 		b := make([]byte, 8)
 		if _, err := rand.Read(b); err != nil {
@@ -84,16 +84,6 @@ func Replace(path string, content []byte, opts ReplaceOptions) (err error) {
 			_ = os.Remove(tmp)
 		}
 	}()
-	if opts.Opened != nil {
-		opts.Opened()
-	}
-	written, err := replaceRead(tmp)
-	if err != nil {
-		return failed(path, err)
-	}
-	if !bytes.Equal(written, content) {
-		return failed(path, io.ErrShortWrite)
-	}
 	if err := os.Chmod(tmp, info.Mode().Perm()); err != nil {
 		return failed(path, err)
 	}
@@ -107,19 +97,24 @@ func Replace(path string, content []byte, opts ReplaceOptions) (err error) {
 	return nil
 }
 
-// writeTemp creates the temporary file, which must not exist yet, and writes
-// content to disk. A failure removes it.
+// writeTemp creates the temporary file, which must not exist yet, writes content
+// to disk and reads it back, through the one handle: opening a new file again
+// makes a virus scanner look at it, which on Windows took 15 milliseconds a file
+// and most of a run over 2,000 files. A failure removes the file.
 func writeTemp(tmp string, content []byte, opened func()) (err error) {
 	if opened != nil {
 		opened()
 	}
-	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(tmp, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
+	closed := false
 	defer func() {
 		if err != nil {
-			_ = f.Close()
+			if !closed {
+				_ = f.Close()
+			}
 			_ = os.Remove(tmp)
 		}
 	}()
@@ -129,5 +124,16 @@ func writeTemp(tmp string, content []byte, opened func()) (err error) {
 	if err := f.Sync(); err != nil {
 		return err
 	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	written, err := replaceRead(f)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(written, content) {
+		return io.ErrShortWrite
+	}
+	closed = true
 	return f.Close()
 }

@@ -139,8 +139,8 @@ func TestReplacePutsTheContentAndLeavesNoTemporaryFile(t *testing.T) {
 	}
 	requireContent(t, path, "new\r\n")
 	requireEntries(t, filepath.Dir(path), 1)
-	if opens != 2 {
-		t.Fatalf("%d opens: the temporary file is created and read back", opens)
+	if opens != 1 {
+		t.Fatalf("%d opens: the temporary file is created and read back through one handle", opens)
 	}
 }
 
@@ -164,13 +164,13 @@ func TestReplaceWritesTheTemporaryFileForItsOwnerOnly(t *testing.T) {
 	var name string
 	saved := replaceRead
 	t.Cleanup(func() { replaceRead = saved })
-	replaceRead = func(p string) ([]byte, error) {
-		info, err := os.Stat(p)
+	replaceRead = func(f *os.File) ([]byte, error) {
+		info, err := f.Stat()
 		if err != nil {
 			t.Fatal(err)
 		}
-		mode, name = info.Mode().Perm(), filepath.Base(p)
-		return saved(p)
+		mode, name = info.Mode().Perm(), filepath.Base(f.Name())
+		return saved(f)
 	}
 	if err := Replace(path, []byte("new"), ReplaceOptions{}); err != nil {
 		t.Fatal(err)
@@ -187,9 +187,9 @@ func TestReplaceStopsWhenTheTemporaryFileDiffers(t *testing.T) {
 	path := userFile(t, "old")
 	saved := replaceRead
 	t.Cleanup(func() { replaceRead = saved })
-	for name, read := range map[string]func(string) ([]byte, error){
-		"other bytes": func(string) ([]byte, error) { return []byte("ne"), nil },
-		"unreadable":  func(string) ([]byte, error) { return nil, errors.New("gone") },
+	for name, read := range map[string]func(*os.File) ([]byte, error){
+		"other bytes": func(*os.File) ([]byte, error) { return []byte("ne"), nil },
+		"unreadable":  func(*os.File) ([]byte, error) { return nil, errors.New("gone") },
 	} {
 		replaceRead = read
 		err := Replace(path, []byte("new"), ReplaceOptions{})
