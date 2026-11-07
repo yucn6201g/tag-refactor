@@ -1,0 +1,20 @@
+{
+  "stage": "code-generation",
+  "unit": "u7-rollback",
+  "version": 1,
+  "writes": [
+    { "path": "README.md" },
+    { "path": "go.mod" },
+    { "path": "go.sum" },
+    { "path": "internal/apply/" },
+    { "path": "internal/awsaccess/" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/journal/" },
+    { "path": "internal/rules/rules_test.go" },
+    { "path": "internal/testutil/" },
+    { "path": "scripts/u6check.go" },
+    { "path": "scripts/verify.sh" },
+    { "path": "test/sandbox/" }
+  ]
+}

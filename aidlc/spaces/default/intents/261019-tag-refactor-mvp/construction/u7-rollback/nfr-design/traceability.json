@@ -1,0 +1,176 @@
+{
+  "stage": "nfr-design",
+  "unit": "u7-rollback",
+  "upstream_ids": [
+    "NFR3.13",
+    "NFR3.14",
+    "NFR3.15",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR5.18",
+    "NFR5.19",
+    "NFR5.20",
+    "NFR5.21",
+    "NFR5.22",
+    "NFR5.23",
+    "NFR5.24",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR7.2",
+    "NFR8.26",
+    "NFR9.10",
+    "NFR10.11",
+    "NFR11.9",
+    "NFR3.10",
+    "NFR3.12",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR7.1",
+    "NFR8.23",
+    "NFR8.24",
+    "NFR8.25"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "security-design.md §1、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR3.14",
+      "status": "OK",
+      "target": "security-design.md §1"
+    },
+    {
+      "id": "NFR3.15",
+      "status": "OK",
+      "target": "security-design.md §2(確かめ、残るリスク、README の文)、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "security-design.md §3・§8、logical-components.md 同時の動き(放棄の共有)、テストの設計"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "logical-components.md テストの設計(U7 のチェックポイント。手順はインフラの設計)"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "security-design.md §9、logical-components.md 単位とまとまりの作り方"
+    },
+    {
+      "id": "NFR5.18",
+      "status": "OK",
+      "target": "security-design.md §8、logical-components.md パッケージごとの変更"
+    },
+    {
+      "id": "NFR5.19",
+      "status": "OK",
+      "target": "logical-components.md 同時の動き、単位とまとまりの作り方"
+    },
+    {
+      "id": "NFR5.20",
+      "status": "OK",
+      "target": "logical-components.md 単位とまとまりの作り方、テストの設計"
+    },
+    {
+      "id": "NFR5.21",
+      "status": "OK",
+      "target": "logical-components.md 30分の見積もりの測り方、security-design.md §4(保存の時間の行)"
+    },
+    {
+      "id": "NFR5.22",
+      "status": "OK",
+      "target": "logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR5.23",
+      "status": "OK",
+      "target": "security-design.md §8"
+    },
+    {
+      "id": "NFR5.24",
+      "status": "OK",
+      "target": "security-design.md §8"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "security-design.md §4"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "security-design.md §5"
+    },
+    {
+      "id": "NFR7.2",
+      "status": "OK",
+      "target": "security-design.md §6"
+    },
+    {
+      "id": "NFR8.26",
+      "status": "OK",
+      "target": "security-design.md §7"
+    },
+    {
+      "id": "NFR9.10",
+      "status": "OK",
+      "target": "logical-components.md テストの設計(U6 の部品をそのまま使う)"
+    },
+    {
+      "id": "NFR10.11",
+      "status": "OK",
+      "target": "logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR11.9",
+      "status": "OK",
+      "target": "logical-components.md パッケージごとの変更(internal/display)、テストの設計"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "security-design.md §1(U6 のまま、rollback にも広げる)"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "OK",
+      "target": "security-design.md §1(TagWriter の防御を U6 のまま使う)"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "security-design.md §4(壊れない保存を U6 のまま使う)"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "security-design.md §5(5秒ごとの保存の役を切り出して共有し、U6 のテストがそのまま通る)"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "security-design.md §6(印を U6 のまま使う)"
+    },
+    {
+      "id": "NFR8.23",
+      "status": "OK",
+      "target": "security-design.md §7(出さないものを U6 のまま)"
+    },
+    {
+      "id": "NFR8.24",
+      "status": "OK",
+      "target": "security-design.md §7(手元の権限を U6 のまま)"
+    },
+    {
+      "id": "NFR8.25",
+      "status": "OK",
+      "target": "security-design.md §4(S3 の書き込みを U6 のまま)"
+    }
+  ]
+}

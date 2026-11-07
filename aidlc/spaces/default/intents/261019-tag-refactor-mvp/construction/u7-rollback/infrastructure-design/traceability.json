@@ -1,0 +1,182 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u7-rollback",
+  "upstream_ids": [
+    "NFR3.13",
+    "NFR3.14",
+    "NFR3.15",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR5.18",
+    "NFR5.19",
+    "NFR5.20",
+    "NFR5.21",
+    "NFR5.22",
+    "NFR5.23",
+    "NFR5.24",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR7.2",
+    "NFR8.26",
+    "NFR9.10",
+    "NFR10.11",
+    "NFR11.9",
+    "NFR3.10",
+    "NFR3.12",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR7.1",
+    "NFR8.23",
+    "NFR8.24",
+    "NFR8.25",
+    "NFR9.9"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "ci.yml の test(権限の例の包含)、検証のスクリプト 手順 1・2(R3 で5つの種類の値を戻す・キーを消す)"
+    },
+    {
+      "id": "NFR3.14",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)。インフラの変更はない"
+    },
+    {
+      "id": "NFR3.15",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "ci.yml の test と race(差分0の各場面)、検証のスクリプト 手順 3(もう一度の rollback)"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "検証のスクリプト 手順 1・2・4(差分0、タグの API の答え)"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR5.18",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR5.19",
+      "status": "OK",
+      "target": "ci.yml の test と race(大きな偽の AWS のテスト)"
+    },
+    {
+      "id": "NFR5.20",
+      "status": "OK",
+      "target": "ci.yml の test(大きな偽の AWS のテストで式の上限と比べる)"
+    },
+    {
+      "id": "NFR5.21",
+      "status": "OK",
+      "target": "検証のスクリプト 手順 6、測る値の記録と見積もりの限界"
+    },
+    {
+      "id": "NFR5.22",
+      "status": "OK",
+      "target": "ci.yml の test と race(2つの分布のそれぞれが各 OS で30秒以内)"
+    },
+    {
+      "id": "NFR5.23",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR5.24",
+      "status": "N/A",
+      "target": "時計を差し替えた単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "ci.yml の test、検証のスクリプト 手順 1 の 5(S3 の記録の rollbacks と entries)"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "ci.yml の test と race(保存の同時実行)"
+    },
+    {
+      "id": "NFR7.2",
+      "status": "OK",
+      "target": "ci.yml の test(印の競争)、検証のスクリプト 手順 5(印が残っていない)と後片付け"
+    },
+    {
+      "id": "NFR8.26",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)。検証のスクリプトは認証情報を表示しない"
+    },
+    {
+      "id": "NFR9.10",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS)"
+    },
+    {
+      "id": "NFR10.11",
+      "status": "OK",
+      "target": "ci.yml の test と coverage(AWS の認証情報なし)"
+    },
+    {
+      "id": "NFR11.9",
+      "status": "OK",
+      "target": "ci.yml の test(表示の期待の出力)、チェックポイントでの人の確認(S3 の記録で rollback を --lang ja で動かす)"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "ci.yml の test(書き込みの口を渡す範囲。U6 のまま)"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "N/A",
+      "target": "U6 の単体テストのまま(ci.yml の test)"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS で壊れない保存。U6 のまま)"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "ci.yml の test(U6 の5秒ごとの保存のテストが共有の部品で通る)"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "ci.yml の test(印の競争。U6 のまま)"
+    },
+    {
+      "id": "NFR8.23",
+      "status": "N/A",
+      "target": "U6 の単体テストのまま(ci.yml の test)"
+    },
+    {
+      "id": "NFR8.24",
+      "status": "OK",
+      "target": "ci.yml の test(ubuntu と macos。U6 のまま)"
+    },
+    {
+      "id": "NFR8.25",
+      "status": "OK",
+      "target": "ci.yml の test(偽の S3 の要求)、検証のスクリプト 手順 1 の 5(S3 の記録)"
+    },
+    {
+      "id": "NFR9.9",
+      "status": "OK",
+      "target": "ci.yml の test(windows-latest。U6 の名前の変更のやり直しを rollback の保存でも使う)"
+    }
+  ]
+}

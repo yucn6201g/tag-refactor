@@ -1,0 +1,140 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u8-iac",
+  "upstream_ids": [
+    "NFR3.16",
+    "NFR3.17",
+    "NFR3.18",
+    "NFR3.19",
+    "NFR3.20",
+    "NFR3.21",
+    "NFR5.25",
+    "NFR5.26",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR8.27",
+    "NFR9.11",
+    "NFR9.12",
+    "NFR10.12",
+    "NFR10.13",
+    "NFR10.14",
+    "NFR11.10",
+    "NFR12.1",
+    "NFR6.1",
+    "NFR9.9",
+    "NFR3.10",
+    "NFR3.13"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.16",
+      "status": "OK",
+      "target": "ci.yml の test と coverage(AWS の認証情報なし)、検証のスクリプト 手順 3(iac は AWS を呼ばない)"
+    },
+    {
+      "id": "NFR3.17",
+      "status": "OK",
+      "target": "ci.yml の test、検証のスクリプト 手順 3(4行だけ変わる)と手順 5(元のファイルの SHA-256)"
+    },
+    {
+      "id": "NFR3.18",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS のリンクとジャンクション)"
+    },
+    {
+      "id": "NFR3.19",
+      "status": "OK",
+      "target": "ci.yml の test と race(上限、深さ、大きなテストのヒープ)"
+    },
+    {
+      "id": "NFR3.20",
+      "status": "OK",
+      "target": "ci.yml の test(一時のリポジトリの git の確かめ)、検証のスクリプト 手順 2・3(実際の git)"
+    },
+    {
+      "id": "NFR3.21",
+      "status": "OK",
+      "target": "検証のスクリプト 手順 1〜6(validate-template。cfn-lint は PATH にあるときだけ)、ci.yml の lint(書き換えたテンプレートの cfn-lint)、チェックポイントでの人の確認"
+    },
+    {
+      "id": "NFR5.25",
+      "status": "OK",
+      "target": "ci.yml の test・race・coverage(大きなテスト。coverage では時間の上限を3倍)、手元の実際の git を使う大きなテスト(TAG_REFACTOR_LARGE_REAL_GIT=1。結果は code-summary.md)"
+    },
+    {
+      "id": "NFR5.26",
+      "status": "OK",
+      "target": "ci.yml の test(ファイルを開いた回数)"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS の書き出し)"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "ci.yml の test"
+    },
+    {
+      "id": "NFR8.27",
+      "status": "OK",
+      "target": "ci.yml の test(秘密の値の出力の確かめ)"
+    },
+    {
+      "id": "NFR9.11",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS で同じ差分と結果、Windows の名前の変更)"
+    },
+    {
+      "id": "NFR9.12",
+      "status": "OK",
+      "target": "ci.yml の test に CGO_ENABLED=0 を足す(3つの OS × Go の2つの版)、build、go の行の前後の記録(code-summary.md)"
+    },
+    {
+      "id": "NFR10.12",
+      "status": "OK",
+      "target": "ci.yml の coverage"
+    },
+    {
+      "id": "NFR10.13",
+      "status": "OK",
+      "target": "ci.yml の vuln と modcheck、Dependabot(設定の変更なし)"
+    },
+    {
+      "id": "NFR10.14",
+      "status": "OK",
+      "target": "ci.yml の test(種類の表と terraform show -json の例)"
+    },
+    {
+      "id": "NFR11.10",
+      "status": "OK",
+      "target": "ci.yml の test(NO_COLOR の期待の出力)、チェックポイントでの人の確認(--lang ja)"
+    },
+    {
+      "id": "NFR12.1",
+      "status": "N/A",
+      "target": "README のライセンスの節は Code Generation で書く。インフラの変更はない"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "ci.yml の test(U6・U7 の保存のテストの回帰)"
+    },
+    {
+      "id": "NFR9.9",
+      "status": "OK",
+      "target": "ci.yml の test(windows-latest の名前の変更のやり直し。journal のテストの回帰)"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "ci.yml の test(iac に書き込みの口を渡さない)"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "ci.yml の test(書き込みの口を受け取るのは apply と rollback だけ)"
+    }
+  ]
+}

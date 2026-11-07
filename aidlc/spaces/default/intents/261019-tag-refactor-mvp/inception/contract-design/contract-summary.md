@@ -348,7 +348,9 @@ properties:
 
 - **中間の状態:** キー名の変更は「新しいキーを付ける」と「古いキーを消す」の2回の呼び出しです。Applier は必ず「付ける」を先に、「消す」を後に行います。間で止まると、古いキーと新しいキーの両方がある状態になりますが、どちらのキーも `beforeTags` か `plannedAfterTags` のどちらかと同じなので、上の表の2行目として戻せます。
 - **`pending` の項目:** 書き換え前に記録したが、まだ書き換えていない、または結果が分からないものです。rollback は上の表で判定します。
+- **status と判定(U6 の機能設計で追加):** rollback は status に関係なく、`touchedKeys` が空でない項目を上の表で判定します(`failed` のうち一部だけ書いた項目と、結果が分からず `pending` のまま残った項目を含む)。apply が書いていない項目(飛ばした、読めなかった)の `touchedKeys` は空で、rollback は何もしません。ただし、書き込みの直前の読み直しで飛ばした項目(U6 の規則 4.7)は、`pending` で保存したときの `touchedKeys` が残ったまま `skipped` になるため、rollback は status が `skipped` の項目を判定しません(他人の変更後のタグが `plannedAfterTags` と偶然同じでも戻さないため)。
 - **二重の rollback:** すでに戻した項目は、2回目の rollback で `alreadyRestored` になり、何もしません。
+- **rollback の結果(U7 の機能設計で追加):** rollback は apply の `entries` と `completed` を変えず、`rollbacks` に1回分を足します。途中で止めた rollback は `completed: false` で残り、同じ実行IDでもう一度 rollback すると、戻した項目は `alreadyRestored` になります。`results[].reason` の値は、skipped が `changedSinceApply`・`resourceNotFound`・`tagLimitExceeded`、failed が `readFailed`・`writeFailed`・`partialWrite`・`resultUnknown`・`notRestored`、restored で読み戻しで確かめられなかったものが `notConfirmed` です。failed の reason には、U6 と同じく誤りの種類を `:` でつなげることがあります(例: `writeFailed:AccessDenied`)。skipped の reason には付けません(書き込みのときになくなったリソースも `resourceNotFound` だけです)。reason は文字列の項目なので `version` は上げません。
 - **保存:** 書き込んでから名前を変えるなど、途中で壊れない方法で行います(NFR6)。
 
 ## C5. コマンドの使い方
@@ -359,9 +361,9 @@ commands:
   scan:          { options: [--rules, --profile, --format(table|json|markdown), --lang(en|ja)] }
   rules-suggest: { invocation: "rules suggest", options: [--profile, --lang] }
   plan:          { options: [--rules (必須), --profile, --format(table|diff|json|markdown), --out, --lang] }
-  apply:         { options: [--plan | --rules, --profile, --yes, --allow-impact, --record-to, --lang] }
-  rollback:      { options: [--run (必須), --profile, --force, --record-from, --yes, --lang] }
-  iac:           { phase: 3, options: "第3弾で決める" }
+  apply:         { options: [--plan | --rules, --profile, --yes, --allow-impact, --record-to, --force-unlock, --lang] }   # U6 の機能設計で確定。--plan と --rules はどちらか1つが必須
+  rollback:      { options: [--run (必須), --profile, --force, --record-from, --yes, --force-unlock, --lang] }   # U7 の機能設計で確定。apply が示す取り消しのコマンド(--record-from、--profile を含む。U6 で実装済み)をそのまま受け付ける
+  iac:           { phase: 3, options: [--plan (必須), --dir (必須), --tf-state, --write, --lang] }   # U8 の機能設計で確定。AWS を呼ばないので --profile は受け付けない。終了コード 2 は手で直すものがある
 streams:
   stdout: 結果(一覧、差分、JSON、Markdown)
   stderr: 進み具合、案内、警告、エラー
@@ -401,6 +403,8 @@ TagWriter:                       # 書き込み(U6・U7 だけに渡す)
   UntagResources(region, arns, keys) -> perResourceResult
 ObjectStore:                     # 記録を S3 に置く場合(U6・U7 だけに渡す)
   Put(uri, bytes) / Get(uri) -> error(StorageFailed, AccessDenied, NotFound)
+  PutIfAbsent(uri, bytes) -> error(Conflict, StorageFailed, AccessDenied)   # U6 で追加。同時実行を防ぐ印。412 PreconditionFailed と 409 ConditionalRequestConflict は Conflict、501 NotImplemented は StorageFailed
+  Delete(uri) -> error(StorageFailed, AccessDenied)                         # U6 で追加。印を消す
 rules:
   - 時間の上限と、待ち時間を延ばしながらの再試行は、この中だけで行う(呼び出し側は再試行しない)
   - 権限不足は、足りない操作(API)の名前つきの AccessDenied として返す
@@ -462,19 +466,24 @@ rules:
 ```yaml
 # go-interface contract (in-process)
 Journal:
-  Lock(accountId, location, purpose(apply|rollback)) -> LockHandle | error(Conflict: 同じアカウントで apply か rollback が実行中, StorageFailed)
+  Lock(accountId, location, purpose(apply|rollback), runId) -> LockHandle | error(Conflict: 同じアカウントで apply か rollback が実行中, StorageFailed)
+                                    # U6 で改訂: runId を先に作って渡す(印の中身に書くため)。手元の印は location に関係なく既定の場所、S3 の記録なら S3 の印も
   Release(LockHandle) -> error
-  Begin(LockHandle, planId) -> RunRecord | error(StorageFailed)
+  Begin(LockHandle, planId) -> RunRecord | error(StorageFailed)   # LockHandle の runId を使う
   RecordBefore(runId, []entry(arn, region, touchedKeys, beforeTags, plannedAfterTags)) -> error(StorageFailed)
                                     # 書き換えより先に保存。失敗したら Applier は何も書き換えない
   RecordAfter(runId, arn, afterTags, status, reason) -> error(StorageFailed)
   Complete(runId) -> error(StorageFailed)
   Load(runId, location) -> RunRecord | error(NotFound, UnsupportedVersion, StorageFailed)
-  RecordRollback(LockHandle, runId, rollbackId, []result) -> error(StorageFailed)
+  OpenForRollback(LockHandle, runId) -> RollbackRun | error(NotFound, UnsupportedVersion, StorageFailed)   # U7 の NFR の設計で追加。目的 rollback の LockHandle だけを受け付け、記録を1回取得する。下の3つは RollbackRun のメソッドとして作る
+  BeginRollback(LockHandle, runId, rollbackId, startedAt) -> error(StorageFailed)          # U7 で RecordRollback を3つに分けた。completed false の RollbackRun を足す
+  RecordRollbackResults(LockHandle, runId, rollbackId, []result) -> error(StorageFailed)   # その rollbackId の results に、ARN を鍵に足すか置き換える
+  CompleteRollback(LockHandle, runId, rollbackId) -> error(StorageFailed)                 # completed を true にする
 rules:
-  - apply と rollback は、どちらも最初に Lock を取り、終わったら Release する
+  - apply と rollback は、どちらも最初に Lock を取り、終わったら Release する(rollback の印の runId には rollbackId を書く。U7 の機能設計で決定)
+  - rollback は記録を読む前に印を取る。rollback の3つの呼び出しは、印を取ったあとに読んだ記録を知らない項目ごと持ち、自分の rollbackId の RollbackRun だけを変えて途中で壊れない方法で書き戻す(印を持っている間はほかの書き手がいないので、保存のたびには読み直さない)。entries、completed、ほかの RollbackRun、知らない項目は残す(U7 の機能設計と NFR の要件で決定)
   - 保存は途中で壊れない方法で行う
-  - 手元のファイルでは、同時実行を印のファイルで防ぐ。S3 の場合の扱いは未決(下の未決事項)
+  - 手元のファイルでは、同時実行を印のファイルで防ぐ。S3 に記録する場合は、S3 の条件付きの書き込みで作る印も取る(U6 の機能設計で決定)
 ```
 
 ## C11. 進み具合の通知口(ProgressSink)
@@ -499,7 +508,7 @@ ErrorKind:
   UnsupportedVersion: 読めない形式の版(ファイルの version と toolVersion、このツールが読める version を案内する)
   NotFound:           記録や変更案のファイルがない
   AccessDenied:       権限不足(足りない API の名前つき)
-  CredentialsMissing: 認証情報がない
+  CredentialsMissing: 認証情報がない(期限切れのトークン ExpiredToken・ExpiredTokenException・RequestExpired・TokenRefreshRequired も含む。U1 で実装済み。U6 の apply はこれを受けたら新しい書き込みを止める)
   Transient:          AWS の一時的な失敗(AwsAccess の再試行を使い切った後)
   StorageFailed:      手元のファイルや S3 への保存・読み込みの失敗(変更案の保存、記録の保存)
   AccountMismatch:    変更案や記録のアカウントと、今のアカウントが違う
@@ -527,12 +536,12 @@ mapping:
 |---|---|---|
 | C1 | 条件ごとの値が複数当てはまる場合の規則(案: 上から順に最初に一致したもの) | U3 |
 | C5 | オプション名の確定(scan、plan、rules suggest) | U1 |
-| C5 | オプション名の確定(apply、rollback) | U6、U7 |
-| C4、C10 | 記録の既定の保存先(案: `.tag-refactor/runs/`)と、同時実行を防ぐ印の置き場所 | U6、U7 |
-| C10 | 記録を S3 に置く場合に、同時実行を防ぐかどうか | U6 |
+| C5 | オプション名の確定(apply、rollback)。apply は U6 の機能設計で確定(`--plan`・`--rules` のどちらか1つ、`--yes`、`--allow-impact`、`--record-to`、`--force-unlock`)。rollback は U7 の機能設計で確定(`--run`(必須)、`--force`、`--record-from`、`--yes`、`--force-unlock`) | (決定済み) |
+| C4、C10 | 記録の既定の保存先と、同時実行を防ぐ印の置き場所。U6 の機能設計で決定: `<ホーム>/.tag-refactor/runs/<accountId>/<runId>.json`、印は同じフォルダーの `.lock`(中身は作った時刻・ホスト名・プロセスID・runId・目的。残った印は `--force-unlock` で人が外す) | (決定済み) |
+| C10 | 記録を S3 に置く場合に、同時実行を防ぐかどうか。U6 の機能設計で決定: S3 の条件付きの書き込みで `<前置き>/<accountId>/.lock` を印にし、手元の印も取る | (決定済み) |
 | C7 | 一度もタグが付いていないリソースを探すときの件数の上限と、打ち切ったときの扱い(要件 OQ5) | U2 |
 | C2、C7 | グローバルなリソースの種類ごとに、タグの API を呼ぶリージョンの確認 | U2、U6 |
-| C2 | IaC への反映(第3弾)に追加で必要な項目 | U8 |
+| C2 | IaC への反映(第3弾)に追加で必要な項目。U8 の機能設計で決定: 追加の項目は要らない(CloudFormation は beforeTags の aws:cloudformation のタグ、Terraform は --tf-state から得る) | (決定済み) |
 | C3 | Markdown 出力の詳しい形(U4 の機能設計で決定済み) | U4 |
 
 ## レビューを受けて決めたこと

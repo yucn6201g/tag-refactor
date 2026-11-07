@@ -93,7 +93,7 @@
     {
       "id": "BR1.2",
       "status": "OK",
-      "target": "internal/awsaccess/inline.go"
+      "target": "internal/awsaccess/read.go"
     },
     {
       "id": "BR1.3",

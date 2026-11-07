@@ -1,0 +1,19 @@
+{
+  "stage": "code-generation",
+  "unit": "u6-apply",
+  "version": 1,
+  "writes": [
+    { "path": "README.md" },
+    { "path": "docs/iam/apply-policy.json" },
+    { "path": "internal/apply/" },
+    { "path": "internal/awsaccess/" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/journal/" },
+    { "path": "internal/rules/rules_test.go" },
+    { "path": "internal/testutil/" },
+    { "path": "scripts/u6check.go" },
+    { "path": "scripts/verify.sh" },
+    { "path": "test/sandbox/" }
+  ]
+}

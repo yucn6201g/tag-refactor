@@ -1,0 +1,134 @@
+{
+  "stage": "nfr-design",
+  "unit": "u6-apply",
+  "upstream_ids": [
+    "NFR3.1",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.12",
+    "NFR4.1",
+    "NFR5.12",
+    "NFR5.13",
+    "NFR5.14",
+    "NFR5.15",
+    "NFR5.16",
+    "NFR5.17",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR7.1",
+    "NFR8.23",
+    "NFR8.24",
+    "NFR8.25",
+    "NFR9.8",
+    "NFR9.9",
+    "NFR10.10",
+    "NFR11.8"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "security-design.md §1 渡す範囲(U1 の NFR3.1 の確かめ: 偽の AWS で scan・rules suggest・plan が書き込みを呼ばないこと)を、書き込みの口を足したあとも保つ"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "security-design.md §1 渡す範囲(apply と rollback だけに TagWriter と ObjectStore)"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "security-design.md §2 書き換え用の権限の例と、書き換えの対象の種類の表(11種類)"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "OK",
+      "target": "security-design.md §1 aws: の防御(大文字と小文字を区別しない)"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "security-design.md §3 記録の中身"
+    },
+    {
+      "id": "NFR5.12",
+      "status": "OK",
+      "target": "security-design.md §5 書き込みの答えのリソースごとの失敗"
+    },
+    {
+      "id": "NFR5.13",
+      "status": "OK",
+      "target": "logical-components.md 書き換えの流れの中の同時の動き、まとまりと読み直しの単位の作り方"
+    },
+    {
+      "id": "NFR5.14",
+      "status": "OK",
+      "target": "logical-components.md まとまりと読み直しの単位の作り方、テストの設計(まとまりと同時の数)"
+    },
+    {
+      "id": "NFR5.15",
+      "status": "OK",
+      "target": "logical-components.md 30分の見積もりの測り方(検証コマンドで L95 を測り、NFR5.14・NFR5.15 の式で2つの分布を見積もる)"
+    },
+    {
+      "id": "NFR5.16",
+      "status": "OK",
+      "target": "logical-components.md テストの設計(大きな偽の AWS の2つの分布)"
+    },
+    {
+      "id": "NFR5.17",
+      "status": "OK",
+      "target": "security-design.md §5 止める条件(全リージョンで共有する数え役、2段の止め方)"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "security-design.md §3 壊れない保存"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "security-design.md §3 5秒ごとの保存"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "security-design.md §3 印"
+    },
+    {
+      "id": "NFR8.23",
+      "status": "OK",
+      "target": "security-design.md §4 出さないもの"
+    },
+    {
+      "id": "NFR8.24",
+      "status": "OK",
+      "target": "security-design.md §3 フォルダーの権限"
+    },
+    {
+      "id": "NFR8.25",
+      "status": "OK",
+      "target": "security-design.md §3 壊れない保存(S3 の ACL と暗号化、名前の範囲)"
+    },
+    {
+      "id": "NFR9.8",
+      "status": "OK",
+      "target": "security-design.md §3(os.OpenFile の O_EXCL、os.Rename)、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR9.9",
+      "status": "OK",
+      "target": "security-design.md §3 壊れない保存(Windows の名前の変更のやり直し)"
+    },
+    {
+      "id": "NFR10.10",
+      "status": "OK",
+      "target": "logical-components.md テストの設計(偽の AWS、認証情報なし、race の件数)"
+    },
+    {
+      "id": "NFR11.8",
+      "status": "OK",
+      "target": "logical-components.md パッケージごとの変更(display)、テストの設計(表示)"
+    }
+  ]
+}

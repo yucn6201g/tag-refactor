@@ -1,0 +1,134 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u6-apply",
+  "upstream_ids": [
+    "NFR3.1",
+    "NFR3.10",
+    "NFR3.11",
+    "NFR3.12",
+    "NFR4.1",
+    "NFR5.12",
+    "NFR5.13",
+    "NFR5.14",
+    "NFR5.15",
+    "NFR5.16",
+    "NFR5.17",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR7.1",
+    "NFR8.23",
+    "NFR8.24",
+    "NFR8.25",
+    "NFR9.8",
+    "NFR9.9",
+    "NFR10.10",
+    "NFR11.8"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "ci.yml の test(読み取りのコマンドが書き込みを呼ばない確かめ)"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "ci.yml の test(書き込みの口を渡す範囲)"
+    },
+    {
+      "id": "NFR3.11",
+      "status": "OK",
+      "target": "ci.yml の test(例と表の一致、R3 との一致)、検証のスクリプト 手順 2・3(R3 で6種類を書き換えて戻す)"
+    },
+    {
+      "id": "NFR3.12",
+      "status": "N/A",
+      "target": "単体テストだけで確かめる(ci.yml の test)。インフラの変更はない"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "検証のスクリプト 手順 3(記録の JSON で合否を決める)"
+    },
+    {
+      "id": "NFR5.12",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR5.13",
+      "status": "OK",
+      "target": "ci.yml の test と race(大きな偽の AWS のテスト)"
+    },
+    {
+      "id": "NFR5.14",
+      "status": "OK",
+      "target": "ci.yml の test(大きな偽の AWS のテスト)、検証のスクリプト 手順 7(式で回数を計算)"
+    },
+    {
+      "id": "NFR5.15",
+      "status": "OK",
+      "target": "検証のスクリプト 手順 7、測る値の記録と見積もりの限界"
+    },
+    {
+      "id": "NFR5.16",
+      "status": "OK",
+      "target": "ci.yml の test と race(各 OS で30秒以内)"
+    },
+    {
+      "id": "NFR5.17",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS で壊れない保存)"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "N/A",
+      "target": "時計を差し替えた単体テストで確かめる(ci.yml の test)"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "ci.yml の test(印の競争)、検証のスクリプト 手順 1・4(印が残っていない)と後片付け(残った印の案内)"
+    },
+    {
+      "id": "NFR8.23",
+      "status": "N/A",
+      "target": "偽の AWS の単体テストで確かめる(ci.yml の test)。検証のスクリプトは認証情報を表示しない"
+    },
+    {
+      "id": "NFR8.24",
+      "status": "OK",
+      "target": "ci.yml の test(ubuntu と macos で権限を確かめる)"
+    },
+    {
+      "id": "NFR8.25",
+      "status": "OK",
+      "target": "ci.yml の test(偽の S3 の要求)、U6 の確認用のスタックの BU6R、検証のスクリプト 手順 6(暗号化、ACL、ないキー)"
+    },
+    {
+      "id": "NFR9.8",
+      "status": "OK",
+      "target": "ci.yml の test(3つの OS)"
+    },
+    {
+      "id": "NFR9.9",
+      "status": "OK",
+      "target": "ci.yml の test(windows-latest)"
+    },
+    {
+      "id": "NFR10.10",
+      "status": "OK",
+      "target": "ci.yml の test と coverage(AWS の認証情報なし)"
+    },
+    {
+      "id": "NFR11.8",
+      "status": "OK",
+      "target": "ci.yml の test(表示の期待の出力)、チェックポイントでの人の確認"
+    }
+  ]
+}
