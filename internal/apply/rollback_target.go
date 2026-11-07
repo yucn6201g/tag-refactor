@@ -3,9 +3,15 @@ package apply
 import (
 	"maps"
 	"slices"
+	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/journal"
 )
+
+// staleReadWindow is how long after the start of an apply a read is not trusted
+// to show what apply wrote: the tagging API can answer with the tags before it.
+// The record has only the start, and an apply may take 30 minutes (NFR5.21).
+const staleReadWindow = time.Hour
 
 // Verdict is the judgement of a resource of rollback (U7 BR3.2, entities
 // RollbackTarget.verdict).
@@ -57,6 +63,11 @@ type RollbackTarget struct {
 	// TouchedKeys, BeforeTags and PlannedAfterTags are those of the record.
 	TouchedKeys                  []string
 	BeforeTags, PlannedAfterTags map[string]string
+	// StaleRead is set when apply wrote the target so recently that a read may
+	// not show it yet: every touched key is written back, whatever the read
+	// says. A write of the value before apply changes nothing if the read was
+	// right, and leaving the tag behind is what a stale read would do otherwise.
+	StaleRead bool
 	// Current are the tags of the last read, aws: keys included.
 	Current map[string]string
 	Verdict Verdict
@@ -81,14 +92,16 @@ type RollbackTarget struct {
 
 // newRollbackTargets returns the targets of the record: the entries with
 // touched keys whose status is not skipped, in ARN order (BR1.4).
-func newRollbackTargets(rec *journal.RunRecord) []*RollbackTarget {
+func newRollbackTargets(rec *journal.RunRecord, now time.Time) []*RollbackTarget {
+	recent := appliedRecently(rec, now)
 	var targets []*RollbackTarget
 	for _, e := range rec.Entries {
 		if len(e.TouchedKeys) == 0 || e.Status == journal.StatusSkipped {
 			continue
 		}
 		targets = append(targets, &RollbackTarget{ARN: e.ARN, Region: e.Region, TouchedKeys: e.TouchedKeys,
-			BeforeTags: nonNil(e.BeforeTags), PlannedAfterTags: nonNil(e.PlannedAfterTags), Status: RollbackPending})
+			BeforeTags: nonNil(e.BeforeTags), PlannedAfterTags: nonNil(e.PlannedAfterTags), Status: RollbackPending,
+			StaleRead: recent && (e.Status == journal.StatusApplied || e.Reason == string(ReasonResultUnknown))})
 	}
 	slices.SortFunc(targets, func(a, b *RollbackTarget) int {
 		switch {
@@ -100,6 +113,19 @@ func newRollbackTargets(rec *journal.RunRecord) []*RollbackTarget {
 		return 0
 	})
 	return targets
+}
+
+// appliedRecently reports whether the apply of the record started within
+// staleReadWindow and no rollback of it has started: after one, the tags are
+// what that rollback wrote, and a second rollback must find them restored
+// without a write (BR4.5).
+func appliedRecently(rec *journal.RunRecord, now time.Time) bool {
+	started, err := time.Parse(time.RFC3339, rec.StartedAt)
+	if err != nil || len(rec.Rollbacks) > 0 {
+		return false
+	}
+	age := now.Sub(started)
+	return age >= 0 && age < staleReadWindow
 }
 
 func nonNil(m map[string]string) map[string]string {
@@ -141,6 +167,9 @@ func keysMatch(keys []string, tags, want map[string]string) bool {
 // (BR3.2): only the touched keys count, never the others or aws: keys.
 func (t *RollbackTarget) judge(current map[string]string) Verdict {
 	if keysMatch(t.TouchedKeys, current, t.BeforeTags) {
+		if t.StaleRead {
+			return VerdictRestore
+		}
 		return VerdictAlreadyRestored
 	}
 	for _, k := range t.TouchedKeys {
@@ -195,9 +224,9 @@ func (t *RollbackTarget) compute() {
 		b, inBefore := t.BeforeTags[k]
 		cur, inCurrent := t.Current[k]
 		switch {
-		case inBefore && (!inCurrent || cur != b):
+		case inBefore && (t.StaleRead || !inCurrent || cur != b):
 			t.TagsToSet[k] = b
-		case !inBefore && inCurrent:
+		case !inBefore && (t.StaleRead || inCurrent):
 			t.KeysToRemove = append(t.KeysToRemove, k)
 		}
 	}
