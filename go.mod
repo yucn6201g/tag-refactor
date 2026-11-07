@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.20.13
 	github.com/aws/aws-sdk-go-v2/service/configservice v1.74.5
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.339.0
-	github.com/aws/aws-sdk-go-v2/service/iam v1.64.4
+	github.com/aws/aws-sdk-go-v2/service/iam v1.64.6
 	github.com/aws/aws-sdk-go-v2/service/kms v1.62.0
 	github.com/aws/aws-sdk-go-v2/service/resourceexplorer2 v1.33.5
 	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.41.5
