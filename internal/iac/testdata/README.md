@@ -1,6 +1,7 @@
 # テストのデータ
 
 - `sandbox-plan.json`: AWS を呼ばずに手で作った変更案。確認用のスタック `tag-refactor-u6-fixtures` の論理 ID とスタック名のタグを持つ。CI の `lint` のジョブが、`test/sandbox/` の写しへの反映に使う。
-- `terraform-show-example.json`: `terraform show -json` の形の例。**手で作ったもので、実物の出力ではない**(手元に terraform がない)。
+- `terraform-show-example.json`: `terraform show -json` の形の例。**手で作ったもので、実物の出力そのものではない**(実物には検証用アカウントの名前や ID が入るため、置いていない)。
   - 形は Terraform の公式の文書「JSON Output Format」(https://developer.hashicorp.com/terraform/internals/json-format 、v1.17.x の版を 2026-11-05 に確かめた)に合わせた: `format_version`、`terraform_version`、`values.root_module.resources` と `child_modules`、各リソースの `address`・`mode`・`type`・`name`・`provider_name`・`schema_version`・`values`・`sensitive_values`。
-  - **各種類の `values.arn` は確かめていない。** Terraform Registry の AWS プロバイダーの文書は取得できず、`internal/restype` の表の種類ごとに `arn` を置いたのは、この作業の前提(種類が ARN の属性を持つ)によるもの。実物の出力が取れるようになったら置き換える。
+  - **実物と照らした(2026-11-08):** Terraform 1.17.1 と AWS プロバイダー 6.72.0 で、確認用のスタックの既存のリソースを手元の state に `terraform import` し、`terraform show -json` の出力を `readTFState` で読んだ。8つの管理リソース(`aws_sqs_queue`、`aws_s3_bucket`、`aws_sns_topic`(`count`)、`aws_vpc`、`aws_security_group`、`aws_iam_role`、`aws_iam_policy`(`for_each`)、子モジュールの `aws_sqs_queue`)がすべて `values.arn` で読め、データソースは外れた。実物に合わせて、例に次を足した: `terraform_version` を 1.17.1 に、`identity_schema_version` と `identity`(`aws_sns_topic` と `aws_iam_policy` では `identity` の中にも `arn` がある。`iac` は `values.arn` だけを読む)、`count` と `for_each` のリソースの `index`、子モジュールで `address` が `resources` の後ろに来る順。
+  - **残りの11種類の `values.arn` は確かめていない**(`aws_secretsmanager_secret`、`aws_kms_key`、`aws_lambda_function`、`aws_dynamodb_table`、`aws_cloudwatch_log_group`、`aws_subnet`、`aws_instance`、`aws_ebs_volume`、`aws_db_instance`、`aws_rds_cluster`、`aws_iam_user`)。確認用のスタックにないため。この表の種類ごとに `arn` を置いたのは、この作業の前提(種類が ARN の属性を持つ)によるもの。

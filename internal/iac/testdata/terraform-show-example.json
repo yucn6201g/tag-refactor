@@ -1,15 +1,17 @@
 {
   "format_version": "1.0",
-  "terraform_version": "1.9.0",
+  "terraform_version": "1.17.1",
   "values": {
     "outputs": {
       "secret": {"sensitive": true, "value": "example-output-value"}
     },
     "root_module": {
       "resources": [
-        {"address": "aws_s3_bucket.example", "mode": "managed", "type": "aws_s3_bucket", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:s3:::example", "bucket": "example", "tags": {"env": "Prod"}, "tags_all": {"env": "Prod"}}, "sensitive_values": {"tags": {}, "tags_all": {}}},
-        {"address": "aws_sqs_queue.example", "mode": "managed", "type": "aws_sqs_queue", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sqs:ap-northeast-1:111122223333:example", "name": "example"}, "sensitive_values": {}},
-        {"address": "aws_sns_topic.example", "mode": "managed", "type": "aws_sns_topic", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:example"}, "sensitive_values": {}},
+        {"address": "aws_s3_bucket.example", "mode": "managed", "type": "aws_s3_bucket", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:s3:::example", "bucket": "example", "tags": {"env": "Prod"}, "tags_all": {"env": "Prod"}}, "sensitive_values": {"tags": {}, "tags_all": {}}, "identity_schema_version": 0, "identity": {"account_id": "111122223333", "bucket": "example", "region": "ap-northeast-1"}},
+        {"address": "aws_sqs_queue.example", "mode": "managed", "type": "aws_sqs_queue", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sqs:ap-northeast-1:111122223333:example", "name": "example"}, "sensitive_values": {}, "identity_schema_version": 1, "identity": {"url": "https://sqs.ap-northeast-1.amazonaws.com/111122223333/example"}},
+        {"address": "aws_sns_topic.example", "mode": "managed", "type": "aws_sns_topic", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:example"}, "sensitive_values": {}, "identity_schema_version": 0, "identity": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:example"}},
+        {"address": "aws_sns_topic.counted[0]", "mode": "managed", "type": "aws_sns_topic", "name": "counted", "index": 0, "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:counted"}, "sensitive_values": {}, "identity_schema_version": 0, "identity": {"arn": "arn:aws:sns:ap-northeast-1:111122223333:counted"}},
+        {"address": "aws_iam_policy.each[\"a\"]", "mode": "managed", "type": "aws_iam_policy", "name": "each", "index": "a", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:iam::111122223333:policy/each-a"}, "sensitive_values": {}, "identity_schema_version": 0, "identity": {"arn": "arn:aws:iam::111122223333:policy/each-a"}},
         {"address": "aws_secretsmanager_secret.example", "mode": "managed", "type": "aws_secretsmanager_secret", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:secretsmanager:ap-northeast-1:111122223333:secret:example-AbCdEf"}, "sensitive_values": {}},
         {"address": "aws_kms_key.example", "mode": "managed", "type": "aws_kms_key", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:kms:ap-northeast-1:111122223333:key/1234"}, "sensitive_values": {}},
         {"address": "aws_lambda_function.example", "mode": "managed", "type": "aws_lambda_function", "name": "example", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:lambda:ap-northeast-1:111122223333:function:example"}, "sensitive_values": {}},
@@ -28,9 +30,9 @@
         {"address": "data.aws_caller_identity.me", "mode": "data", "type": "aws_caller_identity", "name": "me", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:sts::111122223333:assumed-role/x/y"}, "sensitive_values": {}}
       ],
       "child_modules": [
-        {"address": "module.logs", "resources": [
+        {"resources": [
           {"address": "module.logs.aws_s3_bucket.this", "mode": "managed", "type": "aws_s3_bucket", "name": "this", "provider_name": "registry.terraform.io/hashicorp/aws", "schema_version": 0, "values": {"arn": "arn:aws:s3:::logs-bucket"}, "sensitive_values": {}}
-        ]}
+        ], "address": "module.logs"}
       ]
     }
   }

@@ -265,7 +265,8 @@ func TestStateExampleHasEveryTerraformTypeOfTheTable(t *testing.T) {
 			t.Errorf("no %s with values.arn in the example", r.TerraformType)
 		}
 	}
-	if !addresses["module.logs.aws_s3_bucket.this"] || addresses["data.aws_caller_identity.me"] {
+	if !addresses["module.logs.aws_s3_bucket.this"] || !addresses["aws_sns_topic.counted[0]"] ||
+		!addresses[`aws_iam_policy.each["a"]`] || addresses["data.aws_caller_identity.me"] {
 		t.Fatalf("addresses = %v", addresses)
 	}
 }

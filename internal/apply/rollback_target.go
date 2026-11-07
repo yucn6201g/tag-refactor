@@ -3,6 +3,7 @@ package apply
 import (
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/journal"
@@ -101,7 +102,7 @@ func newRollbackTargets(rec *journal.RunRecord, now time.Time) []*RollbackTarget
 		}
 		targets = append(targets, &RollbackTarget{ARN: e.ARN, Region: e.Region, TouchedKeys: e.TouchedKeys,
 			BeforeTags: nonNil(e.BeforeTags), PlannedAfterTags: nonNil(e.PlannedAfterTags), Status: RollbackPending,
-			StaleRead: recent && (e.Status == journal.StatusApplied || e.Reason == string(ReasonResultUnknown))})
+			StaleRead: recent && mayHaveWritten(e)})
 	}
 	slices.SortFunc(targets, func(a, b *RollbackTarget) int {
 		switch {
@@ -126,6 +127,17 @@ func appliedRecently(rec *journal.RunRecord, now time.Time) bool {
 	}
 	age := now.Sub(started)
 	return age >= 0 && age < staleReadWindow
+}
+
+// mayHaveWritten reports whether apply wrote, or may have written, some tags
+// of the entry: applied, a result unknown or a partial write. The reason of
+// the record can carry the error kind, as "resultUnknown:Throttling".
+func mayHaveWritten(e journal.Entry) bool {
+	if e.Status == journal.StatusApplied {
+		return true
+	}
+	reason, _, _ := strings.Cut(e.Reason, ":")
+	return reason == string(ReasonResultUnknown) || reason == string(ReasonPartialWrite)
 }
 
 func nonNil(m map[string]string) map[string]string {
