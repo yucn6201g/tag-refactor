@@ -539,6 +539,8 @@ u6_apply() {
     fi
     fail "apply ended with exit code $TOOL_STATUS without a complete run"
   fi
+  u6_record "$record_to"
+  u6_settled
 }
 
 # u6_record copies the record of the last run to U6_RECORD.
@@ -549,6 +551,34 @@ u6_record() {
       fail "the record $U6_RUN is not in s3://$u6_bucket/runs/$account/" ;;
     *) cp "$1/$account/$U6_RUN.json" "$U6_RECORD" || fail "the record $U6_RUN is not in $1/$account/" ;;
   esac
+}
+
+# u6_settled waits until the tagging API answers twice in a row with what the
+# apply of U6_RECORD wrote. The next plan reads the same API, and at the U8
+# checkpoint it still missed a resource 11 seconds after an apply. It does not
+# ease any check: a plan that leaves out a target still fails.
+u6_settled() {
+  local attempt r seen=0 started=$SECONDS now="$u6_dir/settled.json" pages
+  for attempt in $(seq 1 40); do
+    pages=""
+    for r in ap-northeast-1 us-east-1; do
+      pages="$pages,$(aws --profile "$admin" --region "$r" resourcegroupstaggingapi get-resources --output json)" ||
+        fail "cannot read the tags in $r"
+    done
+    printf '[%s]' "${pages#,}" >"$now"
+    if go run scripts/u6check.go settled "$U6_RECORD" "$now" >/dev/null 2>"$u6_dir/settled-stderr"; then
+      seen=$((seen + 1))
+      if [ "$seen" -eq 2 ]; then
+        [ "$attempt" -eq 2 ] || echo "verify: the tagging API showed the apply $U6_RUN after about $((SECONDS - started)) s"
+        return 0
+      fi
+    else
+      seen=0
+    fi
+    sleep 5
+  done
+  sed 's/^/  /' "$u6_dir/settled-stderr" >&2
+  fail "the tagging API does not show what the apply $U6_RUN wrote after $((SECONDS - started)) s"
 }
 
 # U6 step 3: add and remove the check key five times; the third run keeps
@@ -693,19 +723,24 @@ u7_snapshot() {
     fail "cannot read the tags of the targets in $region"
 }
 
-# u7_same checks that the tags of the ARNs are those of the snapshot $1
-# (eventually consistent: six reads 10 seconds apart).
+# u7_same checks that the tags of the ARNs are those of the snapshot $1, twice
+# in a row since the next plan reads the same API (eventually consistent: up to
+# eight reads).
 u7_same() {
-  local before="$1" attempt now
+  local before="$1" attempt now seen=0
   shift
-  for attempt in 1 2 3 4 5 6; do
+  for attempt in 1 2 3 4 5 6 7 8; do
     u7_snaps=$((u7_snaps + 1))
     now="$u7_dir/now-$u7_snaps.json"
     u7_snapshot "$now" "$@"
     if go run scripts/u6check.go same "$before" "$now" "$@" 2>"$u7_dir/same-stderr"; then
-      return 0
+      seen=$((seen + 1))
+      [ "$seen" -lt 2 ] || return 0
+      sleep 5
+      continue
     fi
-    echo "verify: the tags are not yet those before the apply (read $attempt of 6)"
+    seen=0
+    echo "verify: the tags are not yet those before the apply (read $attempt of 8)"
     sleep 10
   done
   sed 's/^/  /' "$u7_dir/same-stderr" >&2
