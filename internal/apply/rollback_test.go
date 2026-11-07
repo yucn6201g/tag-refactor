@@ -594,8 +594,12 @@ func TestARollbackRightAfterTheApplyDoesNotTrustAStaleRead(t *testing.T) {
 func TestAReadIsTrustedOnceTheApplyCannotBeStale(t *testing.T) {
 	unknown := renamed("a")
 	unknown.Status, unknown.Reason = journal.StatusPending, string(ReasonResultUnknown)
+	unknownKind := renamed("a")
+	unknownKind.Status, unknownKind.Reason = journal.StatusPending, string(ReasonResultUnknown)+":Throttling"
+	partial := renamed("a")
+	partial.Status, partial.Reason = journal.StatusFailed, string(ReasonPartialWrite)+":AccessDenied"
 	failed := renamed("a")
-	failed.Status, failed.Reason = journal.StatusFailed, string(ReasonWriteFailed)
+	failed.Status, failed.Reason = journal.StatusFailed, string(ReasonWriteFailed)+":AccessDenied"
 	earlier := recordStartedAgo(time.Second, renamed("a"))
 	earlier.Rollbacks = []journal.RollbackRecord{{RollbackID: "20261019T211003Z-0001", StartedAt: earlier.StartedAt}}
 	for name, c := range map[string]struct {
@@ -604,6 +608,8 @@ func TestAReadIsTrustedOnceTheApplyCannotBeStale(t *testing.T) {
 	}{
 		"just applied":             {recordStartedAgo(time.Second, renamed("a")), false},
 		"no answer to the write":   {recordStartedAgo(time.Second, unknown), false},
+		"an error with no answer":  {recordStartedAgo(time.Second, unknownKind), false},
+		"a partial write":          {recordStartedAgo(time.Second, partial), false},
 		"within the window":        {recordStartedAgo(staleReadWindow-time.Minute, renamed("a")), false},
 		"past the window":          {recordStartedAgo(staleReadWindow+time.Minute, renamed("a")), true},
 		"a write that failed":      {recordStartedAgo(time.Second, failed), true},
