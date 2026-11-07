@@ -20,7 +20,6 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 	}{
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: "bad flag"}, "bad flag", "--help"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Detail: "plain detail", Hint: "do this"}, "plain detail", "do this"},
-		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOptionNotAvailable, Subject: "apply"}, "apply is not available in this version", "scan"},
 		// U4: the files tag-refactor writes name the option to change.
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOutputExists, Subject: "plan.json", Key: "--out"}, "plan.json already exists", "another file name to --out"},
 		{&errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonOutputFolderMissing, Subject: "x/plan.json", Key: "--output"}, "the folder of x/plan.json does not exist", "--output"},

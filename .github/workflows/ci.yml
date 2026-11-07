@@ -43,6 +43,9 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
       - name: Test (acceptance, unit, performance, output guard, IAM example)
+        env:
+          # As the published binaries (U8 NFR9.12); only the race job turns cgo on.
+          CGO_ENABLED: "0"
         run: go test -mod=readonly ./...
 
   race:
@@ -110,6 +113,27 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check "cfn-lint==${CFN_LINT_VERSION}"
           cfn-lint test/sandbox/*-fixtures.yaml
+      - name: cfn-lint of a template iac rewrote (U8 NFR3.21)
+        # The binary is built first: go run answers 1 for any exit code of the
+        # program, and iac has to be told apart by 0 and 2.
+        run: |
+          go build -mod=readonly -o "$RUNNER_TEMP/tag-refactor" ./cmd/tag-refactor
+          repo="$RUNNER_TEMP/u8-repo"
+          empty="$RUNNER_TEMP/u8-empty"
+          mkdir -p "$repo" "$empty"
+          cp test/sandbox/* "$repo"/
+          export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
+          git init -q --template="$empty" "$repo"
+          git -C "$repo" -c core.autocrlf=false add -A
+          git -C "$repo" -c core.autocrlf=false -c commit.gpgsign=false -c core.hooksPath="$empty" \
+            -c user.name=ci -c user.email=ci@example.invalid commit -q -m "copy of test/sandbox"
+          status=0
+          "$RUNNER_TEMP/tag-refactor" iac --lang en --plan internal/iac/testdata/sandbox-plan.json --dir "$repo" --write || status=$?
+          if [ "$status" -ne 0 ] && [ "$status" -ne 2 ]; then echo "iac ended with exit code $status"; exit 1; fi
+          stat="$(git -C "$repo" diff --numstat)"
+          want="$(printf '4\t4\tu6-fixtures.yaml')"
+          if [ "$stat" != "$want" ]; then echo "the difference of iac is not 4 lines of u6-fixtures.yaml: $stat"; exit 1; fi
+          cfn-lint "$repo/u6-fixtures.yaml"
 
   vuln:
     runs-on: ubuntu-latest

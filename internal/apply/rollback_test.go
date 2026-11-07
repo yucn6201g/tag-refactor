@@ -355,7 +355,7 @@ func TestTheTargetsOfARecord(t *testing.T) {
 	nothing := journal.Entry{ARN: sqsARN("n"), Region: "us-east-1", Status: journal.StatusSkipped}
 	rec := record(renamed("z"), failed, pending, skipped, nothing)
 	var names []string
-	for _, t := range newRollbackTargets(&rec) {
+	for _, t := range newRollbackTargets(&rec, time.Now()) {
 		names = append(names, t.ARN[strings.LastIndex(t.ARN, ":")+1:])
 	}
 	if strings.Join(names, ",") != "f,p,z" {
@@ -538,6 +538,101 @@ func TestNothingToUndoAndNothingToWrite(t *testing.T) {
 	}
 	if rb := lastRun(w2.saved()); !rb.Completed || resultOf(rb, "a").Status != "alreadyRestored" {
 		t.Fatalf("record %+v", rb)
+	}
+}
+
+// recordStartedAgo is record(entries...) of an apply that started age ago.
+func recordStartedAgo(age time.Duration, entries ...journal.Entry) journal.RunRecord {
+	rec := record(entries...)
+	rec.StartedAt = time.Now().Add(-age).UTC().Format(time.RFC3339)
+	return rec
+}
+
+// The checkpoint of U8 found this on the real tagging API: 2 seconds after an
+// apply, the read answered with the tags before it, so the resource looked
+// already restored and kept the tag of the apply, with a rollback that
+// completed. Whatever the read says, a rollback right after the apply writes
+// every touched key back.
+func TestARollbackRightAfterTheApplyDoesNotTrustAStaleRead(t *testing.T) {
+	w := newRBWorld(t)
+	w.save(recordStartedAgo(2*time.Second, renamed("a")))
+	w.aws.put(sqsARN("a"), map[string]string{"env": "Prod"}) // the stale answer
+	// The tags the apply really left, which the first write back meets.
+	w.aws.onWrite = func(op string, _ []string) {
+		if op == awsaccess.OpTagResources {
+			w.aws.put(sqsARN("a"), map[string]string{"env": "Prod", "Environment": "prod"})
+		}
+	}
+	asked := 0
+	req := w.request()
+	req.Confirm = func(s RollbackSummary) (bool, error) {
+		asked++
+		if s.ToRestore != 1 || s.AlreadyRestored != 0 {
+			t.Errorf("summary %+v", s)
+		}
+		return true, nil
+	}
+
+	out := w.run(req)
+
+	if asked != 1 || out.Restored != 1 || out.AlreadyRestored != 0 || out.Unconfirmed != 0 || !out.Completed || out.ExitCode() != 0 {
+		t.Fatalf("asked %d, outcome %+v", asked, out)
+	}
+	tags, err := w.aws.GetTags(context.Background(), "us-east-1", []string{sqsARN("a")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !maps.Equal(tags[sqsARN("a")], map[string]string{"env": "Prod"}) {
+		t.Fatalf("tags %v", tags[sqsARN("a")])
+	}
+	if resultOf(lastRun(w.saved()), "a").Status != "restored" {
+		t.Fatalf("record %+v", lastRun(w.saved()))
+	}
+}
+
+// Only the writes of a recent apply that nothing undid yet are not trusted.
+func TestAReadIsTrustedOnceTheApplyCannotBeStale(t *testing.T) {
+	unknown := renamed("a")
+	unknown.Status, unknown.Reason = journal.StatusPending, string(ReasonResultUnknown)
+	failed := renamed("a")
+	failed.Status, failed.Reason = journal.StatusFailed, string(ReasonWriteFailed)
+	earlier := recordStartedAgo(time.Second, renamed("a"))
+	earlier.Rollbacks = []journal.RollbackRecord{{RollbackID: "20261019T211003Z-0001", StartedAt: earlier.StartedAt}}
+	for name, c := range map[string]struct {
+		rec   journal.RunRecord
+		trust bool
+	}{
+		"just applied":             {recordStartedAgo(time.Second, renamed("a")), false},
+		"no answer to the write":   {recordStartedAgo(time.Second, unknown), false},
+		"within the window":        {recordStartedAgo(staleReadWindow-time.Minute, renamed("a")), false},
+		"past the window":          {recordStartedAgo(staleReadWindow+time.Minute, renamed("a")), true},
+		"a write that failed":      {recordStartedAgo(time.Second, failed), true},
+		"a rollback already began": {earlier, true},
+		"a clock behind the apply": {recordStartedAgo(-time.Hour, renamed("a")), true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newRBWorld(t)
+			w.save(c.rec)
+			w.aws.put(sqsARN("a"), map[string]string{"env": "Prod"})
+
+			out := w.run(w.request())
+
+			if c.trust && (out.AlreadyRestored != 1 || out.Restored != 0 || len(w.aws.writes) != 0) {
+				t.Fatalf("already %d restored %d writes %d", out.AlreadyRestored, out.Restored, len(w.aws.writes))
+			}
+			if !c.trust && (out.AlreadyRestored != 0 || out.Restored != 1 || len(w.aws.writes) == 0) {
+				t.Fatalf("already %d restored %d writes %d", out.AlreadyRestored, out.Restored, len(w.aws.writes))
+			}
+		})
+	}
+}
+
+// A record whose start cannot be read is judged as an old one.
+func TestAStartThatCannotBeReadIsNotRecent(t *testing.T) {
+	rec := record(renamed("a"))
+	rec.StartedAt = "not a time"
+	if appliedRecently(&rec, time.Now()) {
+		t.Fatal("recent")
 	}
 }
 

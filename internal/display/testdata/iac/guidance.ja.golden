@@ -1,0 +1,2 @@
+Terraform で管理しているリソースがあれば、terraform show -json の出力を --tf-state で渡してください
+ファイルは書き換えていません。書き換えるには --write を付けてください。

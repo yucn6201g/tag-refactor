@@ -1,0 +1,31 @@
+--- a/main.tf
++++ b/main.tf
+@@ -1,1 +1,1 @@
+-  env = "Prod"
++  Environment = "prod"
+
+--- a/stacks/orders.yaml
++++ b/stacks/orders.yaml
+@@ -3,4 +3,4 @@
+     Type: AWS::SQS::Queue
+-        - Key: env
++        - Key: Environment
+\ No newline at end of file
+
+main.tf: 4件の変更を反映できます
+stacks/orders.yaml: 1件の変更を反映できます
+反映済みの変更: 3件
+
+ソースにないため反映済みとみなした削除(1件。スタックのタグや default_tags で付けていれば、そちらを直してください):
+  arn:aws:sqs:ap-northeast-1:111122223333:audit  obsolete  stacks/audit.yaml
+
+手で直すもの(7件):
+  arn:aws:s3:::logs-bucket  env  (場所なし)  Terraform のモジュールの中のリソースです(module.logs.aws_s3_bucket.this)
+  arn:aws:s3:::twice  env  (場所なし)  定義の場所が2つ以上あり、1つに決められません(a.b, c.d)
+  arn:aws:sqs:ap-northeast-1:111122223333:billing  Owner  stacks/billing.yaml:20  値が式(!Ref、var.x、ブロックスカラーなど)のため書き換えられません
+  arn:aws:sqs:ap-northeast-1:111122223333:c  k  (場所なし)  定義の場所が2つ以上あり、1つに決められません(候補: dev/a.yaml, prod/a.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:d  k  (場所なし)  論理 ID と種類が合うテンプレートが --dir にありません(CDK や SAM の名前は生成されたものです。CDK は後の作業です)(種類が違うテンプレート: a.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:e  k  (場所なし)  論理 ID と種類が合うテンプレートが --dir にありません(CDK や SAM の名前は生成されたものです。CDK は後の作業です)(外したファイル: bad.yaml)
+  arn:aws:sqs:ap-northeast-1:111122223333:f  k  a.yaml:3  キーがソースにありません。スタックのタグや default_tags で付いているかもしれません
+
+IaC で管理されていないリソース: 12 リソース(CloudFormation のタグがなく、--tf-state にもありません)

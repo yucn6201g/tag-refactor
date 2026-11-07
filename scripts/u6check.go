@@ -10,6 +10,8 @@
 //	go run scripts/u6check.go rollback <record.json> [--id <rollback-id>] [--restored-min <n>] [--all-already]
 //	go run scripts/u6check.go entries <record-before.json> <record-after.json>
 //	go run scripts/u6check.go same <snapshot-before.json> <snapshot-after.json> <arn>...
+//	go run scripts/u6check.go includes <plan.json> <from-key> <to-key> <arn>...
+//	go run scripts/u6check.go settled <record.json> <snapshot.json>
 //
 // plan: every resource with changes changes the check key only (added for
 // add, removed for remove; for rename, the key renamed to --dst and the value
@@ -31,6 +33,11 @@
 // two snapshots (the JSON of "aws resourcegroupstaggingapi get-resources", or
 // a list of them); an ARN a snapshot leaves out has no tags. It names the
 // keys that differ, never their values.
+// includes: each listed ARN is in the plan with a rename of from-key to to-key
+// and a change of the value of to-key; other resources may be in it too, since
+// iac does not use the impact (U8 cicd-pipeline.md).
+// settled: the snapshot shows every touched key of the applied entries as the
+// apply planned it, so a plan made now reads what the apply wrote.
 // It prints one line on success and exits 1 with the reason otherwise.
 package main
 
@@ -72,9 +79,11 @@ type record struct {
 	RunID     string `json:"runId"`
 	Completed bool   `json:"completed"`
 	Entries   []struct {
-		ARN    string `json:"arn"`
-		Status string `json:"status"`
-		Reason string `json:"reason"`
+		ARN              string            `json:"arn"`
+		Status           string            `json:"status"`
+		Reason           string            `json:"reason"`
+		TouchedKeys      []string          `json:"touchedKeys"`
+		PlannedAfterTags map[string]string `json:"plannedAfterTags"`
 	} `json:"entries"`
 	Rollbacks []struct {
 		RollbackID string `json:"rollbackId"`
@@ -104,7 +113,7 @@ func read(path string, v any) {
 
 func main() {
 	if len(os.Args) < 3 {
-		fail("usage: u6check plan|record|rollback|entries|same <file> ...")
+		fail("usage: u6check plan|record|rollback|entries|same|includes|settled <file> ...")
 	}
 	switch os.Args[1] {
 	case "plan":
@@ -129,6 +138,16 @@ func main() {
 			fail("usage: u6check same <before.json> <after.json> <arn>...")
 		}
 		checkSame(os.Args[2], os.Args[3], os.Args[4:])
+	case "includes":
+		if len(os.Args) < 6 {
+			fail("usage: u6check includes <plan.json> <from-key> <to-key> <arn>...")
+		}
+		checkIncludes(os.Args[2], os.Args[3], os.Args[4], os.Args[5:])
+	case "settled":
+		if len(os.Args) != 4 {
+			fail("usage: u6check settled <record.json> <snapshot.json>")
+		}
+		checkSettled(os.Args[2], os.Args[3])
 	default:
 		fail("unknown check %q", os.Args[1])
 	}
@@ -226,6 +245,33 @@ func checkPlan(path, mode string, args []string) {
 		}
 	}
 	fmt.Printf("plan (%s): %d resources, only %s, no impact but that of P2\n", mode, len(p.Resources), a.key)
+}
+
+func checkIncludes(path, from, to string, arns []string) {
+	var p plan
+	read(path, &p)
+	for _, arn := range arns {
+		renamed, changed, found := false, false, false
+		for _, r := range p.Resources {
+			if r.ARN != arn {
+				continue
+			}
+			found = true
+			for _, c := range r.Changes {
+				renamed = renamed || c.Kind == "renameKey" && c.FromKey == from && c.ToKey == to
+				changed = changed || c.Kind == "changeValue" && c.FromKey == to
+			}
+		}
+		switch {
+		case !found:
+			fail("%s is not in the plan", arn)
+		case !renamed:
+			fail("%s has no rename of %s to %s", arn, from, to)
+		case !changed:
+			fail("%s has no change of the value of %s", arn, to)
+		}
+	}
+	fmt.Printf("includes: %d resources in a plan of %d, each with the rename of %s and the change of its value\n", len(arns), len(p.Resources), from)
 }
 
 func checkRecord(path, planPath string, want []string) {
@@ -377,6 +423,25 @@ func snapshot(path string) map[string]map[string]string {
 		}
 	}
 	return out
+}
+
+func checkSettled(recordPath, snapshotPath string) {
+	var r record
+	read(recordPath, &r)
+	now := snapshot(snapshotPath)
+	for _, e := range r.Entries {
+		if e.Status != "applied" {
+			continue
+		}
+		for _, k := range e.TouchedKeys {
+			got, inNow := now[e.ARN][k]
+			want, inPlan := e.PlannedAfterTags[k]
+			if inNow != inPlan || got != want {
+				fail("%s does not show the change of %s yet", e.ARN, k)
+			}
+		}
+	}
+	fmt.Printf("settled: the snapshot shows what %s wrote\n", r.RunID)
 }
 
 func checkSame(beforePath, afterPath string, arns []string) {

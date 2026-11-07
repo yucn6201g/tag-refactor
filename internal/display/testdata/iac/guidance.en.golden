@@ -1,0 +1,2 @@
+if Terraform manages some of these resources, pass the output of terraform show -json with --tf-state
+No file was changed. Add --write to change the files.

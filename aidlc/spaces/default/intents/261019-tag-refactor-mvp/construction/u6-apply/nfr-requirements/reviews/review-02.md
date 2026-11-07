@@ -1,0 +1,54 @@
+## Review
+
+**Verdict:** READY
+**Reviewer:** aidlc-architecture-reviewer-agent
+**Date:** 2026-10-29T01:39:52Z
+**Iteration:** 2
+
+### Findings
+
+| ID | Severity | Location | Finding | Required action | Status |
+|---|---|---|---|---|---|
+| R-01 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > NFR5.15 | 30分の見積もりの式(回数 ÷ 同時の数 × L95 × 1.5)は、実際の書き込みの所要時間を表していない。(1) リージョンは同時に4つ、1つのリージョンの中は順に書く(NFR5.13)ので、所要時間は全呼び出しの合計 ÷ 4 ではなく、最も呼び出しの多いリージョンの順の時間になる。1リージョンに件数が偏ると並列の効果はほぼない。(2) `GetResources`(100 ARN)、`TagResources`、`UntagResources` の所要時間は違うのに、1つの L95 を全部に掛けている。(3) 回数の上限に当たったときの待ち(Tagging API の書き込みは上限が低い)と、5秒ごとに保存する最大約10 MB の記録の保存時間(NFR6.2)が入っていない。(4) 係数1.5の根拠がない。このため、30分以内という合否は見積もりの作り方で結果が変わる | 見積もりを、リージョンごとの順の時間の最大値(最も重いリージョンが決める時間)で求める式にする。操作の種類ごとの回数と L95 を掛けて足す。待ちの時間と記録の保存の時間を項目として入れるか、測った値を使う。係数1.5の根拠を書くか、実測のばらつきから決める。どのリージョンに何件あるものとして見積もるかも合否の基準に書く | Resolved (reviewer) |
+| R-02 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > NFR5.13、NFR5.15(同じ組み合わせが平均10個以上) | 30分の合否は「同じ組み合わせが平均10個以上」という前提に頼っているが、その根拠も、確かめる方法もない。主な使い方であるキー名の変更(renameKey)は、リソースごとの元の値をそのまま新しいキーに移すので、付けるタグの組み合わせは値ごとに変わる(`Name` や `Owner` のように値が多様なキーでは、ほぼ1リソース1組になる)。その場合、式では最大約 N × 4 回になり、1万件で約4万回、見積もりは30分を大きく超えうる。しかも最悪の場合の見積もりは記録するだけで合否に使わない(Q3)ので、利用者が最もよく使う変更で目標を満たさなくても検出できない。また、読み直し(BR4.7)と読み戻し(BR4.3)をまとまりごとに行う設計(Q2 A)では、まとまりが1件に縮むと、1回で100 ARN まで読める `GetResources` を1件ごとに呼ぶことになり、読みだけで約2万回増える | 前提の平均10個以上を、何で確かめるか(検証用アカウントのデータの条件か、テスト用の分布か)を合否の基準に書く。読み直しと読み戻しを、複数のまとまりを束ねて最大100 ARN の `GetResources` で行う(「書く直前」の意味は保つ)よう要件に入れ、NFR5.14 の式と一緒に直す。値が多様なキー名の変更の場合の見積もりと、その利用者への案内(所要時間の目安の表示)を要件に入れるか、受け入れる理由を記録して承認を得る | Resolved (reviewer) |
+| R-03 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > NFR5.17(と NFR5.13、機能設計 BR4.2) | 「Transient の失敗が10件続いたとき」の「件」が、リソース数か呼び出し数か決まっていない。書き込みは1回の呼び出しで最大20個のリソースをまとめる(NFR5.13)ので、リソース数で数えるなら、再試行を使い切った1回の呼び出しの失敗(20件)だけで、10件の上限に達する。呼び出し数で数えるなら機能設計の「10件」と食い違う。さらに、4つのリージョンが同時に動くときに、「続いた」をリージョンをまたいで数えるのか、リージョンごとに数えるのかも決まっていない。上限の意味が決まらないため、合否のテストが書けない | 「件」の単位(書き込みの呼び出し数がよい)と、「続いた」の数え方(成功で0に戻すか、リージョンごとか全体か)を要件に書く。機能設計の BR4.2 の文言も同じに直す。1回の呼び出しの失敗だけで止まらないことと、設定した回数で止まることの両方をテストの基準にする | Resolved (reviewer) |
+| R-04 | Major | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/security-requirements.md > NFR3.11 | 書き換え用のポリシーの例の要件が、実現できる形になっていない。(1) 「ツールが書き換えられる種類」の一覧と、「コードの操作の表」の定義がどの成果物にもない。(2) 例と表の一致を確かめるテストは、同じ人が作る2つの表を比べるだけで、AWS が実際に要求する権限(種類ごとのタグの操作)が正しいことは確かめられない。合っているかは検証用アカウントでの確かめにしか頼れないが、どの種類を確かめるかの基準がない。(3) `tag:TagResources`・`tag:UntagResources` は、Resource Groups Tagging API の操作で、リソースの ARN には絞れない(Resource は `*`)という前提を表に書いていないため、「ARN の形に絞れるものは絞る」がどの操作に当たるのか分からない。(4) 合否に「`Delete*` など関係のない書き込みがない」とあるが、必須の `ec2:DeleteTags` と `s3:DeleteObject` 自体が `Delete*` で、基準が自己矛盾している | 対象の種類の一覧(U2 が収集する種類との対応)を要件か表で決め、種類ごとのタグを付ける・消す操作の表を正本として置く。テストは、表と例の一致に加えて、種類ごとの実際の確かめ(検証用アカウントで各種類を1件ずつ書き換える)を U6 のチェックポイントの基準にする。ARN に絞れない操作とその理由(要確認: 現行の IAM の操作とリソースの対応表)を書く。`Delete*` の基準は、許す操作の一覧(許可リスト)との差で確かめる形に直す | Resolved (reviewer) |
+| R-05 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/security-requirements.md > NFR3.10 | 「書き込みの操作は apply だけが呼ぶ」は、機能設計(書き込みの権限を使うのは U6 と U7 だけ)と食い違う。rollback(U7)も同じ TagWriter と記録、印の書き込みを使う。また「コードの依存の検査」は、チームの lint が既定の linter だけ(依存の禁止を扱う linter はない)なので、何で検査するのかが決まっていない | 「apply と rollback だけ」に直し、`scan`・`rules suggest`・`plan` に書き込みの口を渡さないことを基準にする。依存の検査は、`go list` の依存を調べるテストなど、使う仕組みを書く | Resolved (reviewer) |
+| R-06 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/security-requirements.md > NFR8.24 | Windows は「プロファイルの既定の権限」とし、作れることだけを確かめるが、Go の `os.MkdirAll` のモードは Windows では効かない。`--record-to` で指定した別の手元のフォルダー(プロファイルの外や共有の場所)では、継承された権限で他の利用者が読める可能性がある。Linux と macOS でも、すでにあるフォルダーの権限は変わらず、基準は「作ったフォルダー」だけを見ている。記録には ARN とタグの値が入る | `--record-to` の手元のフォルダーが既定の場所の外にある場合の扱い(権限を確かめて警告する、または既定の場所だけを守ると明記する)を決める。Windows の制約と、受け入れる残るリスクを要件に書く | Resolved (reviewer) |
+| R-07 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/nfr-requirements-questions.md > 決まっていること、Q5 と security-requirements.md > NFR8.23 | 確認済みの回答(決まっていること、Q5)は「記録とログファイルにタグの値が入る」としているが、NFR8.23 と機能設計 BR5.5 はログファイルにタグの値を書かない。要件の方が厳しく安全だが、Q5 の守る範囲の理由(ログファイルにも値が入る)と食い違っている | NFR8.23 に、ログファイルにはタグの値も書かないことを明記し、NFR8.24 の対象の説明(値が入るのは記録だけ)をそろえる | Resolved (reviewer) |
+| R-08 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/security-requirements.md > NFR6.2 | 5秒ごとに、最大約10 MB の記録全体を保存するが、保存が5秒を超えたときの扱い(次の保存を待つか、重ねないか)、保存が書き込みを止めるかが決まっていない。S3 の1回の一時的な失敗でも、全体の書き込みを止める(BR4.4)ことになり、壊れやすい。書く前の記録(BR3.7)は保存済みなので、周期の保存の失敗は次の周期でやり直しても安全性は変わらない | 保存の重なりと、書き込みへの影響の基準を書く。周期の保存の失敗は、設定した連続の回数までは次の周期でやり直し、上限を超えたら止める、など止める条件を数にする | Resolved (reviewer) |
+| R-09 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > 技術の選択(壊れない保存)、NFR6.1、NFR9.8 | `os.Rename` は Windows では既存のファイルを置き換えられるが、置き換え先を別のプロセス(読み取り中の U7 や、ウイルス対策のソフト)が開いていると、共有違反で失敗することがある。再試行や、ディレクトリのディスクへの書き出し(Windows では使えない)の扱いが決まっていない。テストは差し替えによる中断だけで、実際のクラッシュは確かめない | 名前の変更の失敗を再試行する回数を決める。Windows でのディスクへの書き出しの限界を書き、テストの限界として受け入れる | Resolved (reviewer) |
+| R-10 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > 技術の選択(S3 の記録と印)、security-requirements.md > NFR7.1 | `IfNoneMatch` を使うには、AWS SDK for Go v2 の `s3` モジュールが条件付きの書き込みに対応した版である必要があるが、最低の版を要件に書いていない。「別の端末からの同時実行も防げる」は、`--record-to` が S3 のときだけ成り立つ(既定の手元の印は端末をまたげない)のに、NFR7.1 にその限界が書かれていない | `s3` モジュールの最低の版を決めて固定する。NFR7.1 に、手元の記録だけのときは別の端末からの同時実行を防げないことを明記する | Resolved (reviewer) |
+| R-11 | Minor | aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u6-apply/nfr-requirements/tech-stack-decisions.md > NFR5.12、security-requirements.md > NFR3.12 | (1) `TagResources` は、答えが成功でも、リソースごとの失敗の一覧に再試行できる失敗(内部エラー)が入りうるが、その再試行と C12 の種類への対応が要件にない。(2) NFR3.12 は `aws:` のキーを拒むとしているが、機能設計 BR3.5 の「大文字と小文字を区別しない」が入っていない | リソースごとの失敗の一覧の扱い(再試行の対象と C12 の種類への対応)を NFR5.12 に足す。NFR3.12 に大文字と小文字を区別しないことと、そのテストを足す | Resolved (reviewer) |
+
+> R-01 Reviewer note: NFR5.15 の式が、リージョンごとの順の時間の最大値(max_r)を、操作の種類別の回数と L95 の積の和で求める形になった。係数1.2の根拠、待ちの時間、最後の記録の保存の時間が項目に入り、測る条件の表に偏ったリージョンの配分(2,000と500×16)がある。
+
+> R-02 Reviewer note: 「平均10個以上」の前提が消えた。読み直しと読み戻しは100 ARN までの単位で束ねる(NFR5.13、NFR5.14 の R(r))。値がばらばらなキー名の変更の見積もり(約24分)は測る条件の表に載り、記録するが合否には使わない(Q3)。README への案内は明記された。
+
+> R-03 Reviewer note: NFR5.17 で「件」が書き込みの呼び出し1回に定まり、「続いた」は全リージョン通しで、成功すれば0に戻る。9回続いて1回成功、10回続くと止まる、20個の失敗だけでは止まらないテストが基準にある。機能設計 BR4.2 の「10件」の文言は、NFR5.17 が呼び出しの数と明記して解釈を固定している。
+
+> R-04 Reviewer note: NFR3.11 は、種類ごとの操作の表を正本とし、含める種類を明記した。例と表の完全一致のテストと、検証用アカウントでの1件ずつの確かめ(U6 のチェックポイント)を基準にしている。`tag:` の2操作が `"*"` である理由も書かれた。`Delete*` の自己矛盾は、許可の一覧との差で確かめる形に直った。
+
+> R-05 Reviewer note: NFR3.10 が「apply と rollback(U7)だけ」になり、型の確かめの単体テストを検査の手段にした。
+
+> R-06 Reviewer note: NFR8.24 で、既存フォルダーがほかの利用者から読める場合の警告と、Windows の制約・限界の README への記載が入った。
+
+> R-07 Reviewer note: NFR8.23 に、ログファイルにタグの値を書かず、値が入るのは記録だけと明記された。
+
+> R-08 Reviewer note: NFR6.2 に、保存を重ねないこと、書き込みを待たせないこと、3回続けて失敗したら止めることが入り、テストの基準もある。
+
+> R-09 Reviewer note: NFR9.9 に、名前の変更の再試行(100ミリ秒おき、最大5回)と、Windows のディスクへの書き出しの限界の受け入れが入った。
+
+> R-10 Reviewer note: `s3` の v1.114.3 以上を固定する旨と、手元の印では別の端末の同時実行を防げない限界(NFR7.1)が書かれた。
+
+> R-11 Reviewer note: NFR5.12 にリソースごとの失敗の一覧の扱い(再試行の対象と C12 の種類への対応)、NFR3.12 に大文字と小文字を区別しない拒否とそのテストが入った。
+
+### Validation Tool Results
+
+| Tool | Result | Interpretation |
+|---|---|---|
+| sensor-traceability | pass: true(gaps、orphans、invalid_entries、findings_count はすべて 0) | 要件の ID と上流の対応に欠けや余りはない |
+
+### Summary
+
+前回の Major 4件と Minor 7件は、いずれも成果物で解消されている。新しい Critical と Major はなく、30分の見積もり、書き込みの止め方、権限の例、記録の守り方は、実装者が追加の確認なしに作れる水準で定まっている。

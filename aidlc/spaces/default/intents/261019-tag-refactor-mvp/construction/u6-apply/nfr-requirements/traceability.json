@@ -1,0 +1,80 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u6-apply",
+  "upstream_ids": [
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "NFR11",
+    "NFR12"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "N/A",
+      "target": "U6 は scan と plan の速さを変えない。apply --rules の変更案づくりは NFR1 のまま。apply の書き込みの時間は NFR5.15"
+    },
+    {
+      "id": "NFR2",
+      "status": "N/A",
+      "target": "U6 は影響分析を変えない(U5)"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "NFR3.10, NFR3.11, NFR3.12"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "NFR4.1"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "NFR5.12, NFR5.13, NFR5.14, NFR5.15, NFR5.16, NFR5.17"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "NFR6.1, NFR6.2"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "NFR7.1"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "NFR8.23, NFR8.24, NFR8.25"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "NFR9.8, NFR9.9"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "NFR10.10"
+    },
+    {
+      "id": "NFR11",
+      "status": "OK",
+      "target": "NFR11.8"
+    },
+    {
+      "id": "NFR12",
+      "status": "N/A",
+      "target": "配布の仕組みは作業単位に含めず、別の作業で行う"
+    }
+  ]
+}

@@ -74,7 +74,6 @@ const (
 	ReasonTimeout             Reason = "timeout"
 	ReasonRetriesExhausted    Reason = "retries-exhausted"
 	ReasonUsage               Reason = "usage"
-	ReasonOptionNotAvailable  Reason = "option-not-available"
 	ReasonRuleFile            Reason = "rule-file"
 	// ReasonNoDefaultView is an AccessDenied of Resource Explorer: the region
 	// has no default view, so ListResources cannot be used (U2, C12).

@@ -177,7 +177,7 @@ func (c *rollbackConductor) rollback(ctx context.Context, h *journal.LockHandle)
 	if err := checkRecord(rec, c.req.AccountID, c.req.RunID, run.Where()); err != nil {
 		return err
 	}
-	targets := newRollbackTargets(rec)
+	targets := newRollbackTargets(rec, c.r.opts.Now())
 	c.out.Targets = targets
 	if len(targets) == 0 {
 		c.out.NothingToUndo = true

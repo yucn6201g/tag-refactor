@@ -1,0 +1,32 @@
+{
+  "stage": "functional-design",
+  "unit": "u8-iac",
+  "upstream_ids": [
+    "AC7.1.1",
+    "AC7.1.2",
+    "AC7.2.1",
+    "AC7.3.1"
+  ],
+  "coverage": [
+    {
+      "id": "AC7.1.1",
+      "status": "OK",
+      "target": "BR1.1, BR1.3, BR2.1, BR2.3, BR2.4, BR3.1, BR3.3, BR4.1, BR4.2, BR4.3, BR4.4, BR4.5, BR4.6, BR5.1, BR5.2, BR5.3, BR6.1, BR6.2, BR6.3"
+    },
+    {
+      "id": "AC7.1.2",
+      "status": "OK",
+      "target": "BR1.1, BR1.2, BR2.1, BR2.2, BR3.1, BR3.2, BR4.1, BR4.2, BR4.3, BR4.4, BR4.5, BR4.6, BR5.1, BR5.2, BR5.3, BR6.1, BR6.2, BR6.3"
+    },
+    {
+      "id": "AC7.2.1",
+      "status": "N/A",
+      "target": "U8 では作らない(Q1 A。CDK は後の作業。functional-spec.md の U8 の範囲、BR6.3 のヘルプで案内)"
+    },
+    {
+      "id": "AC7.3.1",
+      "status": "N/A",
+      "target": "U8 では作らない(Q1 A。プルリクエストの作成は後の作業。functional-spec.md の U8 の範囲)"
+    }
+  ]
+}

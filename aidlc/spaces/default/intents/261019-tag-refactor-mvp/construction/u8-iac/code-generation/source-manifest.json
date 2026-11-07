@@ -1,0 +1,23 @@
+{
+  "stage": "code-generation",
+  "unit": "u8-iac",
+  "version": 1,
+  "writes": [
+    { "path": ".github/workflows/ci.yml" },
+    { "path": "README.md" },
+    { "path": "go.mod" },
+    { "path": "go.sum" },
+    { "path": "internal/cli/" },
+    { "path": "internal/display/" },
+    { "path": "internal/errkind/errkind.go" },
+    { "path": "internal/fileout/" },
+    { "path": "internal/iac/" },
+    { "path": "internal/journal/store.go" },
+    { "path": "internal/restype/" },
+    { "path": "internal/rules/rules_test.go" },
+    { "path": "internal/testutil/iacfiles.go" },
+    { "path": "scripts/u6check.go" },
+    { "path": "scripts/verify.sh" },
+    { "path": "test/sandbox/u8-rules.yaml" }
+  ]
+}

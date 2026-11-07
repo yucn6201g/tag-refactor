@@ -1,0 +1,80 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u7-rollback",
+  "upstream_ids": [
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "NFR11",
+    "NFR12"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "N/A",
+      "target": "U7 は scan と plan を使わない。rollback の時間は NFR5.21"
+    },
+    {
+      "id": "NFR2",
+      "status": "N/A",
+      "target": "U7 は影響分析を使わない"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "NFR3.13, NFR3.14, NFR3.15"
+    },
+    {
+      "id": "NFR4",
+      "status": "OK",
+      "target": "NFR4.2, NFR4.3, NFR4.4"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "NFR5.18, NFR5.19, NFR5.20, NFR5.21, NFR5.22, NFR5.23, NFR5.24"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "NFR6.3, NFR6.4"
+    },
+    {
+      "id": "NFR7",
+      "status": "OK",
+      "target": "NFR7.2"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "NFR8.26"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "NFR9.10"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "NFR10.11"
+    },
+    {
+      "id": "NFR11",
+      "status": "OK",
+      "target": "NFR11.9"
+    },
+    {
+      "id": "NFR12",
+      "status": "N/A",
+      "target": "配布の仕組みは作業単位に含めず、別の作業で行う"
+    }
+  ]
+}

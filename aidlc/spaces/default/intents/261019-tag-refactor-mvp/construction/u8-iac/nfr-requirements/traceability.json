@@ -1,0 +1,80 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u8-iac",
+  "upstream_ids": [
+    "NFR1",
+    "NFR2",
+    "NFR3",
+    "NFR4",
+    "NFR5",
+    "NFR6",
+    "NFR7",
+    "NFR8",
+    "NFR9",
+    "NFR10",
+    "NFR11",
+    "NFR12"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1",
+      "status": "N/A",
+      "target": "U8 は scan と plan を含まない。iac の時間は NFR5.25"
+    },
+    {
+      "id": "NFR2",
+      "status": "N/A",
+      "target": "U8 は影響分析をしない"
+    },
+    {
+      "id": "NFR3",
+      "status": "OK",
+      "target": "NFR3.16, NFR3.17, NFR3.18, NFR3.19, NFR3.20, NFR3.21"
+    },
+    {
+      "id": "NFR4",
+      "status": "N/A",
+      "target": "iac は AWS のタグを変えない。IaC のファイルは git が追跡していて変更のないものだけを書き換え、git で戻せる(NFR3.20)"
+    },
+    {
+      "id": "NFR5",
+      "status": "OK",
+      "target": "NFR5.25, NFR5.26"
+    },
+    {
+      "id": "NFR6",
+      "status": "OK",
+      "target": "NFR6.5, NFR6.6"
+    },
+    {
+      "id": "NFR7",
+      "status": "N/A",
+      "target": "iac は記録も印も使わない。同時の書き換えは NFR6.6 の確かめで多くの場合止まる"
+    },
+    {
+      "id": "NFR8",
+      "status": "OK",
+      "target": "NFR8.27"
+    },
+    {
+      "id": "NFR9",
+      "status": "OK",
+      "target": "NFR9.11, NFR9.12"
+    },
+    {
+      "id": "NFR10",
+      "status": "OK",
+      "target": "NFR10.12, NFR10.13, NFR10.14"
+    },
+    {
+      "id": "NFR11",
+      "status": "OK",
+      "target": "NFR11.10"
+    },
+    {
+      "id": "NFR12",
+      "status": "OK",
+      "target": "NFR12.1(U8 が足した MPL-2.0 の義務を配布の作業に引き継ぐ)"
+    }
+  ]
+}

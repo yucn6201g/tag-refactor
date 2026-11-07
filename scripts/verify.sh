@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # U2 (scan of every region), U3 (rules suggest), U4 (plan formats and the
-# saved plan), U5 (impact analysis), U6 (apply) and U7 (rollback) checkpoint
-# verification. It calls the sandbox AWS account, so it only runs locally,
+# saved plan), U5 (impact analysis), U6 (apply), U7 (rollback) and U8 (iac)
+# checkpoint verification. It calls the sandbox AWS account, so it only runs locally,
 # never in CI.
 #
 # 1. Runs scripts/verify-u1.sh (every test, and the U1 sandbox test).
@@ -72,6 +72,13 @@
 #    left, prints the L95 of the tagging calls of the rollbacks with the two
 #    estimates of NFR5.21, and the rollback command a person runs by hand
 #    at the checkpoint.
+# U8. Right after U7 (construction/u8-iac/infrastructure-design/
+#    cicd-pipeline.md): makes a plan of test/sandbox/u8-rules.yaml, runs iac
+#    --write on a committed copy of test/sandbox/, checks the 4 lines of the
+#    difference, the list to fix by hand, validate-template and cfn-lint when
+#    it is installed, runs it again to find everything reflected, and checks
+#    that test/sandbox/ did not change. Nothing in AWS changes. Last it makes a
+#    folder for the person to run iac in by hand, and says how to remove it.
 #
 # The temporary folder of U3, the queue of U2 and the temporary queue of U7
 # are removed by one cleanup on every exit; it is defined before the first of
@@ -532,6 +539,8 @@ u6_apply() {
     fi
     fail "apply ended with exit code $TOOL_STATUS without a complete run"
   fi
+  u6_record "$record_to"
+  u6_settled
 }
 
 # u6_record copies the record of the last run to U6_RECORD.
@@ -542,6 +551,34 @@ u6_record() {
       fail "the record $U6_RUN is not in s3://$u6_bucket/runs/$account/" ;;
     *) cp "$1/$account/$U6_RUN.json" "$U6_RECORD" || fail "the record $U6_RUN is not in $1/$account/" ;;
   esac
+}
+
+# u6_settled waits until the tagging API answers twice in a row with what the
+# apply of U6_RECORD wrote. The next plan reads the same API, and at the U8
+# checkpoint it still missed a resource 11 seconds after an apply. It does not
+# ease any check: a plan that leaves out a target still fails.
+u6_settled() {
+  local attempt r seen=0 started=$SECONDS now="$u6_dir/settled.json" pages
+  for attempt in $(seq 1 40); do
+    pages=""
+    for r in ap-northeast-1 us-east-1; do
+      pages="$pages,$(aws --profile "$admin" --region "$r" resourcegroupstaggingapi get-resources --output json)" ||
+        fail "cannot read the tags in $r"
+    done
+    printf '[%s]' "${pages#,}" >"$now"
+    if go run scripts/u6check.go settled "$U6_RECORD" "$now" >/dev/null 2>"$u6_dir/settled-stderr"; then
+      seen=$((seen + 1))
+      if [ "$seen" -eq 2 ]; then
+        [ "$attempt" -eq 2 ] || echo "verify: the tagging API showed the apply $U6_RUN after about $((SECONDS - started)) s"
+        return 0
+      fi
+    else
+      seen=0
+    fi
+    sleep 5
+  done
+  sed 's/^/  /' "$u6_dir/settled-stderr" >&2
+  fail "the tagging API does not show what the apply $U6_RUN wrote after $((SECONDS - started)) s"
 }
 
 # U6 step 3: add and remove the check key five times; the third run keeps
@@ -686,19 +723,24 @@ u7_snapshot() {
     fail "cannot read the tags of the targets in $region"
 }
 
-# u7_same checks that the tags of the ARNs are those of the snapshot $1
-# (eventually consistent: six reads 10 seconds apart).
+# u7_same checks that the tags of the ARNs are those of the snapshot $1, twice
+# in a row since the next plan reads the same API (eventually consistent: up to
+# eight reads).
 u7_same() {
-  local before="$1" attempt now
+  local before="$1" attempt now seen=0
   shift
-  for attempt in 1 2 3 4 5 6; do
+  for attempt in 1 2 3 4 5 6 7 8; do
     u7_snaps=$((u7_snaps + 1))
     now="$u7_dir/now-$u7_snaps.json"
     u7_snapshot "$now" "$@"
     if go run scripts/u6check.go same "$before" "$now" "$@" 2>"$u7_dir/same-stderr"; then
-      return 0
+      seen=$((seen + 1))
+      [ "$seen" -lt 2 ] || return 0
+      sleep 5
+      continue
     fi
-    echo "verify: the tags are not yet those before the apply (read $attempt of 6)"
+    seen=0
+    echo "verify: the tags are not yet those before the apply (read $attempt of 8)"
     sleep 10
   done
   sed 's/^/  /' "$u7_dir/same-stderr" >&2
@@ -931,6 +973,121 @@ awk -v bytes="$u7_s3_bytes" '
   }
 ' "$u7_debug"
 echo "verify: record these values, the answer of the tagging API and the limits of the small samples at the U7 checkpoint"
+
+# U8. iac on a copy of test/sandbox/ (construction/u8-iac/infrastructure-design/
+# cicd-pipeline.md). It changes nothing in AWS: plan and the two reads of the
+# stack and validate-template only read, so the cleanup flags stay as they are.
+# The git commands of the check use none of the user's settings.
+u8_git() {
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git "$@"
+}
+
+# u8_repo_make copies test/sandbox/ to a folder and commits it there, without
+# templates or hooks.
+u8_repo_make() {
+  local repo="$1" empty="$2"
+  mkdir -p "$repo" "$empty"
+  cp test/sandbox/* "$repo"/
+  u8_git init -q --template="$empty" "$repo"
+  u8_git -C "$repo" -c core.autocrlf=false add -A
+  u8_git -C "$repo" -c core.autocrlf=false -c commit.gpgsign=false -c core.hooksPath="$empty" \
+    -c user.name=tag-refactor-verify -c user.email=verify@example.invalid commit -q -m "copy of test/sandbox"
+}
+
+# U8 step 1: the plan, with VU6 and GU6 in it.
+u8_plan="$u3_dir/u8-plan.json"
+rm -f "$u8_plan"
+echo "verify: U8 making the plan of test/sandbox/u8-rules.yaml (profile $readonly_profile)"
+run_tool plan --lang en --profile "$readonly_profile" --region "$region" --rules test/sandbox/u8-rules.yaml --out "$u8_plan"
+if { [ "$TOOL_STATUS" -ne 0 ] && [ "$TOOL_STATUS" -ne 2 ]; } || [ ! -s "$u8_plan" ]; then
+  sed 's/^/  /' "$u3_dir/stderr" >&2
+  fail "plan of U8 ended with exit code $TOOL_STATUS without a plan file"
+fi
+u8_vpc="$(aws_admin cloudformation describe-stack-resource --stack-name "$u6_stack" --logical-resource-id VU6 \
+  --query StackResourceDetail.PhysicalResourceId --output text)" || fail "cannot read VU6 of $u6_stack"
+u8_vpc_arn="arn:aws:ec2:$region:$account:vpc/$u8_vpc"
+u8_bucket_arn="arn:aws:s3:::$u6_bucket"
+go run scripts/u6check.go includes "$u8_plan" project Project "$u8_vpc_arn" "$u6_sg" || fail "the plan of U8 does not rename the tag of VU6 and GU6"
+
+# U8 step 2: the list of hashes of test/sandbox/, and the copy.
+u8_repo="$u3_dir/u8-repo"
+u8_hashes="$u3_dir/u8-sandbox.sha256"
+sha256sum test/sandbox/* >"$u8_hashes"
+u8_repo_make "$u8_repo" "$u3_dir/u8-empty"
+
+# U8 step 3: iac --write. VU6 and GU6 write project directly; the other fixtures
+# have it from the tag of the stack, so they are to fix by hand (exit code 2).
+u8_key_reason="the key is not in the source; it may come from a stack tag or default_tags"
+u8_numstat_want="$(printf '4\t4\tu6-fixtures.yaml')"
+echo "verify: U8 iac --write on a copy of test/sandbox/"
+u8_started=$SECONDS
+run_tool iac --lang en --plan "$u8_plan" --dir "$u8_repo" --write
+u8_seconds=$((SECONDS - u8_started))
+if [ "$TOOL_STATUS" -ne 2 ]; then
+  sed 's/^/  /' "$u3_dir/stderr" >&2
+  fail "iac --write ended with exit code $TOOL_STATUS, not 2"
+fi
+u8_numstat="$(u8_git -C "$u8_repo" diff --numstat)"
+[ "$u8_numstat" = "$u8_numstat_want" ] || fail "the difference of iac is not 4 lines of u6-fixtures.yaml: $u8_numstat"
+u8_template="$u8_repo/u6-fixtures.yaml"
+[ "$(grep -c 'Key: Project$' "$u8_template")" -eq 2 ] || fail "the template has not two Key: Project"
+[ "$(grep -c 'Value: tag-refactor-fixture-u8$' "$u8_template")" -eq 2 ] || fail "the template has not two Value: tag-refactor-fixture-u8"
+if grep -q 'Key: project$' "$u8_template"; then
+  fail "the template still has Key: project"
+fi
+for arn in "$u8_vpc_arn" "$u6_sg"; do
+  if grep -qF "$arn" "$u3_dir/stdout"; then
+    fail "$arn is on the list to fix by hand"
+  fi
+done
+grep -F "$u8_bucket_arn" "$u3_dir/stdout" | grep -qF "$u8_key_reason" ||
+  fail "$u8_bucket_arn is not on the list to fix by hand with the reason: $u8_key_reason"
+
+# U8 step 4: the template rewritten still is a template. The AWS CLI on Windows
+# does not read a path in the form of Git Bash after file://.
+u8_size="$(wc -c <"$u8_template")"
+[ "$u8_size" -le 51200 ] || fail "the template is $u8_size bytes, over the 51,200 of validate-template"
+u8_template_path="$u8_template"
+if command -v cygpath >/dev/null 2>&1; then
+  u8_template_path="$(cygpath -m "$u8_template")"
+fi
+aws_admin cloudformation validate-template --template-body "file://$u8_template_path" >/dev/null ||
+  fail "validate-template refused the template iac rewrote"
+if command -v cfn-lint >/dev/null 2>&1; then
+  cfn-lint "$u8_template" || fail "cfn-lint refused the template iac rewrote"
+else
+  echo "verify: cfn-lint is not installed, so it is skipped (the lint job of the CI checks this template)"
+fi
+
+# U8 step 5: the second time everything is reflected, and test/sandbox/ itself
+# never changed.
+run_tool iac --lang en --plan "$u8_plan" --dir "$u8_repo" --write
+if [ "$TOOL_STATUS" -ne 2 ]; then
+  sed 's/^/  /' "$u3_dir/stderr" >&2
+  fail "the second iac --write ended with exit code $TOOL_STATUS, not 2"
+fi
+if grep -q '^--- a/' "$u3_dir/stdout"; then
+  fail "the second iac --write shows a difference"
+fi
+grep -qx 'already reflected: 4' "$u3_dir/stdout" || fail "the second iac --write does not count 4 changes as reflected"
+u8_numstat="$(u8_git -C "$u8_repo" diff --numstat)"
+[ "$u8_numstat" = "$u8_numstat_want" ] || fail "the second iac --write changed the files: $u8_numstat"
+sha256sum -c --quiet "$u8_hashes" || fail "test/sandbox/ changed; iac must change only its copy"
+echo "verify: U8 the first iac took $u8_seconds s, as a guide to the time of the calls of git"
+
+# U8 step 6: a copy for the person to look at, only now that everything passed.
+u8_check="$(mktemp -d "${TMPDIR:-/tmp}/tag-refactor-u8-check-XXXXXX")" || fail "cannot make a folder for the check by hand"
+u8_repo_make "$u8_check/repo" "$u8_check/empty"
+cp "$u8_plan" "$u8_check/u8-plan.json"
+u8_check_shown="$u8_check"
+if command -v cygpath >/dev/null 2>&1; then
+  u8_check_shown="$(cygpath -w "$u8_check")"
+fi
+
 echo "verify: run this by hand in PowerShell, without --yes, and check the warning of a record already undone and the Japanese result:"
 echo "  tag-refactor rollback --run $u7_s3_run --record-from s3://$u6_bucket/runs --profile $apply_profile --lang ja"
+echo "verify: U8 run this by hand in PowerShell in the folder of the repository, and check the Japanese result: the difference of VU6 and GU6, the count of changes, and the resources whose tag comes from the stack on the list to fix by hand:"
+echo "  go run ./cmd/tag-refactor iac --plan $u8_check_shown\\u8-plan.json --dir $u8_check_shown\\repo --lang ja"
+echo "verify: U8 then remove the folder, whose plan holds the account ID and ARNs:"
+echo "  Remove-Item -Recurse -Force $u8_check_shown"
 echo "verify: OK"

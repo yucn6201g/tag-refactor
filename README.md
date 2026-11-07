@@ -7,12 +7,13 @@ Secrets Manager) use the tags that would change. It reads every
 enabled region, finds resources that were never tagged, counts missing
 required tags, and drafts a rule file from the tags in use. apply rewrites
 the tags of a plan after a confirmation, keeping a record of every change,
-and rollback undoes an apply from that record. (The rest of this README is
-in Japanese.)
+and rollback undoes an apply from that record. iac reflects a saved plan in
+CloudFormation templates and Terraform files. (The rest of this README is in
+Japanese.)
 
-## できること(U1〜U7)
+## できること(U1〜U8)
 
-AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定したときの記録の S3 のオブジェクト)。ほかのコマンドは読み取りだけで、書き込みの口を持ちません。
+AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定したときの記録の S3 のオブジェクト)。ほかのコマンドは読み取りだけで、書き込みの口を持ちません。`iac` は AWS を呼ばず、手元のテンプレートと `.tf` だけを扱います。
 
 | コマンド | できること |
 |---|---|
@@ -20,6 +21,7 @@ AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定
 | `plan` | ルールファイルから変更案を作ります。変更は4種類です: 別名を正しいキー名にする(キー名の変更)、値の別の書き方を正しい値にする(値の変更)、付いていない必須タグを付ける(追加)、消すキーを消す(削除)。値の別名を当てても値が違ってぶつかるキーは変えずに「衝突」として示し、値が決まらない必須タグは「値が未指定」、どの規則にもないキーは「消す候補」として示します(どちらも変更しません)。さらに、IAM のポリシー(管理ポリシーとインラインポリシー)と、S3、KMS、SQS、SNS、Secrets Manager のリソースポリシーのうち、変更するタグを参照しているものを、影響あり(`!`)か判定できない(`?`)として示します(下の「影響分析」)。結果は一覧、差分、JSON、Markdown の4つの形式で出せ、`--out` で変更案をファイルに保存できます。`scan` と同じく全リージョンを読みます(一度もタグが付いていないリソースは探しません)。 |
 | `apply` | 変更案のとおりにタグを書き換えます。保存した変更案(`--plan`)か、その場で作る変更案(`--rules`)のどちらか1つを使います。要約と影響のある変更を示し、`yes` と入力したときだけ書き換えます。書き換える前のタグを記録に保存し、取り消しのコマンドを示します(下の「タグの書き換え(apply)」)。 |
 | `rollback` | `apply` の記録をもとに、その実行で書き換えたキーを書き換える前に戻します。`apply` のあとに変えられたリソースは飛ばし(`--force` で戻せます)、要約を示して `yes` と入力したときだけ戻します。結果は同じ記録に足します(下の「書き換えの取り消し(rollback)」)。 |
+| `iac` | 保存した変更案を、CloudFormation のテンプレート(YAML と JSON)と Terraform の `.tf` に反映します。既定は差分を示すだけで、`--write` を付けると、git で確かめてから、変える範囲だけを書き換えます(下の「IaC への反映(iac)」)。 |
 | `rules suggest` | 今使われているタグから、ルールファイルの下書きを作ります。`scan` と同じまとめ方でキーをまとめ、最も多くのリソースで使われている書き方を正しいキー名に、残りを別名にします。値も同じまとめ方でまとめ、書き方が2つ以上ある値を `values` の候補にします。全リージョンを読みます(`--region` で絞れます。一度もタグが付いていないリソースは探しません)。 |
 
 調べる範囲は次のとおりです。どのコマンドも、調べた範囲を `Checked:` で始まる1行で標準エラーに出します。
@@ -35,7 +37,7 @@ AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定
 
 どのコマンドも、英語か日本語で表示でき(`--lang`)、端末では色を付けます(`NO_COLOR` で消せます)。
 
-まだできないこと(後の作業単位): IaC への反映。
+まだできないこと(後の作業): CDK(TypeScript と Python)への反映と、プルリクエストの作成。
 
 ## インストール
 
@@ -285,9 +287,73 @@ Ctrl+C の扱いは `apply` と同じ2段です。止めた rollback は記録�
 
 - rollback は記録に書かれたタグに戻します。記録の置き場所(`--record-to`、`--record-from` のフォルダや S3 の前置き)は、自分だけが書ける場所にしてください。ほかの人が書ける場所の記録を使うと、その人が書いたタグを付けることになります(記録の中身の確かめは、別のアカウントのリソースや形の壊れた記録を防ぎますが、同じアカウントの中で形の正しい項目を足す書き換えは防げません)。
 - 判定は今のタグと記録だけで行います。rollback で戻したあとに同じ変更をもう一度 apply し、古い記録でもう一度 rollback すると、新しい apply の書き換えも戻します。取り消し済みの記録では、確認画面で警告します。
+- `apply` の開始から1時間以内の最初の rollback は、「すでに戻っている」と読めても、触ったキーをすべて書き戻します。タグの API が `apply` の前のタグを答えることがあるためです。読み取りが正しければタグは変わりませんが、「すでに戻っている」ではなく「戻した」に数えます。
 - 書く直前の読み直しから、そのまとまりを書き終えるまでの間に他人が変えたタグは、上書きすることがあります(タグの API には比べてから書く書き込みがありません。値がばらばらな場合で最大約1分)。
 - `--force-unlock` で動いている apply や rollback の印を外して同時に動かすと、どちらかの結果が記録から失われることがあります。
 - タグが1つもないリソースをタグの API が返さない場合に備え、`apply` の前か後のタグが0個の項目は、答えに出なくても「タグなし」として判定します。そのため、`apply` の前にタグがなかった項目は、本当に削除されていても「すでに戻っている」になります(戻すタグがないので害はありません)。
+
+### IaC への反映(iac)
+
+`apply` で AWS のタグを変えても IaC のソースが古いままだと、次に IaC を適用したときにタグが元に戻ります。`iac` はソースを同じ変更にそろえます。AWS も `terraform` もスタックの更新も呼ばず、AWS の認証情報も要りません。
+
+```bash
+tag-refactor iac --plan plan.json --dir infra                        # 差分を見るだけ(ファイルは変えない)
+tag-refactor iac --plan plan.json --dir infra --write                # 書き換える(git で確かめてから)
+terraform show -json > state.json                                    # ルートモジュールのフォルダーで実行する
+tag-refactor iac --plan plan.json --dir infra --tf-state state.json  # Terraform のリソースも探す
+```
+
+Windows PowerShell 5.1 のリダイレクトは UTF-16 で書くので、`terraform show -json | Out-File -Encoding utf8 state.json` としてください。
+
+| オプション | 意味 |
+|---|---|
+| `--plan` | 必須。`plan --out` で保存した変更案。 |
+| `--dir` | 必須。IaC のソースのフォルダー。CloudFormation のテンプレート(`.yaml`、`.yml`、`.json`、`.template`)は下のフォルダーも探し、Terraform の `.tf` はこのフォルダーの直下だけを読みます(ルートモジュールを渡してください)。`.git`、`.terraform`、`node_modules`、`cdk.out` の中と、シンボリックリンク、ジャンクションは見ません。 |
+| `--tf-state` | `terraform show -json`(引数なし)の出力。ARN が完全に同じリソースを Terraform のリソースとします。渡さないと、Terraform のリソースは「管理されていない」に数えます。state のファイルそのものや、plan のファイルの出力は受け付けません。 |
+| `--write` | ファイルを書き換えます。なければ差分だけです。 |
+| `--lang`、`--debug` | ほかのコマンドと同じです。`--profile` はありません。 |
+
+**どのリソースをどこに反映するか**
+
+- `aws:cloudformation:stack-name` と `aws:cloudformation:logical-id` のタグがあるリソースは CloudFormation のものとし、論理 ID と種類が合うテンプレートを探します。2つ以上あれば、ファイル名(拡張子を除く)がスタック名と同じものが1つだけならそれに書き、ほかは手で直す一覧に出します。
+- 反映するのは、ソースの値が変更の前の値と同じときだけです。すでに変更の後の値なら「反映済み」に数えます。同じ変更案でもう一度動かしても差分は出ません。
+- 同じ論理 ID と種類のテンプレートが1つだけで、それが別のスタックのものだったときも、値が同じなら書き換えます。`--write` の前に差分を確かめてください。
+
+**書き換えるもの**
+
+- 変えるのはキーと値の範囲だけで、コメント、ほかの行、インデント、改行の種類、BOM、ファイルの終わりの改行は1バイトも変えません。Terraform の `=` の桁もそろえ直さないので、そろえるには `terraform fmt` を実行してください。
+- 引用符の種類は元のままです。YAML の引用符なしの値は、数や真偽値や日付に読めるものと、英数字と `_ . / @ -` 以外を含むもの(日本語も)を `"` で囲みます。`aws:` で始まるキーは足さず、変えず、消しません。
+- 必須タグは、最後の要素の書き方を写して足します。書き換えたあとのファイルをもう一度読み、意図した形でなければそのファイルは書き換えません。
+- `--write` は、`--dir` が git の作業ツリーで、書き換えるファイルがコミット済みで変更がないときだけ書きます(`git status` は使わず、`ls-files`、`ls-tree` とハッシュの比較で確かめるので、リポジトリの設定のプログラムは動きません)。利用者の `git` そのものは信用します。すべてのファイルが読んだときから変わっていないことを確かめてから、1つずつ一時ファイルに書いて名前を変えます。途中で失敗したら、書いたファイルと書いていないファイルを示して止まります(git で戻せます)。
+
+**手で直す一覧に出るもの(変更は書き換えません)**
+
+| 場合 | 表示の内容 |
+|---|---|
+| 値やキーが式(`!Ref`、`!Sub`、`var.x`、ブロックスカラー、複数行、ヒアドキュメント、補間) | 値が式 |
+| タグ全体が式(`!If`、`Fn::If`、`merge()`、`local`)、YAML のアンカー・別名・マージのキー | タグが式 |
+| 1行にまとめた書き方での削除と追加、`PropagateAtLaunch` などがある並びへの追加、Terraform の `tag` ブロック | この書き方は対応していない |
+| 変えるキーがソースにない(スタックのタグや `default_tags` かもしれない) | キーがソースにない |
+| ソースの値が AWS と違う | どちらが正しいかを人が決める |
+| Terraform のモジュールの中、`count`・`for_each` | 同じブロックから作るほかのリソースも変わるため |
+| 場所が見つからない、または2つ以上(CDK や SAM の生成した名前、解析できないファイルなど) | 候補のファイルを示す |
+
+**ソースにないため反映済みとみなした削除:** 消すキーがソースにないとき、前に消したのか、スタックのタグや `default_tags` で付いているのかは区別できません。反映済みに数えたうえで別に一覧にします。スタックのタグや `default_tags` で付けている場合は、そちらを直してください。
+
+| 終了コード | 意味 |
+|---|---|
+| 0 | 手で直すものがない(反映するものがない場合、IaC で管理されていないリソースだけの場合を含む) |
+| 1 | 入力の誤り。`--write` の確かめか書き出しに失敗した(差分と一覧は示します) |
+| 2 | 手で直すものがある |
+
+**iac の限界**
+
+- CDK(TypeScript と Python)への反映とプルリクエストの作成は、まだできません(後の作業)。CDK で作ったリソースは、論理 ID がテンプレートに見つからず手で直す一覧に出ます。
+- `default_tags`、スタックのタグ、変数、モジュールは追いかけません。
+- 差分にはファイルの中身(変える行と前後3行)が出ます。秘密の値を書いたテンプレートでは、ログに残すときに注意してください。差分の外の中身、`--tf-state` の値、解析の誤りの文は、`--debug` でも出しません。
+- 候補のファイルは 20,000 個まで(超えると止まります)、1つ 10 MB まで(超えると外して警告します)、合わせて 500 MB まで(超えると止まります)、フォルダーの深さは 32 まで、入れ子は 256 段までです。`.tf` のテンプレートの部品が多すぎるファイル(1つの heredoc が約1万行、1 MB を大きく超えるもの)も、解析に時間がかかりすぎるので外して警告します。合計が上限に近いと、メモリを多く使います(測った規模の 100 MB でヒープの最大は約 270 MB)。
+- `--write` は一時ファイルを書いて名前を変えるので、権限の設定(読み書きの属性)だけを引き継ぎます。所有者、ACL、ハードリンクは引き継ぎません。書く直前にファイルが通常のファイルでなくなっていたら、書かずに止まります。
+- `apply` の前後どちらで動かしてもかまいませんが、変更案を作った時点のタグと比べます。`apply` で飛ばしたリソースの変更もソースには反映するので、`apply` の結果を見てから `--write` してください。
 
 ### ルールファイルの下書き(rules suggest)
 
@@ -398,6 +464,8 @@ remove: [tmp-owner]
 
 `rollback` の終了コード: 0 はすべて戻した(すでに戻っていたものを含む)、取り消すものがなかった、または確認で `yes` 以外を入力した。1 はエラー、失敗したリソース(読めなかった、書けなかった、一部だけ書いた、結果が分からない、戻らなかった)がある、止めた、記録がない・読めない・アカウントが違う、記録を保存できなかった、印があった、印を消せなかった。2 は飛ばしたリソース(後から変えられた、なくなった、50個を超える)がある。1 と 2 の両方にあたるときは 1 です。
 
+`iac` の終了コードは「IaC への反映(iac)」にあります。
+
 一度もタグが付いていないリソースを探せなかったこと、見つかったこと、タグを変更できない種類があることだけでは、終了コードは変わりません。
 
 エラーは2行(`Error:` 何が起きたか、`Fix:` どう直すか。日本語では `エラー:` と `直し方:`)で出します。AWS の SDK のエラー文はそのまま出しません。
@@ -463,6 +531,10 @@ go test -mod=readonly -run 'TestAcceptanceU6' ./internal/cli/...                
 go test -mod=readonly -run 'TestLargeApplyU6' ./internal/apply/...                  # 1万件の apply(呼び出しの回数、同時の数、30秒)
 go test -mod=readonly -run 'TestAcceptanceU7' ./internal/cli/...                    # rollback の受け入れ条件
 go test -mod=readonly -run 'TestLargeRollbackU7' ./internal/apply/...               # 1万件の rollback(呼び出しの回数、同時の数、30秒)
+go test -mod=readonly -run 'TestAcceptanceU8' ./internal/cli/...                    # iac の受け入れ条件
+go test -mod=readonly -run 'TestLargeIacU8' ./internal/iac/...                      # 1万リソース、2,000ファイルの iac(60秒、ヒープ、開いた回数)
+TAG_REFACTOR_LARGE_REAL_GIT=1 go test -mod=readonly -run 'TestLargeIacU8' ./internal/iac/... # 同じ規模を実際の git で(手元だけ)
+go test -mod=readonly -run '^$' -bench 'BenchmarkParse' -benchmem ./internal/iac/...  # 解析の速さとメモリ
 go vet scripts/u6check.go                                                           # 検証のスクリプトの確かめの補助(ビルドには入らない)
 ```
 
@@ -473,7 +545,12 @@ go vet scripts/u6check.go                                                       
 - 端末での文字の幅の表(`internal/display/width_table.go`)は、Go の `unicode` パッケージと同じ版の Unicode の `EastAsianWidth.txt` から作ります。Go を上げて Unicode の版が新しくなると、テストが「表を作り直す」案内で失敗します。そのときは `internal/display` で `go generate` を動かし(`gen_width.go` が `https://www.unicode.org/Public/<版>/ucd/EastAsianWidth.txt` を取ってきます。取れないときは `go run gen_width.go -in <手元のファイル>`)、できた `width_table.go`(先頭に元の URL と SHA-256 を書きます)をコミットします。CI はネットワークを使わず、コミットした表だけを使います。
 
 - テストは AWS を呼びません。HTTP の層の偽の AWS(`internal/testutil`)を使い、手元の `~/.aws` も読みません。
-- CI(`.github/workflows/ci.yml`)は Linux、macOS、Windows と Go の2つの版でテストし、Linux で `-race` 付きのテスト、カバレッジ、lint(`cfn-lint` は `test/sandbox/*-fixtures.yaml`)、govulncheck、モジュールの確認、ビルドを行います。
+- CI(`.github/workflows/ci.yml`)は Linux、macOS、Windows と Go の2つの版でテストし(配るバイナリと同じ `CGO_ENABLED=0`)、Linux で `-race` 付きのテスト、カバレッジ、lint(`cfn-lint` は `test/sandbox/*-fixtures.yaml` と、`iac` が書き換えた写し)、govulncheck、モジュールの確認、ビルドを行います。
+
+## ライセンス
+
+- `iac` の Terraform の読み取りに使う [`github.com/hashicorp/hcl/v2`](https://github.com/hashicorp/hcl) は MPL-2.0 です。このツールは hcl/v2 のソースを変えずにライブラリとして使います。ソースは上のリポジトリから入手できます。
+- 配るバイナリへのライセンスの文の同梱とソースの入手先の案内は、配布の作業(`v0.1.0` の前)で行います。
 
 ## 検証用アカウントでの確認(チェックポイント)
 
@@ -549,6 +626,7 @@ TAG_REFACTOR_SANDBOX_ACCOUNT_ID=<検証用アカウントの ID> bash scripts/ve
 7. `--debug` の行から求めた操作ごとの95パーセンタイル(L95)と、1万件のときの10分の見積もりを表示します。
 8. U6 の確認をします(U2 のキューを消す前)。U6 のスタックと R3 のプロファイル、手元に印が残っていないことを確かめ、R3 で `plan --rules <ルール> --out` を作って範囲を確かめ(`scripts/u6check.go`: 確かめ専用のキーの追加か削除だけ、U1 の P2(キーにポリシー変数がある条件)がどのキーにも付ける「決められない」以外の影響なし、確認用のリソースだけ、5つの対象がすべて入っている。外れれば何も書き換えずに失敗)、`apply --plan ... --yes --allow-impact --debug` で足して消すことを5回くり返します(3回目は記録を S3 に置く)。合否は記録で決めます(完了している、失敗と未処理がない、5つの対象が `applied`)。そのあと、どのリソースと IAM のロールにもキーが残っていないこと、印が残っていないことを確かめ、U2 の一度もタグのないキューを ARN で指定したときにタグ付けの API が返すかを表示し(`plan` は一度もタグのないリソースを変更案に入れないため、`apply` はそれを書き換えません)、S3 の記録の暗号化と ACL、ないキーが NotFound になることを確かめ、タグの操作の L95 と30分の見積もり(値がばらばらな場合の見積もりも)を表示します。キーを足したあとに失敗したときは、後片付けで R3 を使ってキーを消します(印で止まったときは、印の中身を示して `--force-unlock` を案内します。自動では外しません)。
 9. U7 の確認をします(U6 の確認のすぐあと、R3 で。手順は U7 のインフラの設計 [`cicd-pipeline.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u7-rollback/infrastructure-design/cicd-pipeline.md)。新しいスタックは作りません)。5つの対象のタグの写しを取ってから、U6 のキーを足す apply とその rollback を5回くり返し(3回目は記録を S3 に置き、記録の `entries` が変わらず `rollbacks` に完了した1件が増えたことを確かめる)、`u7-src-rules.yaml` でキーを足して `u7-rename-rules.yaml` でキー名と値を変え、2つの apply を順に rollback します。5回目の実行をもう一度 rollback して、すべて「すでに戻っている」で何も書かないことを確かめます。一時的な SQS のキュー(`tag-refactor-u7-zero-<乱数>`。タグ1つ)を作り、apply でタグを0個にして、タグの API が ARN を指定したときにそれを返すかを表示し、rollback で戻します。`plan` がタグ0個のキューを集めたときは、`u7-zero-add-rules.yaml` で必須タグを付けて0個に戻すことも確かめます。どの rollback のあとも、写しと今のタグ(`aws:` を除く)が同じことを確かめます。最後に、確かめ用のキーと印が残っていないことを確かめ、rollback のタグの操作の L95 と NFR5.21 の30分の見積もり(値がばらばらな場合も)を表示し、チェックポイントで人が `--yes` なしで動かす rollback のコマンドを表示します。途中で失敗したときは、後片付けで R3 の apply(`u7-cleanup-remove-rules.yaml`)で確かめ用のキーを消し、一時的なキューを消します。
+10. U8 の確認をします(U7 の確認のすぐあと。手順は U8 のインフラの設計 [`cicd-pipeline.md`](aidlc/spaces/default/intents/261019-tag-refactor-mvp/construction/u8-iac/infrastructure-design/cicd-pipeline.md)。新しいスタックは作らず、AWS に書き込みません)。`u8-rules.yaml` で変更案を作り、`test/sandbox/` を写した一時のリポジトリで `iac --write` を動かします。`u6-fixtures.yaml` の4行(VU6 と GU6 のキーと値)だけが変わること、スタックのタグから来たリソースが手で直す一覧に出ること、`validate-template`(`cfn-lint` があればそれも)が通ること、2回目が反映済みで終わること、`test/sandbox/` の元のファイルが変わらないことを確かめます。すべて通ったら、人が `--lang ja` で確かめるためのフォルダーを作り、動かすコマンドと消すコマンドを表示します。
 
 | 環境変数 | 意味 |
 |---|---|

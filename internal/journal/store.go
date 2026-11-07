@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/yucn6201g/tag-refactor/internal/fileout"
 )
 
 // The saving of local files (NFR6.1, NFR9.9, security design §3). The file
@@ -76,23 +78,27 @@ func writeAtomic(dir, name string, data []byte) (err error) {
 	if err := f.Close(); err != nil {
 		return storageError(target, "journal.saveFailed", "the run record could not be saved", err)
 	}
-	var renameErr error
-	for attempt := 1; attempt <= renameAttempts; attempt++ {
-		if renameErr = rename(tmp, target); renameErr == nil {
-			break
-		}
-		if attempt < renameAttempts {
-			sleep(renameWait)
-		}
-	}
-	if renameErr != nil {
-		return storageError(target, "journal.saveFailed", "the run record could not be saved", renameErr)
+	if err := fileout.RetryRename(tmp, target, renameWaits(), retryEveryError, rename, sleep); err != nil {
+		return storageError(target, "journal.saveFailed", "the run record could not be saved", err)
 	}
 	// The record is in place; a folder that cannot be synced only risks the
 	// rename after a power cut, which leaves the previous version.
 	_ = syncFolder(dir)
 	return nil
 }
+
+// renameWaits are the waits between the renameAttempts tries of the rename.
+func renameWaits() []time.Duration {
+	waits := make([]time.Duration, 0, max(renameAttempts-1, 0))
+	for range renameAttempts - 1 {
+		waits = append(waits, renameWait)
+	}
+	return waits
+}
+
+// retryEveryError makes the rename of a record try again after any error:
+// the record has no error worth giving up on sooner (NFR9.9).
+func retryEveryError(error) bool { return true }
 
 // syncDir writes the entries of a folder to disk. Windows cannot open a
 // folder for that, so there it does nothing (NFR9.9).

@@ -405,8 +405,6 @@ var catalog = map[string]message{
 	// or sanitized when printed.
 	"err.help":              {en: `run "tag-refactor --help" to see the commands and options`, ja: `"tag-refactor --help" でコマンドとオプションを確かめてください`},
 	"err.permissions":       {en: "docs/iam/readonly-policy.json lists the permissions tag-refactor needs", ja: "tag-refactor に要る権限は docs/iam/readonly-policy.json にあります"},
-	"err.supported":         {en: "this version has scan, plan, rules suggest, apply and rollback, plus --debug and --lang", ja: "この版で使えるのは scan、plan、rules suggest、apply、rollback と、--debug、--lang です"},
-	"err.notAvailable":      {en: "%s is not available in this version", ja: "%s はこの版では使えません"},
 	"err.inRegion":          {en: " (region %s)", ja: "(リージョン %s)"},
 	"err.accessDenied":      {en: "access denied for %s%s", ja: "%s の権限がありません%s"},
 	"err.accessDeniedFix":   {en: "allow %s for the identity you use; %s", ja: "使っている ID に %s を許可してください。%s"},

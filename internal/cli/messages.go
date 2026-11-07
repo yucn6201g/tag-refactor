@@ -63,8 +63,6 @@ func describeInvalidInput(e *errkind.Error, lang display.Lang) (string, string) 
 		return describeFileError(e, lang)
 	case errkind.ReasonOutputExists, errkind.ReasonOutputFolderMissing, errkind.ReasonOutputTooLarge:
 		return describeOutput(e, lang)
-	case errkind.ReasonOptionNotAvailable:
-		return t("err.notAvailable", e.Subject), t("err.supported")
 	case errkind.ReasonProfileNotFound:
 		return t("err.profileNotFound", e.Subject), t("err.profileFix")
 	case errkind.ReasonRegionNotSet:

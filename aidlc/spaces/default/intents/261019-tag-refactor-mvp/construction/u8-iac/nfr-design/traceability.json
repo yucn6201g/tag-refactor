@@ -1,0 +1,140 @@
+{
+  "stage": "nfr-design",
+  "unit": "u8-iac",
+  "upstream_ids": [
+    "NFR3.16",
+    "NFR3.17",
+    "NFR3.18",
+    "NFR3.19",
+    "NFR3.20",
+    "NFR3.21",
+    "NFR5.25",
+    "NFR5.26",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR8.27",
+    "NFR9.11",
+    "NFR9.12",
+    "NFR10.12",
+    "NFR10.13",
+    "NFR10.14",
+    "NFR11.10",
+    "NFR12.1",
+    "NFR6.1",
+    "NFR9.9",
+    "NFR3.10",
+    "NFR3.13"
+  ],
+  "coverage": [
+    {
+      "id": "NFR3.16",
+      "status": "OK",
+      "target": "security-design.md §1、logical-components.md パッケージごとの変更(internal/cli)とテストの設計"
+    },
+    {
+      "id": "NFR3.17",
+      "status": "OK",
+      "target": "security-design.md §2 の 6、§3、§4、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR3.18",
+      "status": "OK",
+      "target": "security-design.md §2 の 1・2、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR3.19",
+      "status": "OK",
+      "target": "security-design.md §2、§3(別名を展開しない、メモリの予算)、logical-components.md 並行の動きとメモリ、速さの測り方"
+    },
+    {
+      "id": "NFR3.20",
+      "status": "OK",
+      "target": "security-design.md §0、§6(git status を使わずハッシュで比べる)、logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR3.21",
+      "status": "N/A",
+      "target": "検証用アカウントでの確かめはインフラの設計で決める(検証のスクリプト)"
+    },
+    {
+      "id": "NFR5.25",
+      "status": "OK",
+      "target": "logical-components.md 並行の動きとメモリ、速さの測り方"
+    },
+    {
+      "id": "NFR5.26",
+      "status": "OK",
+      "target": "logical-components.md 並行の動きとメモリ"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "security-design.md §7 の 2〜6、logical-components.md パッケージごとの変更(internal/fileout、internal/journal)"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "security-design.md §7 の 1・6"
+    },
+    {
+      "id": "NFR8.27",
+      "status": "OK",
+      "target": "security-design.md §3(誤りの文)、§8"
+    },
+    {
+      "id": "NFR9.11",
+      "status": "OK",
+      "target": "security-design.md §7 の 5、logical-components.md 差分の作り方(相対パス、改行)"
+    },
+    {
+      "id": "NFR9.12",
+      "status": "OK",
+      "target": "logical-components.md テストの設計(ビルドとカバレッジ)"
+    },
+    {
+      "id": "NFR10.12",
+      "status": "OK",
+      "target": "logical-components.md テストの設計"
+    },
+    {
+      "id": "NFR10.13",
+      "status": "OK",
+      "target": "security-design.md §0(新しい依存は hcl/v2 と yaml/v3)、logical-components.md テストの設計(ビルドと依存)"
+    },
+    {
+      "id": "NFR10.14",
+      "status": "OK",
+      "target": "logical-components.md パッケージごとの変更(internal/restype の表)とテストの設計"
+    },
+    {
+      "id": "NFR11.10",
+      "status": "OK",
+      "target": "logical-components.md パッケージごとの変更(internal/display)とテストの設計"
+    },
+    {
+      "id": "NFR12.1",
+      "status": "N/A",
+      "target": "README のライセンスの節は Code Generation で書く。配布への引き継ぎは unit-of-work.md に記録済み"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "security-design.md §7(U6 の壊れない保存と同じ考えで、部品を fileout に寄せる)"
+    },
+    {
+      "id": "NFR9.9",
+      "status": "OK",
+      "target": "security-design.md §7 の 5(Windows のやり直しを fileout に寄せ、journal は U6 の待ちのまま)"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "security-design.md §1(iac に書き込みの口を渡さない)"
+    },
+    {
+      "id": "NFR3.13",
+      "status": "OK",
+      "target": "security-design.md §1(書き込みの口を受け取るのは apply と rollback だけ)"
+    }
+  ]
+}
