@@ -14,6 +14,12 @@ const (
 	maxNesting      = 256
 	maxUnaryRun     = 256
 	maxConditionals = 10000
+	// maxTemplateCost bounds what the parts of the templates of a file cost:
+	// hclsyntax joins neighboring literals of a template by copying the parts
+	// after them and the text before them, and each line of a heredoc and each $
+	// or % is a part. It is about 1.2 seconds of the parser, and lets through one
+	// heredoc of 10,000 lines and 1 MB. templatePart adds up the cost.
+	maxTemplateCost = 2_000_000_000
 )
 
 // tooDeep reports whether the content of a file nests past the limits.
@@ -283,6 +289,9 @@ type hclFrame struct {
 	braces int
 	// marker is the end of a heredoc.
 	marker []byte
+	// start is where the template of a string or a heredoc starts, and parts
+	// counts its parts.
+	start, parts int
 }
 
 type hclKind int
@@ -300,13 +309,17 @@ type hclScan struct {
 	depth        int
 	unaryRun     int
 	conditionals int
+	// directives is the depth of %{if and %{for; their %{ closes at the next }.
+	directives   int
+	templateCost int
 }
 
 // hclTooDeep counts (a) the depth of [, {, (, ${ and %{, (b) the length of a
-// run of the unary operators ! and -, and (c) the ? of the conditional
-// expressions in the whole file, whose chains the parser recurses on. A heredoc
-// skips the brackets of its text, but not its ${ and %{, which the parser reads
-// as code.
+// run of the unary operators ! and -, (c) the ? of the conditional expressions
+// in the whole file, whose chains the parser recurses on, (d) the depth of the
+// directives %{if and %{for and (e) the cost of the parts of the templates. A
+// heredoc skips the brackets of its text, but not its ${ and %{, which the
+// parser reads as code.
 func hclTooDeep(data []byte) bool {
 	s := &hclScan{data: data, stack: []hclFrame{{kind: hclCode}}}
 	for i := 0; i < len(data); {
@@ -344,7 +357,7 @@ func (s *hclScan) codeStep(i int) (int, bool) {
 	top := &s.stack[len(s.stack)-1]
 	switch c {
 	case '"':
-		s.stack = append(s.stack, hclFrame{kind: hclString})
+		s.stack = append(s.stack, hclFrame{kind: hclString, start: i})
 	case '#':
 		return lineEnd(data, i), false
 	case '/':
@@ -359,7 +372,7 @@ func (s *hclScan) codeStep(i int) (int, bool) {
 		}
 	case '<':
 		if marker, next := heredocStart(data, i); marker != nil {
-			s.stack = append(s.stack, hclFrame{kind: hclHeredoc, marker: marker})
+			s.stack = append(s.stack, hclFrame{kind: hclHeredoc, marker: marker, start: next})
 			return next, false
 		}
 	case '[', '(':
@@ -402,14 +415,59 @@ func (s *hclScan) stringStep(i int) (int, bool) {
 // text, and others start code.
 func (s *hclScan) template(i int) (int, bool) {
 	data := s.data
-	if i+2 < len(data) && (data[i] == '$' || data[i] == '%') && data[i+1] == data[i] && data[i+2] == '{' {
-		return i + 3, false
+	if data[i] != '$' && data[i] != '%' {
+		return i + 1, false
 	}
-	if i+1 < len(data) && (data[i] == '$' || data[i] == '%') && data[i+1] == '{' {
+	costly := s.templatePart(i)
+	if i+2 < len(data) && data[i+1] == data[i] && data[i+2] == '{' {
+		return i + 3, costly
+	}
+	if i+1 < len(data) && data[i+1] == '{' {
+		directive := data[i] == '%' && s.directive(i+2)
 		s.stack = append(s.stack, hclFrame{kind: hclCode})
-		return i + 2, s.open()
+		return i + 2, s.open() || costly || directive
 	}
-	return i + 1, false
+	return i + 1, costly
+}
+
+// templatePart counts one more part, at position i, of the template on top of
+// the stack and reports whether the file passes the limit. The square of the
+// parts grows by 2n+1 with the part after n others; the parser copies text four
+// times as fast as parts.
+func (s *hclScan) templatePart(i int) bool {
+	top := &s.stack[len(s.stack)-1]
+	s.templateCost += 2*top.parts + 1 + (i-top.start)/4
+	top.parts++
+	return s.templateCost > maxTemplateCost
+}
+
+// directive follows the depth of the directives from the keyword after a %{ and
+// reports whether it passes the limit.
+func (s *hclScan) directive(i int) bool {
+	data := s.data
+	for i < len(data) && (data[i] == '~' || data[i] == ' ' || data[i] == '\t' || data[i] == '\r' || data[i] == '\n') {
+		i++
+	}
+	rest := data[i:]
+	switch {
+	case hasKeyword(rest, "if"), hasKeyword(rest, "for"):
+		s.directives++
+	case (hasKeyword(rest, "endif") || hasKeyword(rest, "endfor")) && s.directives > 0:
+		s.directives--
+	}
+	return s.directives > maxNesting
+}
+
+// hasKeyword reports whether data starts with the whole word keyword.
+func hasKeyword(data []byte, keyword string) bool {
+	if !bytes.HasPrefix(data, []byte(keyword)) {
+		return false
+	}
+	if len(data) == len(keyword) {
+		return true
+	}
+	c := data[len(keyword)]
+	return c != '_' && c != '-' && (c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z')
 }
 
 func (s *hclScan) heredocStep(i int) (int, bool) {
@@ -420,6 +478,9 @@ func (s *hclScan) heredocStep(i int) (int, bool) {
 		if bytes.Equal(bytes.TrimSpace(data[i:end]), top.marker) {
 			s.stack = s.stack[:len(s.stack)-1]
 			return end, false
+		}
+		if s.templatePart(i) {
+			return i, true
 		}
 	}
 	return s.template(i)

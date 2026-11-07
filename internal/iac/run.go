@@ -483,6 +483,9 @@ var countOpen = func() {}
 // checkBeforeWriting reads a file a last time (NFR6.6).
 func checkBeforeWriting(o *fileOutcome) error {
 	info, err := os.Lstat(o.c.path)
+	if err == nil && !info.Mode().IsRegular() {
+		return usageError("", "iac.changedSinceRead", "iac.changedSinceReadFix", o.c.rel)
+	}
 	if err == nil && info.Mode().Perm()&0o200 == 0 {
 		return usageError("", "iac.readOnly", "iac.readOnlyFix", o.c.rel)
 	}

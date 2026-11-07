@@ -244,6 +244,17 @@ func TestNestingScansCatchWhatWouldBreakAParser(t *testing.T) {
 	requireDeep(t, "HCL ?", formatTerraform, "a = "+strings.Repeat("b ? c : ", maxConditionals+1)+"d", true)
 	requireDeep(t, "HCL ${", formatTerraform, `a = "`+strings.Repeat(`${"`, many), true)
 	requireDeep(t, "HCL ${ in a heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat("${[", many)+"\nEOT\n", true)
+	requireDeep(t, "HCL %{if", formatTerraform, `a = "`+strings.Repeat("%{if true}", many), true)
+	requireDeep(t, "HCL %{for", formatTerraform, `a = "`+strings.Repeat("%{for b in c}", many), true)
+	requireDeep(t, "HCL %{~ if", formatTerraform, `a = "`+strings.Repeat("%{~ if true ~}", many), true)
+	requireDeep(t, "HCL %{if in a heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat("%{if true}\n", many)+"EOT\n", true)
+	requireDeep(t, "HCL heredoc lines", formatTerraform, "a = <<EOT\n"+strings.Repeat("x\n", many)+"EOT\n", true)
+	requireDeep(t, "HCL doubled in a string", formatTerraform, `a = "`+strings.Repeat("$${", many)+`"`, true)
+	requireDeep(t, "HCL heredocs add up", formatTerraform, strings.Repeat("a = <<EOT\n"+strings.Repeat("x\n", 10000)+"EOT\n", 21), true)
+	requireDeep(t, "HCL long lines in a heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat(strings.Repeat("x", 99)+"\n", 40000)+"EOT\n", true)
+	requireDeep(t, "HCL lone $", formatTerraform, `a = "`+strings.Repeat("$x", many)+`"`, true)
+	requireDeep(t, "HCL lone %", formatTerraform, `a = "`+strings.Repeat("%x", many)+`"`, true)
+	requireDeep(t, "HCL $$ in a heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat("$$", many)+"\nEOT\n", true)
 }
 
 // The scans must not leave out a sound file: brackets in strings, comments,
@@ -268,6 +279,13 @@ func TestNestingScansLeaveSoundFilesAlone(t *testing.T) {
 	requireDeep(t, "HCL heredoc", formatTerraform, "a = <<EOT\n"+brackets+"\nEOT\nb = <<-X\n  "+brackets+"\n  X\n", false)
 	requireDeep(t, "HCL template", formatTerraform, `a = "${var.x}-${[1, 2][0]}"`+"\nb = 1\n", false)
 	requireDeep(t, "HCL minus and conditionals", formatTerraform, "a = 1 - 2\nb = c ? d : e\nf-g = 1\n", false)
+	requireDeep(t, "HCL closed directives", formatTerraform, `a = "`+strings.Repeat("%{if b}c%{else}d%{endif}", 5000)+`"`+"\n", false)
+	requireDeep(t, "HCL closed directives with marks", formatTerraform, `a = "`+strings.Repeat("%{~ for b in c ~}d%{~ endfor ~}", 5000)+`"`+"\n", false)
+	requireDeep(t, "HCL directive words in names", formatTerraform, `a = "`+strings.Repeat("%{iffy}", 5000)+`"`+"\n", false)
+	requireDeep(t, "HCL long heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat("x\n", 30000)+"EOT\n", false)
+	requireDeep(t, "HCL 1 MB heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat(strings.Repeat("x", 99)+"\n", 10000)+"EOT\n", false)
+	requireDeep(t, "HCL script in a heredoc", formatTerraform, "a = <<EOT\n"+strings.Repeat("echo \"$a\" $((b % 2)) 100% $$\n", 5000)+"EOT\n", false)
+	requireDeep(t, "HCL many heredocs", formatTerraform, strings.Repeat("a = <<EOT\n"+strings.Repeat("x\n", 100)+"EOT\n", 5000), false)
 }
 
 // NFR3.19: the deep files are left out and counted, without a crash, and the
@@ -296,13 +314,20 @@ func TestDeepTerraformFilesAreLeftOut(t *testing.T) {
 	f.file("deep.tf", "a = "+strings.Repeat("[", 100000))
 	f.file("bang.tf", "a = "+strings.Repeat("!", 100000)+"b\n")
 	f.file("cond.tf", "a = "+strings.Repeat("b ? c : ", maxConditionals+1)+"d\n")
+	// Both of these take the parser minutes at the limit of 10 MB.
+	f.file("if.tf", "locals {\n  a = \""+strings.Repeat("%{if true}", 1<<20)+"\"\n}\n")
+	f.file("heredoc.tf", "a = <<EOT\n"+strings.Repeat("x\n", 5<<20)+"EOT\n")
 	f.file("main.tf", "resource \"aws_sqs_queue\" \"q\" {\n  tags = {\n    a = \"b\"\n  }\n}\n")
 	r := tfResource(arnQ1, setValue("a", "b", "c"))
 
+	start := time.Now()
 	res := f.runState(f.plan(r), f.state("aws_sqs_queue.q", arnQ1))
 
-	if len(res.Files) != 1 || len(res.SkippedFiles) != 3 {
+	if len(res.Files) != 1 || len(res.SkippedFiles) != 5 {
 		t.Fatalf("result = %+v", res)
+	}
+	if took := time.Since(start); took > 30*time.Second {
+		t.Errorf("took %v", took)
 	}
 }
 

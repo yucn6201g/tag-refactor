@@ -80,6 +80,37 @@ func TestFileChangedBeforeWritingStopsAll(t *testing.T) {
 	}
 }
 
+// A file that became a link with the same content must not be replaced: the
+// rename would put a file in place of the link.
+func TestFileThatBecameALinkBeforeWritingStopsAll(t *testing.T) {
+	f, plan := twoFiles(t)
+	path := filepath.Join(f.dir, "b.yaml")
+	saved := gitCheck
+	t.Cleanup(func() { gitCheck = saved })
+	gitCheck = func(ctx context.Context, root string, files []gitFile, debug *[]string) error {
+		err := saved(ctx, root, files, debug)
+		moved := filepath.Join(f.dir, "b.yaml.moved")
+		if renameErr := os.Rename(path, moved); renameErr != nil {
+			t.Fatal(renameErr)
+		}
+		if linkErr := os.Symlink(moved, path); linkErr != nil {
+			t.Skipf("no symbolic links here: %v", linkErr)
+		}
+		return err
+	}
+
+	res := f.runWrite(plan)
+
+	requireDetail(t, res.WriteErr, "iac.changedSinceRead")
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link is gone: %v %v", info, err)
+	}
+	if strings.Contains(f.read("a.yaml"), "Value: c") {
+		t.Fatal("the first file was written")
+	}
+}
+
 func TestFileChangedWhileItIsReadGoesOnTheList(t *testing.T) {
 	f := newFixture(t)
 	f.file("t.yaml", gitTemplate)

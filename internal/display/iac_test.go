@@ -133,7 +133,7 @@ func TestIacWarnsOfWhatItLeftOut(t *testing.T) {
 		Debug:          []string{"git ls-files: fatal: not a repo", "a.yaml: (a) the tags"},
 	}
 	_, errOut := iacOutput(t, English, res, false)
-	for _, want := range []string{"warning: 1 file left out: larger than 10 MB", "warning: 2 files left out: not UTF-8", "warning: 1 file left out: nested too deep",
+	for _, want := range []string{"warning: 1 file left out: larger than 10 MB", "warning: 2 files left out: not UTF-8", "warning: 1 file left out: nested too deep or with too many parts in a template",
 		"warning: 2 files left out: could not be parsed", "warning: 1 file left out: could not be read", "warning: 1 folders left out"} {
 		if !strings.Contains(errOut, want) {
 			t.Errorf("no %q in:\n%s", want, errOut)

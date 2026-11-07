@@ -46,7 +46,7 @@ var iacCatalog = map[string]message{
 
 	"iac.skipTooLarge":   {en: "%s left out: larger than 10 MB", ja: "%s個のファイルを外しました: 10 MB を超えています"},
 	"iac.skipNotUTF8":    {en: "%s left out: not UTF-8", ja: "%s個のファイルを外しました: UTF-8 ではありません"},
-	"iac.skipTooDeep":    {en: "%s left out: nested too deep", ja: "%s個のファイルを外しました: 入れ子が深すぎます"},
+	"iac.skipTooDeep":    {en: "%s left out: nested too deep or with too many parts in a template", ja: "%s個のファイルを外しました: 入れ子が深すぎるか、テンプレートの部品が多すぎます"},
 	"iac.skipParseError": {en: "%s left out: could not be parsed", ja: "%s個のファイルを外しました: 解析できません"},
 	"iac.skipUnreadable": {en: "%s left out: could not be read", ja: "%s個のファイルを外しました: 読めません"},
 	"iac.skipFolders":    {en: "%s folders left out: deeper than 32 levels or not readable", ja: "%s個のフォルダーを外しました: 32 段より深いか、読めません"},
