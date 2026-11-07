@@ -228,6 +228,9 @@ func (a *app) rootCommand() *cobra.Command {
 			"policies use the tags. Only apply and rollback write to AWS: they change tags and keep a record\n" +
 			"of each run. iac reflects a saved plan in CloudFormation templates and Terraform files, without\n" +
 			"calling AWS.",
+		// --version prints "tag-refactor <version>" (US6.2): the tag of a
+		// released binary or of "go install ...@v0.1.0", else "devel".
+		Version:           toolVersion(),
 		SilenceErrors:     true,
 		SilenceUsage:      true,
 		CompletionOptions: cobra.CompletionOptions{DisableDefaultCmd: true},
@@ -240,6 +243,7 @@ func (a *app) rootCommand() *cobra.Command {
 		"print one line per AWS API call (operation, region, time, retries) to standard error")
 	root.PersistentFlags().StringVar(&a.lang, "lang", "",
 		"language of the output: en or ja (default: LC_ALL, LC_MESSAGES or LANG, then on Windows the display language)")
+	root.SetVersionTemplate("tag-refactor {{.Version}}\n")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Detail: err.Error(), Cause: err}
 	})
