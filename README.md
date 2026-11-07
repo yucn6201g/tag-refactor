@@ -41,13 +41,63 @@ AWS に書き込むのは `apply` と `rollback` だけです(タグと、指定
 
 ## インストール
 
-Go(最新の安定版、または1つ前の版)で、手元でビルドします。
+GitHub Releases の実行ファイルか、`go install` で入手します。どちらも1つの実行ファイルで、追加のランタイムは要りません。
+
+### GitHub Releases から
+
+[Releases](https://github.com/yucn6201g/tag-refactor/releases) のページに、OS と CPU ごとのアーカイブと、チェックサムのファイル(`tag-refactor_<版>_checksums.txt`、SHA-256)があります。
+
+| OS | CPU | アーカイブ |
+|---|---|---|
+| Linux | x86_64 / arm64 | `tag-refactor_<版>_linux_amd64.tar.gz` / `tag-refactor_<版>_linux_arm64.tar.gz` |
+| macOS | Intel / Apple シリコン | `tag-refactor_<版>_darwin_amd64.tar.gz` / `tag-refactor_<版>_darwin_arm64.tar.gz` |
+| Windows | x86_64 / arm64 | `tag-refactor_<版>_windows_amd64.zip` / `tag-refactor_<版>_windows_arm64.zip` |
+
+アーカイブには、実行ファイル、`LICENSE`、`README.md`、`THIRD_PARTY_NOTICES.txt`(使っているライブラリのライセンス)が入っています。
+
+Linux と macOS:
 
 ```bash
-go install github.com/yucn6201g/tag-refactor/cmd/tag-refactor@latest
+VERSION=v0.1.0
+TARGET=linux_amd64   # linux_arm64、darwin_amd64、darwin_arm64
+BASE="https://github.com/yucn6201g/tag-refactor/releases/download/${VERSION}"
+curl -fsSLO "${BASE}/tag-refactor_${VERSION}_${TARGET}.tar.gz"
+curl -fsSLO "${BASE}/tag-refactor_${VERSION}_checksums.txt"
+# チェックサムを確かめる(macOS では sha256sum の代わりに shasum -a 256)
+grep "_${TARGET}.tar.gz\$" "tag-refactor_${VERSION}_checksums.txt" | sha256sum -c
+tar -xzf "tag-refactor_${VERSION}_${TARGET}.tar.gz" tag-refactor
+./tag-refactor --version
 ```
 
-公開のバイナリ(GitHub Releases)は、第1弾(`v0.1.0`)で用意します。
+Windows(PowerShell):
+
+```powershell
+$Version = "v0.1.0"
+$Target = "windows_amd64"   # windows_arm64
+$Base = "https://github.com/yucn6201g/tag-refactor/releases/download/$Version"
+Invoke-WebRequest "$Base/tag-refactor_${Version}_${Target}.zip" -OutFile "tag-refactor_${Version}_${Target}.zip"
+Invoke-WebRequest "$Base/tag-refactor_${Version}_checksums.txt" -OutFile "tag-refactor_${Version}_checksums.txt"
+# 次の2行の値が同じであることを確かめる
+(Get-FileHash "tag-refactor_${Version}_${Target}.zip" -Algorithm SHA256).Hash.ToLower()
+Select-String "_${Target}.zip" "tag-refactor_${Version}_checksums.txt"
+Expand-Archive "tag-refactor_${Version}_${Target}.zip" -DestinationPath tag-refactor
+.\tag-refactor\tag-refactor.exe --version
+```
+
+- 実行ファイルには、署名とビルドの来歴の証明を付けていません。チェックサムで、ダウンロードしたファイルがリリースのページのものと同じであることを確かめてください。
+- 署名がないため、macOS でブラウザからダウンロードすると、Gatekeeper が実行を止めます。上の例のように `curl` で入手するか、`xattr -d com.apple.quarantine tag-refactor` で印を外してください。Windows でも SmartScreen が警告することがあります。
+- リリースのワークフローは、`linux_amd64`、`darwin_arm64`、`windows_amd64` で実行まで確かめています。ほかの3つはビルドまでです。
+
+### go install で
+
+```bash
+go install github.com/yucn6201g/tag-refactor/cmd/tag-refactor@latest   # 版を決めるなら @v0.1.0
+tag-refactor --version
+```
+
+- Go 1.26 以上が要ります。標準ライブラリの既知の脆弱性を避けるため、Go 1.27.3 以上を使ってください(GitHub Releases の実行ファイルは、1.27.3 以上でビルドしています)。
+- 実行ファイルは `$(go env GOPATH)/bin`(`GOBIN` を設定していればそこ)に入ります。
+- `--version` は、タグから入れたときはその版(`v0.1.0` など)を、タグのない commit から入れたときは `v0.0.0-<日時>-<commit>` の形を示します。
 
 ## 使い方
 
@@ -164,6 +214,10 @@ Markdown(`markdown`)は、プルリクエストや Wiki に貼るための形で
 - 256 MiB を超える変更案は保存しません。`--region` で分けて作ってください。
 - 収集や影響分析が不完全でも保存し、不完全の印(`inventoryComplete`、`impactAnalysisComplete`)を付けます。
 - **Windows PowerShell 5.1 では、変更案を `--out` で保存してください。** `>` のリダイレクトは UTF-16 で書き直すので、`--format json > plan.json` で作ったファイルは変更案として読めません(読むと「UTF-8 で保存し直す」案内が出ます)。
+
+### plan の限界
+
+- **`apply` の直後の変更案は、書いたばかりのリソースを見落とすことがあります。** `plan` はタグ付けの API(`tag:GetResources`)が返したタグだけをもとに変更案を作ります。この API は、書き換えたばかりのタグをすぐには返さず、書き換える前の答えを返すことがあります(検証用アカウントでは、`apply` の11秒後でもそうでした)。読めたタグだけを対象にするので誤った変更は作りませんが、変更が漏れることがあります。`apply` や `rollback`、ほかの方法でタグを変えた直後は、少し時間をおいてもう一度 `plan` を実行すれば拾えます。
 
 ### 影響分析
 
@@ -547,10 +601,19 @@ go vet scripts/u6check.go                                                       
 - テストは AWS を呼びません。HTTP の層の偽の AWS(`internal/testutil`)を使い、手元の `~/.aws` も読みません。
 - CI(`.github/workflows/ci.yml`)は Linux、macOS、Windows と Go の2つの版でテストし(配るバイナリと同じ `CGO_ENABLED=0`)、Linux で `-race` 付きのテスト、カバレッジ、lint(`cfn-lint` は `test/sandbox/*-fixtures.yaml` と、`iac` が書き換えた写し)、govulncheck、モジュールの確認、ビルドを行います。
 
+### 版の公開(メンテナー向け)
+
+- 公開するのは、人が `main` の commit に `vX.Y.Z` のタグを付けて push したときだけです。タグを付ける操作が、公開の承認にあたります。
+- タグの push で `.github/workflows/release.yml` が動き、テストと govulncheck のあと、6つの OS と CPU の組み合わせの実行ファイルを、Go の安定版(1.27.3 以上)、`CGO_ENABLED=0`、`-trimpath` でビルドします。ライセンスの文と一緒にアーカイブにし、チェックサムのファイルを作り、Linux、macOS、Windows で実行を確かめてから、GitHub Releases に載せます。
+- タグが `vX.Y.Z` の形でない、`main` にない、実行ファイルの版(`--version`)がタグと違う、Go が 1.27.3 より古い、のどれかにあたると公開しません。同じタグのリリースが既にあるときも失敗します。
+- プルリクエスト(`release.yml`、`scripts/third-party-notices.sh`、`go.mod`、`go.sum` を変えるもの)と手動の実行(`workflow_dispatch`)では、公開の手前まで(ビルド、チェックサム、3つの OS での実行)を動かします。作ったファイルは、その実行の成果物として7日間残ります。
+- `THIRD_PARTY_NOTICES.txt` は `scripts/third-party-notices.sh` が、実行ファイルに入るモジュールと Go の標準ライブラリのライセンスの文から作ります。ライセンスのファイルのないモジュールがあると失敗します。
+
 ## ライセンス
 
-- `iac` の Terraform の読み取りに使う [`github.com/hashicorp/hcl/v2`](https://github.com/hashicorp/hcl) は MPL-2.0 です。このツールは hcl/v2 のソースを変えずにライブラリとして使います。ソースは上のリポジトリから入手できます。
-- 配るバイナリへのライセンスの文の同梱とソースの入手先の案内は、配布の作業(`v0.1.0` の前)で行います。
+- tag-refactor は [Apache License 2.0](LICENSE) で公開しています。Copyright 2026 yucn6201g。
+- 実行ファイルには、Go の標準ライブラリと、Apache-2.0、MIT、BSD、MPL-2.0 のライブラリが入っています。配るアーカイブの `THIRD_PARTY_NOTICES.txt` に、それぞれのライセンスの文と、ソースの入手先を載せています。
+- `iac` の Terraform の読み取りに使う [`github.com/hashicorp/hcl/v2`](https://github.com/hashicorp/hcl) は MPL-2.0 です。このツールは hcl/v2 のソースを変えずにライブラリとして使います。ソースは上のリポジトリと、`THIRD_PARTY_NOTICES.txt` に書いた Go のモジュールのプロキシから入手できます。
 
 ## 検証用アカウントでの確認(チェックポイント)
 
