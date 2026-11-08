@@ -136,12 +136,34 @@ func mapValues(m map[string]string) []string {
 	return out
 }
 
-// blockingReader never answers, like a person who does not type.
-type blockingReader struct{ done chan struct{} }
+// blockingReader never answers, like a person who does not type. waiting is
+// closed when the confirmation starts to read it.
+type blockingReader struct {
+	done, waiting chan struct{}
+	once          *sync.Once
+}
+
+func newBlockingReader() blockingReader {
+	return blockingReader{done: make(chan struct{}), waiting: make(chan struct{}), once: &sync.Once{}}
+}
 
 func (b blockingReader) Read([]byte) (int, error) {
+	b.once.Do(func() { close(b.waiting) })
 	<-b.done
 	return 0, io.EOF
+}
+
+// cancelWhenAsked cancels, like Ctrl+C, once the confirmation waits for the
+// answer: a fixed delay raced the work before the confirmation on a slow
+// runner. After a minute it cancels anyway, and the test fails on its result.
+func cancelWhenAsked(in blockingReader, cancel context.CancelFunc) {
+	go func() {
+		select {
+		case <-in.waiting:
+		case <-time.After(time.Minute):
+		}
+		cancel()
+	}()
 }
 
 // BR2.2: Ctrl+C while the confirmation waits is not yes: nothing is written
@@ -149,13 +171,10 @@ func (b blockingReader) Read([]byte) (int, error) {
 func TestCtrlCAtTheConfirmationChangesNothing(t *testing.T) {
 	r := newApplyRig(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	in := blockingReader{done: make(chan struct{})}
+	in := newBlockingReader()
 	defer close(in.done)
 	_, subscribe := signalPipe()
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	cancelWhenAsked(in, cancel)
 
 	res := r.run(ctx, Deps{Stdin: in, StdinIsTerminal: func() bool { return true }, interrupts: subscribe}, "apply", "--plan", r.plan)
 
