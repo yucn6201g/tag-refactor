@@ -98,13 +98,10 @@ func TestCtrlCAtTheRollbackConfirmationUndoesNothing(t *testing.T) {
 	before := r.rollbackRecord(runID)
 	writes := r.fake.Count(testutil.OpTagResources)
 	ctx, cancel := context.WithCancel(context.Background())
-	in := blockingReader{done: make(chan struct{})}
+	in := newBlockingReader()
 	defer close(in.done)
 	_, subscribe := signalPipe()
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
-	}()
+	cancelWhenAsked(in, cancel)
 
 	res := r.run(ctx, Deps{Stdin: in, StdinIsTerminal: func() bool { return true }, interrupts: subscribe}, "rollback", "--run", runID)
 
