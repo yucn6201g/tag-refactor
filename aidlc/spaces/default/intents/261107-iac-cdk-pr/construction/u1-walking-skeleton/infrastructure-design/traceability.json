@@ -1,0 +1,17 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u1-walking-skeleton",
+  "upstream_ids": ["NFR2.4", "NFR3.4", "NFR3.7", "NFR6.1", "NFR6.8", "NFR6.10", "NFR7.1", "NFR8.1", "NFR8.2", "NFR9.1"],
+  "coverage": [
+    { "id": "NFR2.4", "status": "OK", "target": "GitHub fine-grained token and Actions secret scoped to the github-pr job step (cicd-pipeline.md 6)" },
+    { "id": "NFR3.4", "status": "OK", "target": "benchmark test in the test job, fails over 60s (monitoring-design.md)" },
+    { "id": "NFR3.7", "status": "OK", "target": "job timeouts 30, 10 and 20 minutes and npm cache (cicd-pipeline.md 1)" },
+    { "id": "NFR6.1", "status": "OK", "target": "test job matrix on three OSes with CGO_ENABLED=0 (cicd-pipeline.md 1)" },
+    { "id": "NFR6.8", "status": "OK", "target": "prettier job (cicd-pipeline.md 1)" },
+    { "id": "NFR6.10", "status": "OK", "target": "setup-node pinned by hash in test, race, coverage, prettier, github-pr; ci-gate needs (cicd-pipeline.md 1)" },
+    { "id": "NFR7.1", "status": "OK", "target": "coverage job with Node and npm ci (cicd-pipeline.md 1 and 2)" },
+    { "id": "NFR8.1", "status": "OK", "target": "Node and npm ci in every Go test job (cicd-pipeline.md 1)" },
+    { "id": "NFR8.2", "status": "OK", "target": "Dependabot npm entry for ts-minimal (cicd-pipeline.md 3)" },
+    { "id": "NFR9.1", "status": "OK", "target": "test repository yucn6201g/tag-refactor-pr-sandbox and the github-pr job (infrastructure-specification.md, cicd-pipeline.md 1)" }
+  ]
+}

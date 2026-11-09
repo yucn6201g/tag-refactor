@@ -24,6 +24,11 @@ aidlc/diagnostics/
 .claude/settings.local.json
 # END AI-DLC:gitignore
 
+# The test CDK apps: npm ci installs their packages here, and cdk synth run by
+# hand writes here (the tests synth into temporary folders).
+internal/cdk/testdata/apps/*/node_modules/
+internal/cdk/testdata/apps/*/cdk.out/
+
 # Go build and test output
 /tag-refactor
 /tag-refactor.exe

@@ -1,5 +1,11 @@
 # CI for tag-refactor (U1, U2). It never calls AWS and holds no AWS credentials.
 # Branch protection requires only the ci-gate job.
+#
+# v0.2.0 U1: the jobs that run the Go tests install Node.js and the test CDK app
+# (npm ci), because the tests run cdk synth and the helper on all three systems
+# and fail when the tools are missing (NFR8.1). The token of the test-only
+# repository reaches one step only: the GitHub integration test of github-pr
+# (security design §6).
 name: ci
 
 on:
@@ -20,6 +26,11 @@ env:
   # Versions of tools that Dependabot cannot follow; check them monthly.
   GOLANGCI_LINT_VERSION: v2.15.0
   CFN_LINT_VERSION: 1.57.2
+  # Node.js of the CDK tests, and Prettier for the embedded helper.
+  NODE_VERSION: 22.23.4
+  PRETTIER_VERSION: 3.9.10
+  # The test CDK app the tests copy; npm ci installs it before the tests.
+  CDK_TEST_APP: internal/cdk/testdata/apps/ts-minimal
 
 defaults:
   run:
@@ -29,7 +40,7 @@ jobs:
   test:
     name: test (${{ matrix.os }}, go ${{ matrix.go }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -42,6 +53,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ matrix.go }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+      - name: Install the test CDK app
+        working-directory: ${{ env.CDK_TEST_APP }}
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Test (acceptance, unit, performance, output guard, IAM example)
         env:
           # As the published binaries (U8 NFR9.12); only the race job turns cgo on.
@@ -53,7 +72,7 @@ jobs:
     # turns on; the other jobs and the published binaries keep CGO_ENABLED=0
     # (NFR5.7).
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,6 +80,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+      - name: Install the test CDK app
+        working-directory: ${{ env.CDK_TEST_APP }}
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Test with the race detector
         env:
           CGO_ENABLED: "1"
@@ -68,7 +95,7 @@ jobs:
 
   coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -76,6 +103,14 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+      - name: Install the test CDK app
+        working-directory: ${{ env.CDK_TEST_APP }}
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Measure statement coverage of cmd and internal
         run: |
           go test -mod=readonly -coverpkg=./cmd/tag-refactor/...,./internal/... -coverprofile=coverage.out ./cmd/tag-refactor/... ./internal/...
@@ -193,10 +228,57 @@ jobs:
           cd "$empty"
           "./$exe" --help
 
+  prettier:
+    # The format of the embedded helper (team code style, NFR6.8).
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Prettier --check of the helper and of the verification files
+        run: npm exec --yes "prettier@${PRETTIER_VERSION}" -- --check internal/cdk/helper/ "test/verify/*.js"
+
+  github-pr:
+    # The integration test with the real GitHub (AC1.1.11, NFR9.1). The secret
+    # and the variable go to the env of its one step only; without the secret
+    # (pull requests from forks, Dependabot) the test is skipped and the job
+    # passes.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+      - name: Install the test CDK app
+        working-directory: ${{ env.CDK_TEST_APP }}
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Open and close a pull request in the test-only repository
+        env:
+          CGO_ENABLED: "0"
+          TAG_REFACTOR_TEST_REPO: ${{ vars.TAG_REFACTOR_TEST_REPO }}
+          TAG_REFACTOR_TEST_REPO_TOKEN: ${{ secrets.TAG_REFACTOR_TEST_REPO_TOKEN }}
+        run: go test -mod=readonly -count=1 -run '^TestGitHubPullRequest$' ./internal/cli/
+
   ci-gate:
     # The only required status check: it passes only when every job passed.
     if: always()
-    needs: [test, race, coverage, lint, vuln, modcheck, build]
+    needs: [test, race, coverage, lint, vuln, modcheck, build, prettier, github-pr]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

@@ -1,0 +1,11 @@
+{
+  "stage": "domain-design",
+  "upstream_ids": ["US1.1", "US2.1", "US3.1", "US3.2", "US4.1"],
+  "coverage": [
+    { "id": "US1.1", "status": "OK", "target": "IacCommand, PullRequestPublisher, IacDisplay" },
+    { "id": "US2.1", "status": "OK", "target": "CdkSynthesizer, IacWriter" },
+    { "id": "US3.1", "status": "OK", "target": "CdkSourceAnalyzer, IacWriter" },
+    { "id": "US3.2", "status": "OK", "target": "CdkSourceAnalyzer, IacWriter" },
+    { "id": "US4.1", "status": "OK", "target": "IacWriter, CdkSynthesizer, CdkSourceAnalyzer, IacDisplay" }
+  ]
+}

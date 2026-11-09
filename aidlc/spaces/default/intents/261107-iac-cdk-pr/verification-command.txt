@@ -1,0 +1,1 @@
+"C:\Program Files\Git\bin\bash.exe" -c "TAG_REFACTOR_SANDBOX_ACCOUNT_ID=663798383745 TAG_REFACTOR_TEST_REPO=yucn6201g/tag-refactor-pr-sandbox bash ./test/verify/v02-u1.sh"

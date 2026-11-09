@@ -1,0 +1,1 @@
+"tag-refactor の第2弾として、iac コマンドに2つの機能を足す。(1) FR8.3 / AC7.2.1: CDK のソース(TypeScript と Python)への、タグの変更の反映。(2) FR8.4 / AC7.3.1: 反映した変更から GitHub のプルリクエストを作る。要件は前の intent aidlc/spaces/default/intents/261019-tag-refactor-mvp/ の requirements と U8 の機能設計(construction/u8-iac/)にあり、どちらも U8 の機能設計の Q1 で人が範囲の外にしたもの(優先度 Could)。既存の実装は internal/iac、cmd/、README の iac の節。"

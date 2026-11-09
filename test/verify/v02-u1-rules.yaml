@@ -1,0 +1,7 @@
+# Rule file of the v0.2.0 U1 verification (test/verify/v02-u1.sh): Env becomes
+# Environment, the rename the walking skeleton reflects in the CDK app of the
+# test-only repository.
+version: 1
+keys:
+  Environment:
+    aliases: [Env]

@@ -56,6 +56,8 @@
 <!-- Format: NEVER [behavior] (affirmed [date]) -->
 <!-- Example: NEVER throw exceptions across service layer boundaries (affirmed 2026-05-17) -->
 
+- NEVER 公開のリポジトリ(tag-refactor)とテスト専用のリポジトリに、トークンなどの秘密の値を置かない(コミットするファイル、ワークフローの定義、テストのデータのどれにも書かず、CI の secret か手元の環境にだけ置く)。 (affirmed 2026-11-08)
+
 ## Mandated
 
 <!-- Populated by practices-discovery affirmation gate. -->
@@ -63,6 +65,8 @@
 <!-- Example: ALWAYS use Result<T,E> for fallible operations in service layer (affirmed 2026-05-17) -->
 
 None. (affirmed 2026-10-19)
+
+None. (affirmed 2026-11-08)
 
 ## Corrections
 

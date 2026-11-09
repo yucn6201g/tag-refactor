@@ -1,0 +1,260 @@
+{
+  "stage": "nfr-design",
+  "unit": "u1-walking-skeleton",
+  "upstream_ids": [
+    "NFR1.1",
+    "NFR1.2",
+    "NFR1.3",
+    "NFR1.4",
+    "NFR1.5",
+    "NFR2.1",
+    "NFR2.2",
+    "NFR2.3",
+    "NFR2.4",
+    "NFR3.1",
+    "NFR3.2",
+    "NFR3.3",
+    "NFR3.4",
+    "NFR3.5",
+    "NFR3.6",
+    "NFR3.7",
+    "NFR3.8",
+    "NFR3.9",
+    "NFR3.10",
+    "NFR4.1",
+    "NFR4.2",
+    "NFR4.3",
+    "NFR4.4",
+    "NFR5.1",
+    "NFR5.2",
+    "NFR6.1",
+    "NFR6.2",
+    "NFR6.3",
+    "NFR6.4",
+    "NFR6.5",
+    "NFR6.6",
+    "NFR6.7",
+    "NFR6.8",
+    "NFR6.9",
+    "NFR6.10",
+    "NFR7.1",
+    "NFR8.1",
+    "NFR8.2",
+    "NFR9.1",
+    "NFR10.1",
+    "NFR10.2",
+    "NFR10.3"
+  ],
+  "coverage": [
+    {
+      "id": "NFR1.1",
+      "status": "OK",
+      "target": "security-design.md 8: source-reading test for GH_TOKEN reads"
+    },
+    {
+      "id": "NFR1.2",
+      "status": "OK",
+      "target": "security-design.md 3 and 4: output handling table, redact function with <redacted>, allowlist for stderr lines"
+    },
+    {
+      "id": "NFR1.3",
+      "status": "OK",
+      "target": "security-design.md 4: URL userinfo rule"
+    },
+    {
+      "id": "NFR1.4",
+      "status": "OK",
+      "target": "security-design.md 4: closed redaction list and allowlist of kept stderr lines; observability-design.md 3"
+    },
+    {
+      "id": "NFR1.5",
+      "status": "OK",
+      "target": "observability-design.md 3"
+    },
+    {
+      "id": "NFR2.1",
+      "status": "OK",
+      "target": "security-design.md 2: environment builder (also drops TAG_REFACTOR_TEST_REPO_TOKEN, see 6)"
+    },
+    {
+      "id": "NFR2.2",
+      "status": "OK",
+      "target": "security-design.md 2 and reliability-design.md 2: deferred cleanup"
+    },
+    {
+      "id": "NFR2.3",
+      "status": "OK",
+      "target": "security-design.md 5: SHA-256 computed from embedded bytes, private dir (0700 or owner-only ACL), test hook"
+    },
+    {
+      "id": "NFR2.4",
+      "status": "OK",
+      "target": "security-design.md 6: token scope, github-pr job step env, test builds child envs, credential helper via gh, child env and workflow tests"
+    },
+    {
+      "id": "NFR3.1",
+      "status": "OK",
+      "target": "performance-design.md and reliability-design.md 1: procexec timeout"
+    },
+    {
+      "id": "NFR3.2",
+      "status": "OK",
+      "target": "performance-design.md: helper timeout"
+    },
+    {
+      "id": "NFR3.3",
+      "status": "OK",
+      "target": "performance-design.md: pullrequest timeout constants"
+    },
+    {
+      "id": "NFR3.4",
+      "status": "OK",
+      "target": "performance-design.md and reliability-design.md 5: single parse, no type check, benchmark records time and fails at 60s (ND-Q4)"
+    },
+    {
+      "id": "NFR3.5",
+      "status": "OK",
+      "target": "performance-design.md: one analyze and one recheck per app"
+    },
+    {
+      "id": "NFR3.6",
+      "status": "OK",
+      "target": "performance-design.md and reliability-design.md 4: no CDK calls without stack-name tags"
+    },
+    {
+      "id": "NFR3.7",
+      "status": "OK",
+      "target": "performance-design.md: npm and Go caches, parallel tests; reliability-design.md 5: job timeout 30 min"
+    },
+    {
+      "id": "NFR3.8",
+      "status": "OK",
+      "target": "scalability-design.md: first app by name, others skipped"
+    },
+    {
+      "id": "NFR3.9",
+      "status": "OK",
+      "target": "scalability-design.md: tsconfig include and entry files only"
+    },
+    {
+      "id": "NFR3.10",
+      "status": "OK",
+      "target": "reliability-design.md 1: non-interactive process group or job object (created suspended), interactive foreground group, WaitDelay 5s, test bound 10s"
+    },
+    {
+      "id": "NFR4.1",
+      "status": "OK",
+      "target": "reliability-design.md 3: existing write and fileout.Replace"
+    },
+    {
+      "id": "NFR4.2",
+      "status": "OK",
+      "target": "reliability-design.md 3: no Publish on WriteErr or Interrupted"
+    },
+    {
+      "id": "NFR4.3",
+      "status": "OK",
+      "target": "reliability-design.md 2: cleanup table"
+    },
+    {
+      "id": "NFR4.4",
+      "status": "OK",
+      "target": "reliability-design.md 3: CompletedSteps kept"
+    },
+    {
+      "id": "NFR5.1",
+      "status": "OK",
+      "target": "scalability-design.md: existing forEach and budget"
+    },
+    {
+      "id": "NFR5.2",
+      "status": "OK",
+      "target": "reliability-design.md 4: previous acceptance tests unchanged"
+    },
+    {
+      "id": "NFR6.1",
+      "status": "OK",
+      "target": "logical-components.md: single binary, embedded helper"
+    },
+    {
+      "id": "NFR6.2",
+      "status": "OK",
+      "target": "logical-components.md: internal/cdk, internal/pullrequest, internal/procexec"
+    },
+    {
+      "id": "NFR6.3",
+      "status": "OK",
+      "target": "security-design.md 5: embedded JavaScript helper"
+    },
+    {
+      "id": "NFR6.4",
+      "status": "OK",
+      "target": "performance-design.md: createSourceFile and forEachChild only"
+    },
+    {
+      "id": "NFR6.5",
+      "status": "OK",
+      "target": "logical-components.md: Analyzer checks node version before start"
+    },
+    {
+      "id": "NFR6.6",
+      "status": "OK",
+      "target": "logical-components.md: cdk executable lookup order, no npx, synth arguments"
+    },
+    {
+      "id": "NFR6.7",
+      "status": "OK",
+      "target": "reliability-design.md 5: ts-minimal copied, node_modules linked by symlink or mklink /J, safe cleanup"
+    },
+    {
+      "id": "NFR6.8",
+      "status": "OK",
+      "target": "logical-components.md CI design: prettier job with pinned version"
+    },
+    {
+      "id": "NFR6.9",
+      "status": "OK",
+      "target": "reliability-design.md 1: golang.org/x/sys only"
+    },
+    {
+      "id": "NFR6.10",
+      "status": "OK",
+      "target": "logical-components.md CI design: setup-node pinned by hash in test, race, coverage, github-pr; ci-gate needs"
+    },
+    {
+      "id": "NFR7.1",
+      "status": "OK",
+      "target": "reliability-design.md 5: procexec stub"
+    },
+    {
+      "id": "NFR8.1",
+      "status": "OK",
+      "target": "logical-components.md CI design and reliability-design.md 5: Node and npm ci in every Go test job, CI fail and local skip"
+    },
+    {
+      "id": "NFR8.2",
+      "status": "OK",
+      "target": "logical-components.md CI design: npm ci and Dependabot npm entry for ts-minimal"
+    },
+    {
+      "id": "NFR9.1",
+      "status": "OK",
+      "target": "security-design.md 6 and reliability-design.md 5: github-pr job, t.Cleanup closes PR and deletes branch"
+    },
+    {
+      "id": "NFR10.1",
+      "status": "OK",
+      "target": "observability-design.md 1: cdk.ProgressSink lines"
+    },
+    {
+      "id": "NFR10.2",
+      "status": "OK",
+      "target": "observability-design.md 2: messages catalog keys"
+    },
+    {
+      "id": "NFR10.3",
+      "status": "OK",
+      "target": "observability-design.md 1: pullrequest.ProgressSink lines and URL on stdout"
+    }
+  ]
+}

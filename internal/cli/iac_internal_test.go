@@ -32,6 +32,11 @@ func TestIacPassesItsOptionsOn(t *testing.T) {
 	if code != ExitOK {
 		t.Fatalf("exit code = %d", code)
 	}
+	// v0.2.0 C6: the printer receives the states of the CDK apps.
+	if got.Progress == nil {
+		t.Fatal("the request has no progress sink")
+	}
+	got.Progress = nil
 	if got != (iac.Request{PlanPath: "p.json", Dir: "d", TFStatePath: "s.json", Write: true}) {
 		t.Fatalf("request = %+v", got)
 	}
@@ -122,13 +127,30 @@ func TestIacInJapanese(t *testing.T) {
 
 // NFR3.16: the writer has nothing to hold an AWS connection or a writer of AWS,
 // and the command puts it together with no such thing. What the command takes
-// from Deps for AWS stays out of it: a stand-in shows the request only.
+// from Deps for AWS stays out of it: a stand-in shows the request only. Since
+// v0.2.0 the writer holds the synthesizer and the analyzer of CDK (contract
+// C2, C3), and the request the sink of their states (C6): nothing else.
 func TestIacIsPutTogetherWithoutAWS(t *testing.T) {
-	if n := reflect.TypeFor[iac.Writer]().NumField(); n != 0 {
-		t.Fatalf("the writer has %d fields", n)
+	writer := reflect.TypeFor[iac.Writer]()
+	for i := range writer.NumField() {
+		f := writer.Field(i)
+		if f.Type.Kind() != reflect.Interface || !strings.HasPrefix(f.Name, "synth") && !strings.HasPrefix(f.Name, "analyzer") {
+			t.Fatalf("the writer holds %s of type %s", f.Name, f.Type)
+		}
+		for j := range f.Type.NumMethod() {
+			if m := f.Type.Method(j).Type.String(); strings.Contains(m, "awsaccess") || strings.Contains(m, "aws-sdk") {
+				t.Fatalf("the writer's %s reaches AWS: %s", f.Name, m)
+			}
+		}
 	}
 	if n := reflect.TypeOf(iac.New).NumIn(); n != 0 {
 		t.Fatalf("the writer takes %d values", n)
+	}
+	options := reflect.TypeFor[iac.Options]()
+	for i := range options.NumField() {
+		if name := options.Field(i).Type.String(); strings.Contains(name, "awsaccess") || strings.Contains(name, "aws.") {
+			t.Fatalf("the options of the writer hold %s", name)
+		}
 	}
 	run := reflect.TypeFor[iacRunner]()
 	for i := range run.NumIn() {
@@ -138,8 +160,8 @@ func TestIacIsPutTogetherWithoutAWS(t *testing.T) {
 	}
 	for i := range reflect.TypeFor[iac.Request]().NumField() {
 		f := reflect.TypeFor[iac.Request]().Field(i)
-		if k := f.Type.Kind(); k != reflect.String && k != reflect.Bool {
-			t.Fatalf("the request holds %s of kind %s", f.Name, k)
+		if k := f.Type.Kind(); k != reflect.String && k != reflect.Bool && f.Type.String() != "cdk.ProgressSink" {
+			t.Fatalf("the request holds %s of type %s", f.Name, f.Type)
 		}
 	}
 }

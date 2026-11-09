@@ -33,10 +33,15 @@ var (
 
 // runner holds one run of Run.
 type runner struct {
+	w      *Writer
 	req    Request
 	root   string
 	res    *Result
 	budget *budget
+	// cdkReason and cdkTool say why a CDK app could not be used, for the
+	// resources no template has (v0.2.0 BR2.3).
+	cdkReason ManualReason
+	cdkTool   string
 }
 
 // Run does workflow W1: the input, the targets, the places, the edits, the
@@ -61,7 +66,7 @@ func (w *Writer) Run(ctx context.Context, req Request) (*Result, error) {
 	defer setMemoryLimit()()
 	targets, res := buildTargets(plan, state)
 	res.HasTFState, res.WriteRequested = req.TFStatePath != "", req.Write
-	r := &runner{req: req, root: root, res: res, budget: newBudget()}
+	r := &runner{w: w, req: req, root: root, res: res, budget: newBudget()}
 	if len(targets) > 0 {
 		if err := r.reflect(ctx, targets); err != nil {
 			return nil, err
@@ -69,6 +74,7 @@ func (w *Writer) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	sortItems(res.Manual)
 	sortItems(res.AssumedRemovals)
+	slices.SortFunc(res.CDKApps, func(a, b CDKApp) int { return strings.Compare(a.Dir, b.Dir) })
 	return res, nil
 }
 
@@ -89,29 +95,57 @@ func sortItems(items []ManualItem) {
 	})
 }
 
-// reflect does everything after the targets are known.
+// reflect does everything after the targets are known. The CDK apps come
+// first (v0.2.0 functional spec §2): the targets synth finds become CDK
+// targets, and the others go on to the templates and the Terraform files.
 func (r *runner) reflect(ctx context.Context, targets []*target) error {
+	cdkTasks, err := r.prepareCDK(ctx, targets)
+	if err != nil {
+		return err
+	}
+	var rest []*target
 	wantCF, wantTF := false, false
 	for _, t := range targets {
+		if t.tool == ToolCDK {
+			continue
+		}
+		rest = append(rest, t)
 		wantCF = wantCF || t.tool == ToolCloudFormation
 		wantTF = wantTF || t.tool == ToolTerraform
 	}
+	var outs []*fileOutcome
+	if len(rest) > 0 {
+		if outs, err = r.reflectFiles(ctx, rest, wantCF, wantTF); err != nil {
+			return err
+		}
+	}
+	cdkOuts, err := r.processCDK(ctx, cdkTasks)
+	if err != nil {
+		return err
+	}
+	if err := r.recheckCDK(ctx, cdkOuts); err != nil {
+		return err
+	}
+	outs = append(outs, cdkOuts...)
+	slices.SortFunc(outs, func(a, b *fileOutcome) int { return strings.Compare(a.c.rel, b.c.rel) })
+	return r.finish(ctx, outs)
+}
+
+// reflectFiles finds the places of the targets in the templates and the
+// Terraform files and makes their edits.
+func (r *runner) reflectFiles(ctx context.Context, targets []*target, wantCF, wantTF bool) ([]*fileOutcome, error) {
 	found, err := walkRoot(r.root, wantCF, wantTF)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r.res.SkippedFolders = found.folders
-	r.res.SkippedFiles = found.skipped
+	r.res.SkippedFiles = append(r.res.SkippedFiles, found.skipped...)
 	firsts, err := r.readAll(ctx, found.candidates)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	tasks := r.placeTargets(targets, found.candidates, firsts)
-	outs, err := r.processAll(ctx, tasks)
-	if err != nil {
-		return err
-	}
-	return r.finish(ctx, outs)
+	return r.processAll(ctx, tasks)
 }
 
 // forEach calls work for 0 to n-1 on a few goroutines and stops at the first
@@ -234,6 +268,7 @@ type fileTask struct {
 // each target and gathers the targets by file (BR3.2, BR3.3).
 func (r *runner) placeTargets(targets []*target, candidates []*candidate, firsts []firstRead) []*fileTask {
 	index := newPlaceIndex()
+	index.cdkReason, index.cdkTool = r.cdkReason, r.cdkTool
 	byRel := make(map[string]int, len(candidates))
 	for i, c := range candidates {
 		byRel[c.rel] = i
@@ -245,9 +280,12 @@ func (r *runner) placeTargets(targets []*target, candidates []*candidate, firsts
 	}
 	slices.SortFunc(r.res.SkippedFiles, func(a, b SkippedFile) int { return strings.Compare(a.File, b.File) })
 	for _, s := range r.res.SkippedFiles {
-		if strings.HasSuffix(strings.ToLower(s.File), ".tf") {
+		switch name := strings.ToLower(s.File); {
+		case strings.HasSuffix(name, ".tf"):
 			index.skippedTF = append(index.skippedTF, s.File)
-		} else {
+		case strings.HasSuffix(name, ".ts"):
+			// A source of a CDK app the helper could not parse is no template.
+		default:
 			index.skippedCF = append(index.skippedCF, s.File)
 		}
 	}
@@ -284,6 +322,8 @@ type fileOutcome struct {
 	diff    string
 	blob    gitFile
 	sum     [sha256.Size]byte
+	// cdk is set for a source of a CDK app (v0.2.0).
+	cdk *cdkOutcome
 }
 
 func (r *runner) processAll(ctx context.Context, tasks []*fileTask) ([]*fileOutcome, error) {
@@ -426,7 +466,8 @@ func (r *runner) finish(ctx context.Context, outs []*fileOutcome) error {
 		res.Debug = append(res.Debug, o.debug...)
 		if o.reflected > 0 {
 			res.Reflected += o.reflected
-			res.Files = append(res.Files, FileResult{File: o.c.rel, Tool: o.c.tool(), Reflected: o.reflected, Diff: o.diff})
+			res.Files = append(res.Files, FileResult{File: o.c.rel, Tool: o.c.tool(), Language: o.c.language(),
+				Reflected: o.reflected, Diff: o.diff})
 			toWrite = append(toWrite, o)
 		}
 	}
@@ -474,6 +515,7 @@ func (r *runner) write(ctx context.Context, files []*fileOutcome) {
 			return
 		}
 		res.Files[i].Written = true
+		res.WrittenFiles = append(res.WrittenFiles, o.c.rel)
 	}
 }
 

@@ -19,10 +19,16 @@ type target struct {
 	before       map[string]string
 	changes      []planner.Change
 	tool         Tool
-	// stackName and logicalID are set for CloudFormation.
+	// stackName and logicalID are set for CloudFormation and CDK.
 	stackName, logicalID string
 	// address is set for Terraform.
 	address string
+	// account is the account of the plan, region and global those of the
+	// resource: the keys of the match with synth (v0.2.0 BR2.1).
+	account, region string
+	global          bool
+	// cdk is set for a target matched with a resource of synth.
+	cdk *cdkTarget
 }
 
 // changeKey is the key a manual item names: the key the change starts from, or
@@ -54,7 +60,8 @@ func buildTargets(plan *planner.Plan, state stateIndex) ([]*target, *Result) {
 			continue
 		}
 		res.Resources++
-		t := &target{arn: r.ARN, resourceType: r.ResourceType, before: r.BeforeTags, changes: r.Changes}
+		t := &target{arn: r.ARN, resourceType: r.ResourceType, before: r.BeforeTags, changes: r.Changes,
+			account: plan.AccountID, region: r.Region, global: r.Global}
 		if decideTool(res, t, state) {
 			targets = append(targets, t)
 		}
