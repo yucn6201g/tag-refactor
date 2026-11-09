@@ -73,10 +73,14 @@ func InstallFakeGH(t testing.TB) *FakeGH {
 }
 
 // linkOrCopy makes dst the same file as src: a hard link when it can, else a
-// copy.
+// copy. On Windows it always copies: a hard link of the running test binary
+// cannot be deleted while the binary runs, so the cleanup of t.TempDir would
+// fail with "Access is denied".
 func linkOrCopy(src, dst string) error {
-	if err := os.Link(src, dst); err == nil {
-		return nil
+	if runtime.GOOS != "windows" {
+		if err := os.Link(src, dst); err == nil {
+			return nil
+		}
 	}
 	in, err := os.Open(src)
 	if err != nil {
