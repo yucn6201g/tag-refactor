@@ -399,7 +399,7 @@ func (r *runner) editFile(out *fileOutcome, task *fileTask, ct *content, parsed 
 	}
 	fail := func(why string) {
 		for _, p := range reflected {
-			out.manual = append(out.manual, ManualItem{ARN: p.pt.t.arn, ChangeID: p.c.ChangeID, Key: changeKey(p.c),
+			out.manual = append(out.manual, ManualItem{ARN: p.pt.t.arn, LogicalID: p.pt.t.logicalID, Address: p.pt.t.address, ChangeID: p.c.ChangeID, Key: changeKey(p.c),
 				File: p.pt.at.file, Line: p.pt.at.line, Reason: ReasonUnreadableFile})
 		}
 		out.debug = append(out.debug, task.c.rel+": "+why)
@@ -448,7 +448,7 @@ func allRemoved(site *tagSite, sim *outcomeOfTarget) bool {
 func (o *fileOutcome) markUnreadable(targets []placedTarget, why string) {
 	for _, pt := range targets {
 		for _, c := range pt.t.changes {
-			o.manual = append(o.manual, ManualItem{ARN: pt.t.arn, ChangeID: c.ChangeID, Key: changeKey(c),
+			o.manual = append(o.manual, ManualItem{ARN: pt.t.arn, LogicalID: pt.t.logicalID, Address: pt.t.address, ChangeID: c.ChangeID, Key: changeKey(c),
 				File: pt.at.file, Line: pt.at.line, Reason: ReasonUnreadableFile})
 		}
 	}

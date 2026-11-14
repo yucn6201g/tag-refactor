@@ -188,7 +188,7 @@ func TestV02U1PullRequestFromACDKApp(t *testing.T) {
 		t.Fatalf("the URL is on %d lines of stdout, want 1:\n%s", urls, r.stdout)
 	}
 	branch := strings.TrimSpace(w.out("symbolic-ref", "--short", "HEAD"))
-	requireMatch(t, "branch", branch, `^tag-refactor/iac-\d{8}-\d{6}$`)
+	requireMatch(t, "branch", branch, `^tag-refactor/iac-\d{8}-\d{6}Z$`)
 	title := "Reflect tag changes from tag-refactor (plan.json)"
 	shown := strings.Split(strings.TrimSpace(w.out("show", "--name-only", "--format=%s", "HEAD")), "\n")
 	if len(shown) != 3 || shown[0] != title || shown[2] != "infra/lib/stack.ts" {

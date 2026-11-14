@@ -100,9 +100,16 @@ type Plan struct {
 	// Base is the branch iac ran on, which the pull request goes to.
 	Base   string
 	Branch string
-	Title  string
-	// UserBody is the content of --pr-body-file (U2).
+	// Title is the title of the pull request and the commit message, redacted
+	// (U2 NFR1.8).
+	Title string
+	// TitleRedacted is true when the redaction changed the title (U2).
+	TitleRedacted bool
+	// UserBody is the content of --pr-body-file (U2), as the user wrote it.
 	UserBody string
+	// BodyNotices are the shapes of UserBody that are told about but do not
+	// stop the run: ARNs and twelve-digit numbers (U2 NFR1.7).
+	BodyNotices []redact.Finding
 	// RepoRoot is the top of the working tree, Prefix the place of --dir in
 	// it (empty or ending with /), GitDir the folder of git.
 	RepoRoot, Prefix, GitDir string
@@ -125,10 +132,9 @@ type PublishOutcome struct {
 	// FailedStep is the step that failed; empty when every step was done.
 	FailedStep string
 	URL        string
-	// BodyFile is where the body stays when the request was not opened.
+	// BodyFile is where the body stays when the request was not opened; empty
+	// when it could not be written or once the request is open.
 	BodyFile string
-	// ResumeCommands are for U2.
-	ResumeCommands []string
 	// Err is the cause, with a kind; it holds no token.
 	Err error
 }
@@ -176,13 +182,93 @@ func (p *Publisher) debug(line string) {
 
 // stop is the error of a check that did not pass: nothing was changed.
 func stop(detailID string, args ...any) error {
-	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--pr",
-		DetailID: detailID, DetailArgs: args, HintID: "iac.prCheckFix"}
+	return stopWith("iac.prCheckFix", detailID, args...)
 }
 
-// DefaultBranch is the name of the new branch at now (contract X1).
+// stopWith is stop with another way out.
+func stopWith(hintID, detailID string, args ...any) error {
+	return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--pr",
+		DetailID: detailID, DetailArgs: args, HintID: hintID}
+}
+
+// BodyShapesError is the cause of the error of a body that holds a shape that
+// stops the run (U2 NFR1.6). It holds the kinds and the lines, never a value.
+type BodyShapesError struct {
+	Findings []redact.Finding
+}
+
+func (e *BodyShapesError) Error() string { return "the body holds values that must not be made public" }
+
+// DefaultBranch is the name of the new branch at now, in UTC (contract X1, U2
+// BR1.2).
 func DefaultBranch(now time.Time) string {
-	return "tag-refactor/iac-" + now.Format("20060102-150405")
+	return "tag-refactor/iac-" + now.UTC().Format("20060102-150405") + "Z"
+}
+
+// The limits of the body of --pr-body-file (U2 BR1.1, NFR6.14).
+const (
+	maxBodyBytes = 1 << 20
+	maxBodyRunes = 60000
+)
+
+// readBody reads the file of --pr-body-file: a regular file of UTF-8, up to 1
+// MiB and 60,000 characters (code points). It is read before git runs.
+func readBody(file string) (string, error) {
+	bad := func(id string, args ...any) error {
+		e := stop(id, args...).(*errkind.Error)
+		e.Subject = "--pr-body-file"
+		return e
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		return "", bad("iac.prBodyUnreadable", file)
+	}
+	if !info.Mode().IsRegular() {
+		return "", bad("iac.prBodyNotRegular", file)
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return "", bad("iac.prBodyUnreadable", file)
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, maxBodyBytes+1))
+	switch {
+	case err != nil:
+		return "", bad("iac.prBodyUnreadable", file)
+	case len(data) > maxBodyBytes:
+		return "", bad("iac.prBodyTooLarge", file)
+	case !utf8.Valid(data):
+		return "", bad("iac.prBodyNotUTF8", file)
+	case utf8.RuneCount(data) > maxBodyRunes:
+		return "", bad("iac.prBodyTooLong", file)
+	}
+	return string(data), nil
+}
+
+// checkBody reads the body and looks for the shapes in it: a shape that stops
+// the run is an error that names the kinds and the lines; the others are kept
+// as notices (U2 NFR1.6, NFR1.7).
+func (p *Publisher) checkBody(file string, plan *Plan) error {
+	body, err := readBody(file)
+	if err != nil {
+		return err
+	}
+	var stops []redact.Finding
+	for _, f := range redact.Scan(body) {
+		p.debug(fmt.Sprintf("--pr-body-file: %s on lines %v", f.Kind, f.Lines))
+		if f.Stop {
+			stops = append(stops, f)
+		} else {
+			plan.BodyNotices = append(plan.BodyNotices, f)
+		}
+	}
+	if len(stops) > 0 {
+		e := stopWith("iac.prBodySecretFix", "iac.prBodySecret").(*errkind.Error)
+		e.Subject, e.Cause = "--pr-body-file", &BodyShapesError{Findings: stops}
+		return e
+	}
+	plan.UserBody = body
+	return nil
 }
 
 // gitCaller runs git for one repository.
@@ -269,14 +355,24 @@ func (p *Publisher) Check(ctx context.Context, req CheckRequest, sink ProgressSi
 
 // checkLocal does the checks that need no network.
 func (p *Publisher) checkLocal(ctx context.Context, req CheckRequest) (Plan, error) {
-	if err := checkTitle(req.Title); err != nil {
+	var plan Plan
+	plan.Title = redact.String(req.Title)
+	plan.TitleRedacted = plan.Title != req.Title
+	if err := checkTitle(plan.Title); err != nil {
 		return Plan{}, err
+	}
+	if req.BodyFile != "" {
+		if err := p.checkBody(req.BodyFile, &plan); err != nil {
+			return Plan{}, err
+		}
+	}
+	if strings.HasPrefix(req.BranchName, "-") {
+		return Plan{}, stop("iac.prBadBranch", req.BranchName)
 	}
 	g, err := p.newGit(req.Dir)
 	if err != nil {
 		return Plan{}, err
 	}
-	var plan Plan
 	if plan.RepoRoot, err = g.out(ctx, "rev-parse", "--show-toplevel"); err != nil {
 		return Plan{}, ctxOr(ctx, stop("iac.prNotRepo", req.Dir))
 	}
@@ -298,15 +394,25 @@ func (p *Publisher) checkLocal(ctx context.Context, req CheckRequest) (Plan, err
 	plan.Branch = req.BranchName
 	if plan.Branch == "" {
 		plan.Branch = DefaultBranch(req.Now)
-	}
-	if _, err := g.out(ctx, "check-ref-format", "--branch", plan.Branch); err != nil {
-		return Plan{}, ctxOr(ctx, stop("iac.prBadBranch", plan.Branch))
+	} else if err := checkBranchName(ctx, g, plan.Branch); err != nil {
+		return Plan{}, err
 	}
 	if _, err := g.out(ctx, "rev-parse", "--verify", "--quiet", "refs/heads/"+plan.Branch); err == nil {
 		return Plan{}, stop("iac.prBranchExists", plan.Branch)
 	}
-	plan.Title = req.Title
 	return plan, ctx.Err()
+}
+
+// checkBranchName checks the name of --pr-branch with git (U2 NFR6.12): git
+// must take it as a branch name and give it back unchanged, which turns away
+// @{-1} and the like, that git reads as another branch. A name that starts with
+// - is turned away before (checkLocal), so git never reads it as an option.
+func checkBranchName(ctx context.Context, g *gitCaller, name string) error {
+	got, err := g.out(ctx, "check-ref-format", "--branch", name)
+	if err != nil || got != name {
+		return ctxOr(ctx, stop("iac.prBadBranch", name))
+	}
+	return nil
 }
 
 func ctxOr(ctx context.Context, err error) error {
@@ -414,6 +520,13 @@ func (p *Publisher) checkNetwork(ctx context.Context, plan Plan) error {
 	if heads == "" {
 		return stop("iac.prBaseNotOnRemote", plan.Base, plan.Remote)
 	}
+	heads, err = g.out(ctx, "ls-remote", "--heads", plan.Remote, "refs/heads/"+plan.Branch)
+	if err != nil {
+		return ctxOr(ctx, stop("iac.prRemoteUnreachable", plan.Remote))
+	}
+	if heads != "" {
+		return stopWith("iac.prBranchOnRemoteFix", "iac.prBranchOnRemote", plan.Branch, plan.Remote)
+	}
 	return nil
 }
 
@@ -428,20 +541,33 @@ func (p *Publisher) Publish(ctx context.Context, plan Plan, in PublishInput, sin
 	for _, f := range in.Files {
 		out.CommittedFiles = append(out.CommittedFiles, path.Join(plan.Prefix, f))
 	}
+	// The body file comes first, so that the resume commands of every step
+	// can point at it (U2 BR4.3, NFR1.10). The title and the body are used as
+	// they are: the parts tag-refactor makes were redacted when they were put
+	// together, and the body of the user is the user's (U2 NFR1.8).
+	bodyFile, err := writeBody(plan, in.Body)
+	if err != nil {
+		sink.Step(StepBranch, StatusStarted, plan.Branch)
+		out.FailedStep = StepBranch
+		out.Err = &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Op: StepBranch, Subject: "--pr",
+			DetailID: "iac.prBodyFileFailed", DetailArgs: []any{err.Error()}, HintID: "iac.prBodyFileFix", Cause: err}
+		sink.Step(StepBranch, StatusFailed, plan.Branch)
+		return out
+	}
+	out.BodyFile = bodyFile
 	g, err := p.newGit(plan.RepoRoot)
 	if err != nil {
 		out.FailedStep, out.Err = StepBranch, err
 		return out
 	}
-	title, body := redact.String(in.Title), redact.String(in.Body)
 	steps := []struct {
 		name string
 		run  func() error
 	}{
 		{StepBranch, func() error { return p.branch(ctx, g, plan) }},
-		{StepCommit, func() error { return p.commit(ctx, g, out.CommittedFiles, title) }},
+		{StepCommit, func() error { return p.commit(ctx, g, out.CommittedFiles, in.Title) }},
 		{StepPush, func() error { return p.push(ctx, g, plan) }},
-		{StepCreate, func() error { return p.create(ctx, plan, title, body, &out) }},
+		{StepCreate, func() error { return p.create(ctx, plan, in.Title, &out) }},
 	}
 	for _, s := range steps {
 		sink.Step(s.name, StatusStarted, plan.Branch)
@@ -505,21 +631,16 @@ func (p *Publisher) talk(ctx context.Context, g *gitCaller, args []string) error
 	return err
 }
 
-// create writes the body to a file in the folder of git, which no commit takes,
-// and asks gh to open the pull request with it (contract C1 body_file). The
-// file goes once the request is open, and stays to be used again otherwise.
-func (p *Publisher) create(ctx context.Context, plan Plan, title, body string, out *PublishOutcome) error {
+// create asks gh to open the pull request with the body file Publish wrote in
+// the folder of git, which no commit takes (contract C1 body_file). The file
+// goes once the request is open, and stays to be used again otherwise.
+func (p *Publisher) create(ctx context.Context, plan Plan, title string, out *PublishOutcome) error {
 	gh, err := p.runner().LookPath("gh")
 	if err != nil {
 		return err
 	}
-	bodyFile, err := writeBody(plan, body)
-	if err != nil {
-		return err
-	}
-	out.BodyFile = bodyFile
 	args := []string{"pr", "create", "--repo", plan.RepoPath, "--base", plan.Base, "--head", plan.Branch,
-		"--title", title, "--body-file", bodyFile}
+		"--title", title, "--body-file", out.BodyFile}
 	p.debug("gh pr create --repo " + plan.RepoPath + " --base " + plan.Base + " --head " + plan.Branch)
 	res, err := p.runner().Run(ctx, procexec.Command{Name: gh, Args: args, Dir: plan.RepoRoot, Env: p.environ(),
 		Timeout: p.timeouts().GH})
@@ -535,22 +656,43 @@ func (p *Publisher) create(ctx context.Context, plan Plan, title, body string, o
 			out.URL = line
 		}
 	}
-	if err := os.Remove(bodyFile); err == nil {
-		out.BodyFile = ""
+	if err := os.Remove(out.BodyFile); err != nil {
+		p.debug("the body file stays at " + out.BodyFile)
 	}
+	out.BodyFile = ""
 	return nil
 }
 
 var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]`)
 
+// maxNameInBodyFile is how many bytes of the branch name the name of the body
+// file takes: with the rest, the name stays under 100 characters.
+const maxNameInBodyFile = 60
+
+// writeBody writes the body to a new file of <GitDir>/tag-refactor (U2 NFR1.10):
+// a name no other run has, which only the user can read on Unix. The other
+// body files there are left alone.
 func writeBody(plan Plan, body string) (string, error) {
 	dir := filepath.Join(filepath.FromSlash(plan.GitDir), "tag-refactor")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	file := filepath.Join(dir, "pr-body-"+unsafeName.ReplaceAllString(plan.Branch, "-")+".md")
-	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+	name := unsafeName.ReplaceAllString(plan.Branch, "-")
+	if len(name) > maxNameInBodyFile {
+		name = name[:maxNameInBodyFile]
+	}
+	f, err := os.CreateTemp(dir, "pr-body-"+name+"-*.md")
+	if err != nil {
 		return "", err
 	}
-	return file, nil
+	if _, err := f.WriteString(body); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }

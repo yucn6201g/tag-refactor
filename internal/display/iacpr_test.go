@@ -97,8 +97,8 @@ func TestPullRequestNotOpenedAndStopped(t *testing.T) {
 	p.PullRequestNotOpened(false)
 	p.PullRequestNotOpened(true)
 	p.PullRequestStopped(pullrequest.PublishOutcome{Branch: "b", CompletedSteps: []string{pullrequest.StepBranch, pullrequest.StepCommit},
-		BodyFile: "/repo/.git/tag-refactor/pr-body-b.md"})
-	p.PullRequestStopped(pullrequest.PublishOutcome{Branch: "b"})
+		BodyFile: "/repo/.git/tag-refactor/pr-body-b.md"}, nil, pullrequest.ShellSh)
+	p.PullRequestStopped(pullrequest.PublishOutcome{Branch: "b"}, nil, pullrequest.ShellSh)
 
 	for _, line := range []string{"No file was written, so no pull request was opened.",
 		"The pull request was not opened: the files were not all written.",
@@ -134,20 +134,21 @@ func TestPullRequestTitleAndBody(t *testing.T) {
 		Manual: []iac.ManualItem{{ARN: "arn:aws:s3:::secret", Key: "env", Reason: iac.ReasonValueDiffers}},
 	}
 
-	body := PullRequestBody(English, res, "infra/")
+	body, ok := PullRequestBody(English, res, "infra/", "")
 
 	for _, want := range []string{"`tag-refactor iac --pr`", "## Changed files (4)", "- `infra/lib/stack.ts` (CDK, TypeScript)\n",
-		"- `infra/stacks/a.yaml` (CloudFormation)\n", "- `infra/main.tf` (Terraform)\n", "- `infra/<redacted>'name'.yaml` (CloudFormation)\n"} {
-		if !strings.Contains(body, want) {
+		"- `infra/stacks/a.yaml` (CloudFormation)\n", "- `infra/main.tf` (Terraform)\n", "- `infra/<redacted>'name'.yaml` (CloudFormation)\n",
+		"## To fix by hand (1)\n\n- secret, env: the value in the source is neither"} {
+		if !ok || !strings.Contains(body, want) {
 			t.Fatalf("no %q in:\n%s", want, body)
 		}
 	}
-	for _, unwanted := range []string{"not-written", "secret", "arn:aws"} {
+	for _, unwanted := range []string{"not-written", "arn:aws"} {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("%q in:\n%s", unwanted, body)
 		}
 	}
-	if ja := PullRequestBody(Japanese, res, ""); !strings.Contains(ja, "## 変更したファイル(4)") || !strings.Contains(ja, "(CDK、TypeScript)") {
+	if ja, _ := PullRequestBody(Japanese, res, "", ""); !strings.Contains(ja, "## 変更したファイル(4)") || !strings.Contains(ja, "(CDK、TypeScript)") {
 		t.Fatalf("body:\n%s", ja)
 	}
 }

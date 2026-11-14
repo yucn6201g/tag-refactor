@@ -171,6 +171,10 @@ func TestOneManualChangeLeavesTheOthers(t *testing.T) {
 	if res.Manual[0].Line != 6 || res.Manual[0].File != "t.yaml" {
 		t.Fatalf("place of the item = %+v", res.Manual[0])
 	}
+	// v0.2.0 U2 (review N3): the item names the logical ID of the resource.
+	if m := res.Manual[0]; m.LogicalID != "Q1" || m.Address != "" {
+		t.Fatalf("names of the item = %+v", m)
+	}
 }
 
 func TestChangesOfAWholePlaceThatIsAnExpression(t *testing.T) {
@@ -402,6 +406,10 @@ func TestTerraformRemovalsAndAdditions(t *testing.T) {
 func TestTerraformTagBlockAndExpressionsGoToTheList(t *testing.T) {
 	res, _ := runTF(t, "resource \"aws_sqs_queue\" \"q\" {\n  tag {\n    key = \"a\"\n  }\n}\n", setValue("a", "1", "2"))
 	requireReasons(t, res, "a unsupportedTagShape")
+	// v0.2.0 U2 (review N3): the item names the address of the resource.
+	if m := res.Manual[0]; m.Address != "aws_sqs_queue.q" || m.LogicalID != "" {
+		t.Fatalf("names of the item = %+v", m)
+	}
 	res, _ = runTF(t, "resource \"aws_sqs_queue\" \"q\" {\n  tags = merge(var.a, { a = \"1\" })\n}\n", setValue("a", "1", "2"))
 	requireReasons(t, res, "a tagsNotLiteral")
 	res, _ = runTF(t, "resource \"aws_sqs_queue\" \"q\" {\n  tags = {\n    a = var.x\n  }\n}\n", setValue("a", "1", "2"))

@@ -40,6 +40,11 @@ func describe(e *errkind.Error, lang display.Lang) (what, fix string) {
 		action := awsaccess.IAMAction(e.Op)
 		return t("err.accessDenied", action, inRegion(e.Region, lang)), t("err.accessDeniedFix", action, t("err.permissions"))
 	case errkind.Transient:
+		// A step of a program other than AWS (git and gh of iac --pr) names
+		// its own messages.
+		if e.DetailID != "" {
+			return t(e.DetailID, e.DetailArgs...), t(e.HintID, e.HintArgs...)
+		}
 		if e.Reason == errkind.ReasonTimeout {
 			return t("err.timeout", e.Op, inRegion(e.Region, lang)), t("err.timeoutFix")
 		}

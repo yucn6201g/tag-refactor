@@ -156,15 +156,34 @@ func TestTheEnvironmentsOfTheIntegrationTest(t *testing.T) {
 	}
 }
 
+// Review N6: the branch of the subtest options takes the time in UTC, the ID
+// of the run when there is one, and a random part.
+func TestOptionsBranch(t *testing.T) {
+	at := time.Date(2026, 11, 8, 18, 30, 5, 0, time.FixedZone("UTC+9", 9*60*60))
+
+	withRun, again, alone := optionsBranch(at, "987654321"), optionsBranch(at, "987654321"), optionsBranch(at, "")
+
+	requireMatch(t, "branch", withRun, `^tag-refactor/iac-20261108-093005Z-options-987654321-[0-9a-f]{8}$`)
+	requireMatch(t, "branch", alone, `^tag-refactor/iac-20261108-093005Z-options-[0-9a-f]{8}$`)
+	if withRun == again {
+		t.Fatalf("two names in the same second are the same: %s", withRun)
+	}
+}
+
 // Infrastructure design: the branches of iac --pr older than a day are the ones
 // left by an earlier run.
 func TestStaleBranches(t *testing.T) {
-	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.Local)
+	now := time.Date(2026, 11, 8, 12, 0, 0, 0, time.UTC)
 	for branch, want := range map[string]bool{
-		"tag-refactor/iac-20261106-120000": true,
-		"tag-refactor/iac-20261107-130000": false,
-		"tag-refactor/iac-not-a-date":      false,
-		"feature/x":                        false,
+		"tag-refactor/iac-20261106-120000":          true,
+		"tag-refactor/iac-20261107-130000":          false,
+		"tag-refactor/iac-20261107-115959Z":         true,
+		"tag-refactor/iac-20261107-130000Z-options": false,
+		"tag-refactor/iac-20261106-120000Z-options": true,
+		"tag-refactor/iac-not-a-date":               false,
+		"feature/x":                                 false,
+		optionsBranch(time.Date(2026, 11, 6, 21, 0, 0, 0, time.FixedZone("UTC+9", 9*60*60)), "12345"): true,
+		optionsBranch(time.Date(2026, 11, 7, 13, 0, 0, 0, time.UTC), ""):                              false,
 	} {
 		if got := staleBranch(branch, now); got != want {
 			t.Errorf("staleBranch(%s) = %v", branch, got)

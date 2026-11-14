@@ -80,6 +80,11 @@ const (
 // a removal counted as reflected, with an empty Reason. It holds no tag value.
 type ManualItem struct {
 	ARN, ChangeID, Key string
+	// LogicalID is the logical ID of a CloudFormation or CDK resource, and
+	// Address the address of a Terraform resource; empty when not known. The
+	// list to fix by hand in the pull request names the resource by them
+	// (v0.2.0 U2, entities.md ManualLine.resourceName).
+	LogicalID, Address string
 	// File is relative to --dir with /; Line starts at 1. Both can be empty.
 	File string
 	Line int

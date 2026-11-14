@@ -65,6 +65,27 @@
 
 - **Construction Verification Command**: "C:\Program Files\Git\bin\bash.exe" -c "TAG_REFACTOR_SANDBOX_ACCOUNT_ID=663798383745 TAG_REFACTOR_TEST_REPO=yucn6201g/tag-refactor-pr-sandbox bash ./test/verify/v02-u1.sh"
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- **Parked**: 2026-11-14T13:35:09Z
+
+- **Parked At Stage**: functional-design
+
+- **Parked By**: person
+
 ## Phase Progress
 <!-- Status values: Pending, Active, Verified, Skipped -->
 
@@ -126,7 +147,7 @@ Per unit: [TBD]
 - **Current Stage**: functional-design
 - **Next Stage**: nfr-requirements
 - **Status**: Running
-- **Last Updated**: 2026-11-09T03:35:13Z
+- **Last Updated**: 2026-11-14T13:35:09Z
 
 - **Construction Autonomy Mode**: autonomous
 

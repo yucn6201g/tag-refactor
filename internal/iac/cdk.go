@@ -268,7 +268,7 @@ func (r *runner) planCDK(run *cdkRun, matched []*target) []*cdkTask {
 
 // manual puts one change on the list to fix by hand at a place of the app.
 func (p *cdkPlanner) manual(t *target, c planner.Change, reason ManualReason, file string, line int) {
-	p.r.res.Manual = append(p.r.res.Manual, ManualItem{ARN: t.arn, ChangeID: c.ChangeID, Key: changeKey(c),
+	p.r.res.Manual = append(p.r.res.Manual, ManualItem{ARN: t.arn, LogicalID: t.logicalID, Address: t.address, ChangeID: c.ChangeID, Key: changeKey(c),
 		File: p.run.rel(file), Line: line, Reason: reason})
 }
 
@@ -599,7 +599,7 @@ func (o *fileOutcome) followRiders(part *cdkPart, sim *outcomeOfTarget) {
 				o.already++
 				continue
 			}
-			o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
+			o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, LogicalID: rd.t.logicalID, Address: rd.t.address, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
 				File: item.File, Line: item.Line, Reason: item.Reason})
 		}
 	}
@@ -609,10 +609,10 @@ func (o *fileOutcome) followRiders(part *cdkPart, sim *outcomeOfTarget) {
 func (o *fileOutcome) unreadableParts(parts []*cdkPart, why string) {
 	for _, part := range parts {
 		for _, c := range part.t.changes {
-			o.manual = append(o.manual, ManualItem{ARN: part.t.arn, ChangeID: c.ChangeID, Key: changeKey(c),
+			o.manual = append(o.manual, ManualItem{ARN: part.t.arn, LogicalID: part.t.logicalID, Address: part.t.address, ChangeID: c.ChangeID, Key: changeKey(c),
 				File: part.at.file, Line: part.at.line, Reason: ReasonUnreadableFile})
 			for _, rd := range part.riders[c.ChangeID] {
-				o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
+				o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, LogicalID: rd.t.logicalID, Address: rd.t.address, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
 					File: part.at.file, Line: part.at.line, Reason: ReasonUnreadableFile})
 			}
 		}
@@ -625,10 +625,10 @@ func (o *fileOutcome) unreadableParts(parts []*cdkPart, why string) {
 func (o *fileOutcome) failCDK(why string, reason ManualReason) {
 	for _, rc := range o.cdk.reflected {
 		at := rc.part.at
-		o.manual = append(o.manual, ManualItem{ARN: rc.part.t.arn, ChangeID: rc.c.ChangeID, Key: changeKey(rc.c),
+		o.manual = append(o.manual, ManualItem{ARN: rc.part.t.arn, LogicalID: rc.part.t.logicalID, Address: rc.part.t.address, ChangeID: rc.c.ChangeID, Key: changeKey(rc.c),
 			File: at.file, Line: at.line, Reason: reason})
 		for _, rd := range rc.part.riders[rc.c.ChangeID] {
-			o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
+			o.manual = append(o.manual, ManualItem{ARN: rd.t.arn, LogicalID: rd.t.logicalID, Address: rd.t.address, ChangeID: rd.c.ChangeID, Key: changeKey(rd.c),
 				File: at.file, Line: at.line, Reason: reason})
 		}
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/planner"
 	"github.com/yucn6201g/tag-refactor/internal/procexec"
+	"github.com/yucn6201g/tag-refactor/internal/pullrequest"
 )
 
 // Deps holds what the command line takes from its environment. The zero value
@@ -62,6 +63,9 @@ type Deps struct {
 	// iac, when set, replaces the writer of the iac command. The tests of this
 	// package use it.
 	iac iacRunner
+	// prTimeouts, when set, replaces the limits of the steps of --pr. The
+	// tests of this package use it.
+	prTimeouts pullrequest.Timeouts
 }
 
 // Exit codes (contract C5, BR6.3).

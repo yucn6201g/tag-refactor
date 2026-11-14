@@ -1,8 +1,6 @@
 package display
 
 import (
-	"fmt"
-	"path"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -243,27 +241,6 @@ func (p *Printer) PullRequestNotOpened(writeFailed bool) {
 	p.locked(func() { p.say(styleChange, id) })
 }
 
-// PullRequestStopped tells, after the error of a step, what was done and where
-// the working tree stays (BR4.2).
-func (p *Printer) PullRequestStopped(out pullrequest.PublishOutcome) {
-	p.locked(func() {
-		done := make([]string, 0, len(out.CompletedSteps))
-		for _, s := range out.CompletedSteps {
-			done = append(done, string(p.stepWord(s)))
-		}
-		list := p.tr("iac.prNone")
-		if len(done) > 0 {
-			list = strings.Join(done, p.tr("list.separator"))
-		}
-		if len(out.CompletedSteps) > 0 {
-			p.say(styleNone, "iac.prStay", out.Branch, rawString(list))
-		}
-		if out.BodyFile != "" {
-			p.say(styleNone, "iac.prBodyKept", out.BodyFile)
-		}
-	})
-}
-
 // DebugLine prints one line for --debug, already redacted by its maker.
 func (p *Printer) DebugLine(line string) {
 	p.locked(func() {
@@ -293,38 +270,4 @@ func PullRequestTitle(lang Lang, planFile string) string {
 		// Redacting again keeps the cut from showing part of a hidden shape.
 		name = redact.String(string(runes[:keep])) + "…"
 	}
-}
-
-// PullRequestBody is the body of U1 (BR4.4, contract X2): a few lines that say
-// where it comes from, and the changed files with their kind of IaC, relative
-// to the top of the working tree (prefix is the place of --dir in it). It
-// holds no ARN, account ID, tag value, token or output of another program.
-func PullRequestBody(lang Lang, res *iac.Result, prefix string) string {
-	var b strings.Builder
-	b.WriteString(T(lang, "iac.prIntro") + "\n" + T(lang, "iac.prReview") + "\n\n")
-	written := 0
-	for i := range res.Files {
-		if res.Files[i].Written {
-			written++
-		}
-	}
-	b.WriteString(T(lang, "iac.prChangedFiles", written) + "\n\n")
-	for i := range res.Files {
-		f := &res.Files[i]
-		if !f.Written {
-			continue
-		}
-		fmt.Fprintf(&b, "- `%s` (%s)\n", strings.ReplaceAll(path.Join(prefix, f.File), "`", "'"), kindOf(lang, f))
-	}
-	return redact.String(b.String())
-}
-
-func kindOf(lang Lang, f *iac.FileResult) string {
-	switch f.Tool {
-	case iac.ToolCDK:
-		return T(lang, "iac.prKindCDKTS")
-	case iac.ToolTerraform:
-		return T(lang, "iac.prKindTF")
-	}
-	return T(lang, "iac.prKindCFN")
 }

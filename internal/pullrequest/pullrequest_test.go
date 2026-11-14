@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -88,7 +89,7 @@ func (f *tools) Run(_ context.Context, c procexec.Command) (procexec.Result, err
 		return out("https://user:ghp_secret@github.com/o/r.git")
 	case strings.HasPrefix(w, "git rev-parse --verify"):
 		return procexec.Result{ExitCode: 1}, nil
-	case strings.HasPrefix(w, "git ls-remote"):
+	case strings.HasPrefix(w, "git ls-remote --heads origin refs/heads/main"):
 		return out("0123abcd\trefs/heads/main")
 	case strings.HasPrefix(w, "gh pr create"):
 		body, _ := os.ReadFile(c.Args[len(c.Args)-1])
@@ -126,7 +127,11 @@ func (s *steps) Step(step, status, detail string) {
 	s.lines = append(s.lines, step+" "+status+" "+detail)
 }
 
-var now = time.Date(2026, 11, 8, 18, 30, 5, 0, time.Local)
+// now is in a zone nine hours ahead of UTC: the default branch takes UTC.
+var now = time.Date(2026, 11, 8, 18, 30, 5, 0, time.FixedZone("UTC+9", 9*60*60))
+
+// defaultBranch is the default branch at now.
+const defaultBranch = "tag-refactor/iac-20261108-093005Z"
 
 func publisher(f *tools) *Publisher {
 	return &Publisher{Runner: f, Environ: func() []string {
@@ -151,11 +156,11 @@ func TestCheckDecidesThePlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := Plan{Remote: "origin", RemoteURL: "https://github.com/o/r.git", Host: "github.com", RepoPath: "o/r", Base: "main",
-		Branch: "tag-refactor/iac-20261108-183005", Title: "T", RepoRoot: "/repo", Prefix: "infra/", GitDir: filepath.ToSlash(f.gitDir)}
-	if plan != want {
+		Branch: defaultBranch, Title: "T", RepoRoot: "/repo", Prefix: "infra/", GitDir: filepath.ToSlash(f.gitDir)}
+	if !reflect.DeepEqual(plan, want) {
 		t.Fatalf("plan %+v\nwant %+v", plan, want)
 	}
-	if strings.Join(sink.lines, "|") != "checked done tag-refactor/iac-20261108-183005" {
+	if strings.Join(sink.lines, "|") != "checked done "+defaultBranch {
 		t.Fatalf("sink %v", sink.lines)
 	}
 	c, _ := f.find("git rev-parse --show-toplevel")
@@ -193,7 +198,6 @@ func TestCheckStopsAtTheFirstProblem(t *testing.T) {
 			f.change["git config --get remote.origin.url"] = procexec.Result{Stdout: []byte("https://gitlab.com/o/r.git")}
 			f.change["git remote get-url"] = procexec.Result{Stdout: []byte("https://gitlab.com/o/r.git")}
 		}, "iac.prNotGitHub"},
-		{"bad branch", "T", func(f *tools) { f.change["git check-ref-format"] = failed }, "iac.prBadBranch"},
 		{"branch exists", "T", func(f *tools) { f.change["git rev-parse --verify"] = procexec.Result{} }, "iac.prBranchExists"},
 		{"empty title", " ", func(*tools) {}, "iac.prBadTitle"},
 		{"two lines", "a\nb", func(*tools) {}, "iac.prBadTitle"},
@@ -292,7 +296,7 @@ func TestPublishMakesEveryStep(t *testing.T) {
 			steps = append(steps, w)
 		}
 	}
-	branch := "tag-refactor/iac-20261108-183005"
+	branch := defaultBranch
 	want := []string{"git switch -c " + branch, "git add -- infra/lib/stack.ts",
 		"git commit --only -m Reflect (plan.json) -- infra/lib/stack.ts",
 		"git push origin refs/heads/" + branch + ":refs/heads/" + branch}
@@ -385,21 +389,20 @@ func TestPublishTimeoutsAndCancel(t *testing.T) {
 	}
 }
 
-// NFR1.2, BR4.3, BR4.4: the title, the commit message and the body are redacted.
-func TestPublishRedactsWhatItBuilds(t *testing.T) {
+// U2 NFR1.8 (security design §3 (c)): Publish gives the title and the body to
+// git and gh as it got them, not one character changed; the redaction is done
+// before, part by part (Check for the title, display for the body).
+func TestPublishKeepsTheTitleAndTheBody(t *testing.T) {
 	f := newTools(t)
+	title := "Reflect (plan-123456789012.json)"
+	body := "see arn:aws:s3:::mine and 123456789012\n"
 
-	publish(t, f, PublishInput{Files: []string{"a.ts"}, Title: "Reflect (plan-123456789012.json)",
-		Body: "see arn:aws:s3:::secret and AKIAABCDEFGHIJKLMNOP"})
+	publish(t, f, PublishInput{Files: []string{"a.ts"}, Title: title, Body: body})
 
 	commit, _ := f.find("git commit")
 	create, _ := f.find("gh pr create")
-	for _, text := range []string{strings.Join(commit.Args, " "), strings.Join(create.Args, " "), f.bodies[0]} {
-		for _, secret := range []string{"123456789012", "arn:aws", "AKIA"} {
-			if strings.Contains(text, secret) {
-				t.Errorf("%q holds %s", text, secret)
-			}
-		}
+	if !slices.Contains(commit.Args, title) || create.Args[slices.Index(create.Args, "--title")+1] != title || f.bodies[0] != body {
+		t.Fatalf("commit %v\ncreate %v\nbody %q", commit.Args, create.Args, f.bodies)
 	}
 }
 
@@ -441,7 +444,7 @@ func TestGitEnvironments(t *testing.T) {
 }
 
 func TestDefaultBranch(t *testing.T) {
-	if got := DefaultBranch(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)); got != "tag-refactor/iac-20260102-030405" {
+	if got := DefaultBranch(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)); got != "tag-refactor/iac-20260102-030405Z" {
 		t.Fatalf("DefaultBranch = %s", got)
 	}
 }
