@@ -14,3 +14,15 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci"
+  # The pinned packages of the test CDK app, CDK CLI included (v0.2.0 NFR8.2).
+  - package-ecosystem: npm
+    directory: /internal/cdk/testdata/apps/ts-minimal
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    ignore:
+      # The helper reads TypeScript 4.0 to 5.x (NFR6.4); a later major is a
+      # change of the helper, not an update.
+      - dependency-name: typescript
+        versions: [">= 6"]

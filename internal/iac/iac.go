@@ -1,11 +1,15 @@
 package iac
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"time"
 
+	"github.com/yucn6201g/tag-refactor/internal/cdk"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/planner"
+	"github.com/yucn6201g/tag-refactor/internal/procexec"
 )
 
 // Request is one run of iac (IacRequest).
@@ -19,6 +23,9 @@ type Request struct {
 	// Write changes the files (--write); without it only the difference is
 	// shown (BR5.1).
 	Write bool
+	// Progress receives the states of the CDK apps (v0.2.0 contract C6). Nil
+	// shows nothing.
+	Progress cdk.ProgressSink
 }
 
 // ManualReason says why a change is left to be fixed by hand (rules.md).
@@ -41,6 +48,20 @@ const (
 	ReasonUnreadableFile      ManualReason = "unreadableFile"
 )
 
+// The reasons of CDK (v0.2.0 contract C7). Their texts are one line each in U1;
+// U6 makes them complete.
+const (
+	ReasonCDKAppFailed           ManualReason = "cdkAppFailed"
+	ReasonCDKUnsupportedLanguage ManualReason = "cdkUnsupportedLanguage"
+	ReasonCDKV1                  ManualReason = "cdkV1"
+	ReasonCDKNoSource            ManualReason = "cdkNoSource"
+	ReasonCDKScopeTag            ManualReason = "cdkScopeTag"
+	ReasonCDKSharedValue         ManualReason = "cdkSharedValue"
+	ReasonCDKAmbiguous           ManualReason = "cdkAmbiguous"
+	ReasonCDKExpression          ManualReason = "cdkExpression"
+	ReasonCDKUnsupportedShape    ManualReason = "cdkUnsupportedShape"
+)
+
 // DetailKind says what ManualItem.Detail holds.
 type DetailKind string
 
@@ -52,6 +73,7 @@ const (
 	DetailCandidates DetailKind = "candidates" // the files that could be the place
 	DetailOtherType  DetailKind = "otherType"  // the files with the logical ID and another Type
 	DetailSkipped    DetailKind = "skipped"    // the candidate files left out
+	DetailTool       DetailKind = "tool"       // the program a CDK app failed with
 )
 
 // ManualItem is a change left to be fixed by hand; in Result.AssumedRemovals,
@@ -72,8 +94,11 @@ type ManualItem struct {
 type FileResult struct {
 	// File is relative to --dir with /.
 	File string
-	// Tool says whether the file is a template or a Terraform file.
+	// Tool says whether the file is a template, a Terraform file or the source
+	// of a CDK app.
 	Tool Tool
+	// Language is the language of a CDK source (typescript); empty otherwise.
+	Language string
 	// Reflected counts the changes the file takes.
 	Reflected int
 	// Diff is the unified difference of the file, in lines joined by \n. Its
@@ -91,7 +116,37 @@ const (
 	ToolNone Tool = iota
 	ToolCloudFormation
 	ToolTerraform
+	ToolCDK
 )
+
+// CDKAppStatus is what became of a CDK app (v0.2.0 contract C7).
+type CDKAppStatus string
+
+// The states of a CDK app at the end of a run.
+const (
+	CDKAppDone    CDKAppStatus = "done"
+	CDKAppFailed  CDKAppStatus = "failed"
+	CDKAppSkipped CDKAppStatus = "skipped"
+)
+
+// ReasonNotInU1 is why an app after the first is skipped: U1 synthesizes one
+// app (scalability design). It goes when U3 takes several apps; it puts
+// nothing on the list to fix by hand and does not change the exit code.
+const ReasonNotInU1 = "notInU1"
+
+// CDKApp is one CDK app of the run.
+type CDKApp struct {
+	// Dir is relative to --dir, with /.
+	Dir      string
+	Language string
+	Status   CDKAppStatus
+	Elapsed  time.Duration
+	// FailureReason is a reason of cdk.Failure, "helper" for a failure of the
+	// helper, or ReasonNotInU1.
+	FailureReason string
+	// Tool is the program the app failed with: cdk, node, typescript or helper.
+	Tool string
+}
 
 // SkipReason says why a candidate file was left out (BR3.1, NFR3.19).
 type SkipReason string
@@ -149,10 +204,16 @@ type Result struct {
 	// Debug holds the lines for --debug: what git said, and why a file failed
 	// the check after its edits. They hold no content of the sources.
 	Debug []string
+	// CDKApps are the CDK apps found below --dir, by folder (v0.2.0 C7).
+	CDKApps []CDKApp
+	// WrittenFiles are the files --write wrote, relative to --dir with /, in
+	// the order of Files: what a pull request commits (v0.2.0 C1).
+	WrittenFiles []string
 }
 
 // ExitCode is the exit code of the result (BR6.2): 1 when --write stopped, 2
-// with anything to fix by hand, otherwise 0.
+// with anything to fix by hand or a CDK app that failed or was skipped
+// (v0.2.0 contract C7), otherwise 0.
 func (r *Result) ExitCode() int {
 	switch {
 	case r.WriteErr != nil || r.Interrupted:
@@ -160,15 +221,54 @@ func (r *Result) ExitCode() int {
 	case len(r.Manual) > 0:
 		return 2
 	}
+	for _, a := range r.CDKApps {
+		if a.Status != CDKAppDone && a.FailureReason != ReasonNotInU1 {
+			return 2
+		}
+	}
 	return 0
 }
 
 // Writer runs iac. It takes no AWS connection and no writer of AWS: there is
-// nothing of the kind to pass it (U8 NFR3.16).
-type Writer struct{}
+// nothing of the kind to pass it (U8 NFR3.16). The programs it runs for CDK
+// apps get no AWS credentials either (v0.2.0 BR1.3).
+type Writer struct {
+	synth    cdkSynthesizer
+	analyzer cdkAnalyzer
+}
 
-// New returns a writer.
-func New() *Writer { return &Writer{} }
+// cdkSynthesizer and cdkAnalyzer are the parts of package cdk the writer uses;
+// the tests stand in for them.
+type (
+	cdkSynthesizer interface {
+		Discover(ctx context.Context, root string, only []string) ([]cdk.App, error)
+		Synthesize(ctx context.Context, app cdk.App, opts cdk.Options, sink cdk.ProgressSink) (cdk.Synthesis, error)
+	}
+	cdkAnalyzer interface {
+		Analyze(ctx context.Context, app cdk.App, req cdk.AnalyzeRequest) (cdk.Analysis, error)
+		Recheck(ctx context.Context, app cdk.App, edited map[string][]byte) (cdk.Analysis, error)
+	}
+)
+
+// Options are what the writer takes from its surroundings for CDK apps.
+type Options struct {
+	// Runner runs cdk and node; nil runs the programs of the computer.
+	Runner procexec.Runner
+	// Environ is the environment the programs start from; nil is the one of
+	// the process.
+	Environ func() []string
+	// Now is the clock of the elapsed times; nil is time.Now.
+	Now func() time.Time
+}
+
+// New returns a writer that runs the programs of the computer.
+func New() *Writer { return NewWithOptions(Options{}) }
+
+// NewWithOptions returns a writer with the given surroundings.
+func NewWithOptions(o Options) *Writer {
+	cfg := cdk.Config{Runner: o.Runner, Environ: o.Environ, Now: o.Now}
+	return &Writer{synth: cdk.NewSynthesizer(cfg), analyzer: cdk.NewAnalyzer(cfg)}
+}
 
 // usageError is the error of a wrong option or input (BR1.1).
 func usageError(subject, detailID, hintID string, args ...any) error {

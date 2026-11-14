@@ -17,6 +17,7 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/display"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/planner"
+	"github.com/yucn6201g/tag-refactor/internal/procexec"
 )
 
 // Deps holds what the command line takes from its environment. The zero value
@@ -47,6 +48,9 @@ type Deps struct {
 	// StdinIsTerminal reports whether Stdin is a terminal (U6 BR2.3). Nil
 	// asks the operating system about the process standard input.
 	StdinIsTerminal func() bool
+	// Exec runs the outside programs of iac: cdk, node, git and gh (v0.2.0
+	// C5). Nil runs the programs of the computer; tests stand in for them.
+	Exec procexec.Runner
 
 	// savingHook, when set, is called once the temporary file of plan --out
 	// or rules suggest --output exists, before anything is written to it.
@@ -154,6 +158,10 @@ type app struct {
 	lang    string
 	started time.Time
 	result  *outcome
+	// stderr is the standard error as Run got it: git commit and git push of
+	// iac --pr write to it directly, for the hooks and the signing (v0.2.0
+	// reliability design §1).
+	stderr io.Writer
 }
 
 // closeDisplay closes the display, which puts the terminal back as it was
@@ -174,7 +182,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer, deps Deps
 	if deps.Now == nil {
 		deps.Now = time.Now
 	}
-	a := &app{deps: deps, p: display.New(stdout, stderr)}
+	a := &app{deps: deps, p: display.New(stdout, stderr), stderr: stderr}
 	defer closeDisplay(a.p)
 	a.p.SetLang(display.ResolveLang(getenv))
 	root := a.rootCommand()

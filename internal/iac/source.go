@@ -29,6 +29,8 @@ const (
 	quotePlain quoteStyle = iota
 	quoteSingle
 	quoteDouble
+	// quoteBacktick is a template literal without substitutions (TypeScript).
+	quoteBacktick
 )
 
 // tagShape is the shape of the place of the tags (TagSite.shape).
@@ -265,6 +267,11 @@ type placeIndex struct {
 	// skippedCF and skippedTF name the candidates left out, for the detail of
 	// a place not found (BR3.1).
 	skippedCF, skippedTF []string
+	// cdkReason and cdkTool, when set, replace templateNotFound for a
+	// resource no template has: a CDK app failed or was skipped, and the
+	// resource may be one of its (v0.2.0 BR2.3).
+	cdkReason ManualReason
+	cdkTool   string
 }
 
 func newPlaceIndex() *placeIndex { return &placeIndex{byKey: map[string][]fileRef{}} }
@@ -331,6 +338,14 @@ func (x *placeIndex) findTemplate(res *Result, t *target) (place, bool) {
 	}
 	switch len(match) {
 	case 0:
+		if x.cdkReason != "" {
+			kind := DetailNone
+			if x.cdkTool != "" {
+				kind = DetailTool
+			}
+			manualAll(res, t, x.cdkReason, kind, x.cdkTool)
+			return place{}, false
+		}
 		kind, detail := DetailNone, ""
 		switch {
 		case len(other) > 0:

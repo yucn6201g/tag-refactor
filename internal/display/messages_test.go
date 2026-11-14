@@ -66,7 +66,8 @@ func TestEveryIdentifierInTheSourcesIsInTheCatalog(t *testing.T) {
 	prefixes := "unit|word|list|stderr|exit|scope|progress|state|result|status|discovery|scan|plan|kind|cause|diff|md|err|planfile|draft|apply|reason|journal|rollback|iac"
 	literal := regexp.MustCompile(`"((?:` + prefixes + `)\.[A-Za-z]+)"`)
 	used := 0
-	for _, dir := range []string{".", filepath.Join("..", "cli"), filepath.Join("..", "journal"), filepath.Join("..", "apply"), filepath.Join("..", "iac")} {
+	for _, dir := range []string{".", filepath.Join("..", "cli"), filepath.Join("..", "journal"), filepath.Join("..", "apply"), filepath.Join("..", "iac"),
+		filepath.Join("..", "pullrequest"), filepath.Join("..", "cdk")} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
 		if err != nil {
 			t.Fatal(err)

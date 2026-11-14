@@ -238,6 +238,8 @@ func (r *results) iacManualLine(m *iac.ManualItem) string {
 		reason += r.tr("iac.detailOtherType", Sanitize(m.Detail))
 	case iac.DetailSkipped:
 		reason += r.tr("iac.detailSkipped", Sanitize(m.Detail))
+	case iac.DetailTool:
+		reason += r.tr("iac.detailAddress", Sanitize(m.Detail))
 	}
 	return "  " + Sanitize(m.ARN) + "  " + Sanitize(m.Key) + "  " + at + "  " + reason
 }
@@ -327,16 +329,20 @@ func (p *Printer) iacGuidance(res *iac.Result) {
 	if len(res.Files) > 0 && !res.WriteRequested {
 		p.say(styleNone, "iac.noWrite")
 	}
-	written, cloudFormation := false, false
+	written, cloudFormation, cdkSource := false, false, false
 	for i := range res.Files {
 		f := &res.Files[i]
 		written = written || f.Written
 		cloudFormation = cloudFormation || f.Written && f.Tool == iac.ToolCloudFormation
+		cdkSource = cdkSource || f.Written && f.Tool == iac.ToolCDK
 	}
 	if written {
 		p.say(styleNone, "iac.review")
 	}
 	if cloudFormation {
 		p.say(styleNone, "iac.stackUpdate")
+	}
+	if cdkSource {
+		p.say(styleNone, "iac.cdkWritten")
 	}
 }
