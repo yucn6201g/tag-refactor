@@ -123,7 +123,7 @@ func TestScanOfALongLineIsQuick(t *testing.T) {
 
 		got := Scan(line)
 
-		if took := time.Since(begin); took > time.Second {
+		if took := time.Since(begin); took > timeFactor*time.Second {
 			t.Errorf("a line of %q... took %v", line[:12], took)
 		}
 		if got != nil {

@@ -583,7 +583,10 @@ func TestV02U2ResumeCommandsAfterAStop(t *testing.T) {
 // is still there with the body.
 func (w *prWorld) requireBodyFileKept(stderr string) {
 	w.t.Helper()
-	bodies, err := filepath.Glob(filepath.Join(w.dir, ".git", "tag-refactor", "pr-body-*.md"))
+	// The folder as git names it, as iac does: on macOS the temporary folder
+	// is reached through a symbolic link, and on Windows through a short name.
+	gitDir := filepath.FromSlash(strings.TrimSpace(w.out("rev-parse", "--absolute-git-dir")))
+	bodies, err := filepath.Glob(filepath.Join(gitDir, "tag-refactor", "pr-body-*.md"))
 	if err != nil || len(bodies) != 1 {
 		w.t.Fatalf("body files %v, %v", bodies, err)
 	}
