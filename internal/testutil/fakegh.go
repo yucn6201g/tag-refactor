@@ -7,18 +7,30 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
-// The fake gh of the tests (v0.2.0 U1, unit-test-instructions.md): the test
-// binary itself, copied as gh into a folder put first on PATH. When it starts
-// as gh with fakeGHDirEnv set, RunFakeGHIfRequested plays gh instead of
-// running the tests: it writes each call to a file of that folder and answers
-// as gh would. The real git stays in use; only gh is stood in for.
+// The fakes of git and gh of the tests (v0.2.0 U1 and U2,
+// unit-test-instructions.md): the test binary itself, copied under the name of
+// the program into a folder put first on PATH. When it starts under that name
+// with the variable of its folder set, it plays the program instead of running
+// the tests and writes each call to a file of that folder.
+//
+// There are two fakes. The fake gh (InstallFakeGH) answers as gh would; the
+// real git stays in use. The fake that writes down its arguments
+// (InstallFakeArgs) can stand under any names, git and gh among them: it only
+// keeps the name and the arguments of each call and ends with 0. The tests of
+// the resume commands (U2) run those commands in a real shell and compare the
+// arguments the fake received.
 
 // fakeGHDirEnv names the folder of the fake gh: its calls and its settings.
 const fakeGHDirEnv = "TAG_REFACTOR_FAKE_GH_DIR"
+
+// fakeArgsDirEnv names the folder of the fake that writes down its arguments.
+const fakeArgsDirEnv = "TAG_REFACTOR_FAKE_ARGS_DIR"
 
 // FakePullRequestURL is what the fake gh prints for gh pr create.
 const FakePullRequestURL = "https://github.com/o/r/pull/7"
@@ -37,39 +49,54 @@ type GHCall struct {
 type fakeGHSettings struct {
 	AuthFails   bool `json:"authFails"`
 	CreateFails bool `json:"createFails"`
+	// CreateHangs makes gh pr create wait without an answer, until it is
+	// stopped (AC1.1.10).
+	CreateHangs bool `json:"createHangs"`
+	// CreateNoURL makes gh pr create end well without printing a URL.
+	CreateNoURL bool `json:"createNoURL"`
 }
 
 // FakeGH is an installed fake gh.
 type FakeGH struct {
-	t   testing.TB
-	dir string
+	t        testing.TB
+	dir      string
+	settings fakeGHSettings
 }
 
 // InstallFakeGH puts a fake gh first on PATH for the rest of the test. The
 // package that calls it must call RunFakeGHIfRequested first in its TestMain.
 func InstallFakeGH(t testing.TB) *FakeGH {
 	t.Helper()
+	dir := t.TempDir()
+	bin := installBinaries(t, dir, "gh")
+	f := &FakeGH{t: t, dir: dir}
+	f.write()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(fakeGHDirEnv, dir)
+	return f
+}
+
+// installBinaries copies the test binary into dir/bin under each name and
+// returns that folder.
+func installBinaries(t testing.TB, dir string, names ...string) string {
+	t.Helper()
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatalf("find the test binary: %v", err)
 	}
-	dir := t.TempDir()
 	bin := filepath.Join(dir, "bin")
 	if err := os.Mkdir(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	name := "gh"
-	if runtime.GOOS == "windows" {
-		name = "gh.exe"
+	for _, name := range names {
+		if runtime.GOOS == "windows" {
+			name += ".exe"
+		}
+		if err := linkOrCopy(self, filepath.Join(bin, name)); err != nil {
+			t.Fatalf("copy the test binary as %s: %v", name, err)
+		}
 	}
-	if err := linkOrCopy(self, filepath.Join(bin, name)); err != nil {
-		t.Fatalf("copy the test binary as gh: %v", err)
-	}
-	f := &FakeGH{t: t, dir: dir}
-	f.write(fakeGHSettings{})
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv(fakeGHDirEnv, dir)
-	return f
+	return bin
 }
 
 // linkOrCopy makes dst the same file as src: a hard link when it can, else a
@@ -98,9 +125,9 @@ func linkOrCopy(src, dst string) error {
 	return out.Close()
 }
 
-func (f *FakeGH) write(s fakeGHSettings) {
+func (f *FakeGH) write() {
 	f.t.Helper()
-	data, err := json.Marshal(s)
+	data, err := json.Marshal(f.settings)
 	if err != nil {
 		f.t.Fatal(err)
 	}
@@ -110,29 +137,41 @@ func (f *FakeGH) write(s fakeGHSettings) {
 }
 
 // FailAuth makes gh auth status fail, as when gh is not logged in.
-func (f *FakeGH) FailAuth() { f.write(fakeGHSettings{AuthFails: true}) }
+func (f *FakeGH) FailAuth() { f.settings.AuthFails = true; f.write() }
 
 // FailCreate makes gh pr create fail.
-func (f *FakeGH) FailCreate() { f.write(fakeGHSettings{CreateFails: true}) }
+func (f *FakeGH) FailCreate() { f.settings.CreateFails = true; f.write() }
+
+// HangCreate makes gh pr create wait without an answer until it is stopped.
+func (f *FakeGH) HangCreate() { f.settings.CreateHangs = true; f.write() }
+
+// CreateWithoutURL makes gh pr create end well without printing a URL.
+func (f *FakeGH) CreateWithoutURL() { f.settings.CreateNoURL = true; f.write() }
 
 // Calls returns the calls of the fake gh so far, in order.
 func (f *FakeGH) Calls() []GHCall {
 	f.t.Helper()
-	file, err := os.Open(filepath.Join(f.dir, "calls.jsonl"))
+	return readCalls[GHCall](f.t, filepath.Join(f.dir, "calls.jsonl"))
+}
+
+// readCalls reads the calls a fake wrote, one JSON object a line.
+func readCalls[T any](t testing.TB, path string) []T {
+	t.Helper()
+	file, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		f.t.Fatal(err)
+		t.Fatal(err)
 	}
 	defer func() { _ = file.Close() }()
-	var calls []GHCall
+	var calls []T
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 1<<20), 16<<20)
 	for scanner.Scan() {
-		var c GHCall
+		var c T
 		if err := json.Unmarshal(scanner.Bytes(), &c); err != nil {
-			f.t.Fatal(err)
+			t.Fatal(err)
 		}
 		calls = append(calls, c)
 	}
@@ -171,8 +210,12 @@ func (c GHCall) Flag(flag string) string {
 // may name the process output (the output guard test).
 func FakeGHRequested() (string, bool) {
 	dir := os.Getenv(fakeGHDirEnv)
-	base := strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
-	return dir, dir != "" && base == "gh"
+	return dir, dir != "" && programName() == "gh"
+}
+
+// programName is the name this binary was started under, without .exe.
+func programName() string {
+	return strings.TrimSuffix(strings.ToLower(filepath.Base(os.Args[0])), ".exe")
 }
 
 // PlayFakeGH answers one call of gh and returns its exit code.
@@ -203,17 +246,29 @@ func PlayFakeGH(dir string, args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	case len(args) >= 2 && args[0] == "pr" && args[1] == "create":
-		if s.CreateFails {
-			_, _ = io.WriteString(stderr, "pull request create failed: GraphQL: something went wrong\n")
-			return 1
-		}
-		_, _ = io.WriteString(stdout, FakePullRequestURL+"\n")
-		return 0
+		return playCreate(s, stdout, stderr)
 	}
 	return 0
 }
 
-func appendCall(dir string, call GHCall) error {
+func playCreate(s fakeGHSettings, stdout, stderr io.Writer) int {
+	switch {
+	case s.CreateHangs:
+		// The limit of the step stops this process long before.
+		time.Sleep(time.Hour)
+		return 0
+	case s.CreateFails:
+		_, _ = io.WriteString(stderr, "pull request create failed: GraphQL: something went wrong\n")
+		return 1
+	case s.CreateNoURL:
+		_, _ = io.WriteString(stdout, "Creating pull request...\n")
+		return 0
+	}
+	_, _ = io.WriteString(stdout, FakePullRequestURL+"\n")
+	return 0
+}
+
+func appendCall(dir string, call any) error {
 	data, err := json.Marshal(call)
 	if err != nil {
 		return err
@@ -227,4 +282,76 @@ func appendCall(dir string, call GHCall) error {
 		return err
 	}
 	return f.Close()
+}
+
+// ArgsCall is one call of the fake that writes down its arguments.
+type ArgsCall struct {
+	// Name is the name the fake was started under, without .exe.
+	Name string   `json:"name"`
+	Args []string `json:"args"`
+}
+
+// FakeArgs is an installed fake that writes down its arguments.
+type FakeArgs struct {
+	t   testing.TB
+	dir string
+}
+
+// InstallFakeArgs puts the fake under each of names first on PATH for the rest
+// of the test. The package that calls it must call FakeArgsRequested first in
+// its TestMain:
+//
+//	if dir, ok := testutil.FakeArgsRequested(); ok {
+//		os.Exit(testutil.PlayFakeArgs(dir, os.Args[1:]))
+//	}
+func InstallFakeArgs(t testing.TB, names ...string) *FakeArgs {
+	t.Helper()
+	dir := t.TempDir()
+	bin := installBinaries(t, dir, names...)
+	if err := os.WriteFile(filepath.Join(dir, "names.txt"), []byte(strings.Join(names, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(fakeArgsDirEnv, dir)
+	return &FakeArgs{t: t, dir: dir}
+}
+
+// FakeArgsRequested reports whether this binary was started under one of the
+// names of the fake that writes down its arguments, and the folder of the fake.
+func FakeArgsRequested() (string, bool) {
+	dir := os.Getenv(fakeArgsDirEnv)
+	if dir == "" {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "names.txt"))
+	if err != nil {
+		return "", false
+	}
+	return dir, slices.Contains(strings.Split(string(data), "\n"), programName())
+}
+
+// PlayFakeArgs writes down one call and returns its exit code: 0, or 3 when
+// the call could not be written.
+func PlayFakeArgs(dir string, args []string) int {
+	if args == nil {
+		args = []string{}
+	}
+	if err := appendCall(dir, ArgsCall{Name: programName(), Args: args}); err != nil {
+		return 3
+	}
+	return 0
+}
+
+// Calls returns the calls of the fake so far, in order.
+func (f *FakeArgs) Calls() []ArgsCall {
+	f.t.Helper()
+	return readCalls[ArgsCall](f.t, filepath.Join(f.dir, "calls.jsonl"))
+}
+
+// Reset forgets the calls so far.
+func (f *FakeArgs) Reset() {
+	f.t.Helper()
+	if err := os.Remove(filepath.Join(f.dir, "calls.jsonl")); err != nil && !os.IsNotExist(err) {
+		f.t.Fatal(err)
+	}
 }

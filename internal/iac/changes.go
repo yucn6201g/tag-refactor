@@ -88,13 +88,13 @@ func (s *simulator) lineOf(e *simEntry) int {
 }
 
 func (s *simulator) manual(c planner.Change, reason ManualReason, line int) {
-	s.out.manual = append(s.out.manual, ManualItem{ARN: s.t.arn, ChangeID: c.ChangeID, Key: changeKey(c),
+	s.out.manual = append(s.out.manual, ManualItem{ARN: s.t.arn, LogicalID: s.t.logicalID, Address: s.t.address, ChangeID: c.ChangeID, Key: changeKey(c),
 		File: s.at.file, Line: line, Reason: reason})
 }
 
 func (s *simulator) assumed(c planner.Change) {
 	s.out.already++
-	s.out.assumed = append(s.out.assumed, ManualItem{ARN: s.t.arn, ChangeID: c.ChangeID, Key: changeKey(c), File: s.at.file})
+	s.out.assumed = append(s.out.assumed, ManualItem{ARN: s.t.arn, LogicalID: s.t.logicalID, Address: s.t.address, ChangeID: c.ChangeID, Key: changeKey(c), File: s.at.file})
 }
 
 // afterTags is beforeTags with every change applied.

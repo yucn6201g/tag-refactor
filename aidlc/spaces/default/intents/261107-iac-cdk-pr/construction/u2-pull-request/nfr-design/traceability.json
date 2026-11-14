@@ -1,0 +1,18 @@
+{
+  "stage": "nfr-design",
+  "unit": "u2-pull-request",
+  "upstream_ids": ["NFR1.6", "NFR1.7", "NFR1.8", "NFR1.9", "NFR1.10", "NFR9.2", "NFR6.11", "NFR6.12", "NFR6.13", "NFR6.14", "NFR6.15"],
+  "coverage": [
+    { "id": "NFR1.6", "status": "OK", "target": "security-design.md section 2 (reading in checkLocal, redact.Scan, Stop findings, iac.prBodySecret)" },
+    { "id": "NFR1.7", "status": "OK", "target": "security-design.md section 2 (Plan.BodyNotices, iac.prBodyNotice)" },
+    { "id": "NFR1.8", "status": "OK", "target": "security-design.md section 3 (redaction per part in PullRequestBody, title in checkLocal, Publish no longer redacts)" },
+    { "id": "NFR1.9", "status": "OK", "target": "security-design.md section 4 (resume.go, one command per line, quoteSh, quotePowerShell, Manual values)" },
+    { "id": "NFR1.10", "status": "OK", "target": "security-design.md section 5 (os.CreateTemp at Publish start, 60-byte name, failure and interruption display)" },
+    { "id": "NFR9.2", "status": "OK", "target": "security-design.md section 7 (options subtest of TestGitHubPullRequest, staleBranch in UTC)" },
+    { "id": "NFR6.11", "status": "OK", "target": "security-design.md section 2 (regexp table, boundary checks, rescan after a skipped match)" },
+    { "id": "NFR6.12", "status": "OK", "target": "security-design.md section 6 (leading hyphen, check-ref-format, output equals input)" },
+    { "id": "NFR6.13", "status": "OK", "target": "logical-components.md (Check: default branch name in UTC with Z) and security-design.md section 7" },
+    { "id": "NFR6.14", "status": "OK", "target": "security-design.md section 2 (code point count while reading the body)" },
+    { "id": "NFR6.15", "status": "OK", "target": "security-design.md section 4 (quoting rules, tests with sh, powershell.exe and pwsh)" }
+  ]
+}

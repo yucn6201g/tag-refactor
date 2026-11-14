@@ -1,0 +1,17 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u2-pull-request",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "U1 NFR1.1 to NFR1.5 unchanged; U2 adds NFR1.6, NFR1.7, NFR1.8, NFR1.9, NFR1.10 (security-requirements.md)" },
+    { "id": "NFR2", "status": "N/A", "target": "U2 adds no cdk synth call; U1 NFR2.1 to NFR2.4 apply unchanged" },
+    { "id": "NFR3", "status": "N/A", "target": "U2 adds no new kind of external call; git check-ref-format, git and gh keep the U1 time limits (U1 NFR3.x, U2 BR4.4)" },
+    { "id": "NFR4", "status": "N/A", "target": "File writing is unchanged; U1 NFR4.1 to NFR4.4 apply" },
+    { "id": "NFR5", "status": "N/A", "target": "iac without --pr is unchanged; U1 NFR5.1 and NFR5.2 apply" },
+    { "id": "NFR6", "status": "OK", "target": "U1 NFR6.1 to NFR6.10 unchanged; U2 adds NFR6.11, NFR6.12, NFR6.13, NFR6.14, NFR6.15 (tech-stack-decisions.md)" },
+    { "id": "NFR7", "status": "N/A", "target": "The new code counts toward the 80 percent statement coverage; U1 NFR7.1 applies" },
+    { "id": "NFR8", "status": "N/A", "target": "U2 adds no test that runs cdk synth; U1 NFR8.1 and NFR8.2 apply" },
+    { "id": "NFR9", "status": "OK", "target": "U1 NFR9.1 plus U2 NFR9.2 (real GitHub test with --pr-branch, --pr-title and --pr-body-file)" },
+    { "id": "NFR10", "status": "N/A", "target": "New messages follow U1 NFR10.1 to NFR10.3 for --lang" }
+  ]
+}

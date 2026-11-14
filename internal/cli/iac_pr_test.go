@@ -74,7 +74,7 @@ func TestV02U1NothingToWriteOpensNothing(t *testing.T) {
 	r := w.iac(plan, "--pr")
 
 	r.requireExit(t, 0)
-	requireContains(t, "stderr", r.stderr, "No file was written, so no pull request was opened.")
+	requireContains(t, "stderr", r.stderr, "Nothing to reflect, so no pull request was opened.")
 	if _, created := w.gh.Find("pr", "create"); created {
 		t.Fatal("gh pr create was called")
 	}

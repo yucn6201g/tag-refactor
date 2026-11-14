@@ -1,0 +1,18 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u2-pull-request",
+  "upstream_ids": ["NFR1.6", "NFR1.7", "NFR1.8", "NFR1.9", "NFR1.10", "NFR9.2", "NFR6.11", "NFR6.12", "NFR6.13", "NFR6.14", "NFR6.15"],
+  "coverage": [
+    { "id": "NFR1.6", "status": "OK", "target": "cicd-pipeline.md section 1 (Scan unit tests; cli acceptance tests that stop on the shapes)" },
+    { "id": "NFR1.7", "status": "OK", "target": "cicd-pipeline.md section 1 (cli acceptance tests for notices)" },
+    { "id": "NFR1.8", "status": "OK", "target": "cicd-pipeline.md section 1 (Publish keeps title and body unit test; cli acceptance tests for title redaction)" },
+    { "id": "NFR1.9", "status": "OK", "target": "cicd-pipeline.md section 1 (sh and PowerShell real shell tests, fixed shell in tests)" },
+    { "id": "NFR1.10", "status": "OK", "target": "cicd-pipeline.md section 1 (body file unit tests; cli acceptance test for interruption)" },
+    { "id": "NFR9.2", "status": "OK", "target": "cicd-pipeline.md section 1, section 3 and section 5 (options subtest in github-pr with its own clone)" },
+    { "id": "NFR6.11", "status": "OK", "target": "cicd-pipeline.md section 1 (Scan unit tests)" },
+    { "id": "NFR6.12", "status": "OK", "target": "cicd-pipeline.md section 1 (branch name unit tests)" },
+    { "id": "NFR6.13", "status": "OK", "target": "cicd-pipeline.md section 1 (default branch name unit test with a fake clock; staleBranch unit test) and section 5" },
+    { "id": "NFR6.14", "status": "OK", "target": "cicd-pipeline.md section 1 (cli acceptance tests for the body limits)" },
+    { "id": "NFR6.15", "status": "OK", "target": "cicd-pipeline.md section 1 and section 3 (PowerShell tests with powershell.exe and pwsh on windows-latest)" }
+  ]
+}

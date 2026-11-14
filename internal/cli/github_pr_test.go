@@ -13,6 +13,8 @@ package cli_test
 // npm ci never gets it. It is never printed.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -92,10 +94,13 @@ func requireIntegrationTools(t *testing.T, names ...string) {
 	}
 }
 
-// AC1.1.11 (US1.1): Given the test-only repository with the test app on main,
-// When tag-refactor iac --pr runs in a clone of it, Then a pull request is
-// opened whose difference is the one line of the key, and the test closes it
-// and deletes its branch.
+// AC1.1.11 (US1.1), NFR9.2 (v0.2.0 U2): Given the test-only repository with
+// the test app on main, When tag-refactor iac --pr runs in a clone of it, Then
+// a pull request is opened whose difference is the one line of the key, and
+// the test closes it and deletes its branch. The subtest default runs without
+// the options of the pull request; the subtest options gives --pr-branch,
+// --pr-title and --pr-body-file and reads them back from GitHub. Each subtest
+// works in a clone of its own; the command is built once.
 func TestGitHubPullRequest(t *testing.T) {
 	repo, token := os.Getenv(testRepoEnv), os.Getenv(testRepoTokenEnv)
 	if repo == "" || token == "" {
@@ -107,23 +112,70 @@ func TestGitHubPullRequest(t *testing.T) {
 	requireIntegrationTools(t, "gh", "git", "node", "npm", "go")
 	ghEnv, npmEnv, toolEnv := githubEnvs(os.Environ(), token)
 	cleanStaleBranches(t, ghEnv, repo, time.Now())
+	envs := integrationEnvs{gh: ghEnv, npm: npmEnv, tool: toolEnv}
+	tool := buildTagRefactor(t, t.TempDir())
 
+	t.Run("default", func(t *testing.T) {
+		clone, plan := integrationClone(t, envs, repo)
+
+		url := openIntegrationPullRequest(t, envs, clone, tool, plan)
+
+		requireOneLineDiff(t, envs, clone, url)
+	})
+	t.Run("options", func(t *testing.T) {
+		clone, plan := integrationClone(t, envs, repo)
+		branch := optionsBranch(time.Now(), os.Getenv("GITHUB_RUN_ID"))
+		title := "tag-refactor integration test with options"
+		bodyText := "This body comes from --pr-body-file.\n"
+		body := filepath.Join(t.TempDir(), "body.md")
+		if err := os.WriteFile(body, []byte(bodyText), 0o600); err != nil {
+			t.Fatal(err)
+		}
+
+		url := openIntegrationPullRequest(t, envs, clone, tool, plan, "--pr-branch", branch, "--pr-title", title, "--pr-body-file", body)
+
+		var view struct {
+			HeadRefName string `json:"headRefName"`
+			Title       string `json:"title"`
+			Body        string `json:"body"`
+		}
+		if err := json.Unmarshal([]byte(runIn(t, envs.gh, clone, "gh", "pr", "view", url, "--json", "headRefName,title,body")), &view); err != nil {
+			t.Fatal(err)
+		}
+		if view.HeadRefName != branch || view.Title != title || !strings.HasPrefix(strings.ReplaceAll(view.Body, "\r\n", "\n"), bodyText) {
+			t.Fatalf("the pull request has the branch %q, the title %q and the body:\n%s", view.HeadRefName, view.Title, view.Body)
+		}
+		requireOneLineDiff(t, envs, clone, url)
+	})
+}
+
+// integrationEnvs are the environments of the programs of the integration
+// test (githubEnvs).
+type integrationEnvs struct{ gh, npm, tool []string }
+
+// integrationClone clones the test-only repository into a folder of the test,
+// sets git up for gh, installs the test app and saves the plan.
+func integrationClone(t *testing.T, envs integrationEnvs, repo string) (clone, plan string) {
+	t.Helper()
 	work := t.TempDir()
-	clone := filepath.Join(work, "clone")
-	runIn(t, ghEnv, work, "gh", "repo", "clone", repo, clone, "--", "-q")
+	clone = filepath.Join(work, "clone")
+	runIn(t, envs.gh, work, "gh", "repo", "clone", repo, clone, "--", "-q")
 	for _, kv := range [][2]string{
 		{"user.name", "tag-refactor test"}, {"user.email", "tag-refactor-test@example.invalid"},
 		{"commit.gpgsign", "false"}, {"credential.https://github.com.helper", ""},
 	} {
-		runIn(t, ghEnv, clone, "git", "config", "--local", kv[0], kv[1])
+		runIn(t, envs.gh, clone, "git", "config", "--local", kv[0], kv[1])
 	}
-	runIn(t, ghEnv, clone, "git", "config", "--local", "--add", "credential.https://github.com.helper", "!gh auth git-credential")
-	runIn(t, npmEnv, clone, "npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund")
-	plan := writeIntegrationPlan(t, work)
-	tool := buildTagRefactor(t, work)
+	runIn(t, envs.gh, clone, "git", "config", "--local", "--add", "credential.https://github.com.helper", "!gh auth git-credential")
+	runIn(t, envs.npm, clone, "npm", "ci", "--ignore-scripts", "--no-audit", "--no-fund")
+	return clone, writeIntegrationPlan(t, work)
+}
 
-	out := runIn(t, toolEnv, clone, tool, "iac", "--lang", "en", "--plan", plan, "--dir", clone, "--pr")
-
+// openIntegrationPullRequest runs iac --pr in the clone and returns the URL it
+// printed; the cleanup closes the pull request and deletes its branch.
+func openIntegrationPullRequest(t *testing.T, envs integrationEnvs, clone, tool, plan string, args ...string) string {
+	t.Helper()
+	out := runIn(t, envs.tool, clone, tool, append([]string{"iac", "--lang", "en", "--plan", plan, "--dir", clone, "--pr"}, args...)...)
 	url := ""
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "https://github.com/") {
@@ -135,12 +187,19 @@ func TestGitHubPullRequest(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		cmd := exec.Command("gh", "pr", "close", url, "--delete-branch")
-		cmd.Env, cmd.Dir = ghEnv, clone
+		cmd.Env, cmd.Dir = envs.gh, clone
 		if msg, err := cmd.CombinedOutput(); err != nil {
 			t.Errorf("the pull request %s and its branch were left: %v\n%s", url, err, msg)
 		}
 	})
-	diff := runIn(t, ghEnv, clone, "gh", "pr", "diff", url)
+	return url
+}
+
+// requireOneLineDiff checks that the difference of the pull request is the one
+// line of the key.
+func requireOneLineDiff(t *testing.T, envs integrationEnvs, clone, url string) {
+	t.Helper()
+	diff := runIn(t, envs.gh, clone, "gh", "pr", "diff", url)
 	var removed, added []string
 	for _, line := range strings.Split(diff, "\n") {
 		switch {
@@ -209,13 +268,32 @@ func cleanStaleBranches(t *testing.T, env []string, repo string, now time.Time) 
 	}
 }
 
+// optionsBranch is the branch of the subtest options: the time in UTC, then
+// the ID of the run of GitHub Actions when there is one, and a random part, so
+// that two runs in the same second do not take the same name (review N6).
+// staleBranch reads only the time at its start.
+func optionsBranch(now time.Time, runID string) string {
+	random := make([]byte, 4)
+	if _, err := rand.Read(random); err != nil {
+		panic(err)
+	}
+	name := prBranchPrefix + now.UTC().Format("20060102-150405") + "Z-options-"
+	if runID != "" {
+		name += runID + "-"
+	}
+	return name + hex.EncodeToString(random)
+}
+
 // staleBranch reports a branch of iac --pr older than a day, by the time in its
-// name.
+// name: the YYYYMMDD-HHMMSS right after the prefix, read in UTC (U2 BR1.2,
+// NFR6.13). What follows it, the Z of the default name or the -options of the
+// integration test, is not read.
 func staleBranch(branch string, now time.Time) bool {
+	const layout = "20060102-150405"
 	stamp, ok := strings.CutPrefix(branch, prBranchPrefix)
-	if !ok {
+	if !ok || len(stamp) < len(layout) {
 		return false
 	}
-	at, err := time.ParseInLocation("20060102-150405", stamp, time.Local)
+	at, err := time.ParseInLocation(layout, stamp[:len(layout)], time.UTC)
 	return err == nil && now.Sub(at) > 24*time.Hour
 }

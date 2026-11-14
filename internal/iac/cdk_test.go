@@ -290,6 +290,10 @@ func TestCDKKeyCounts(t *testing.T) {
 		if m := res.Manual[0]; m.File != "infra/lib/stack.ts" || m.Line != 5 {
 			t.Fatalf("place %s:%d", m.File, m.Line)
 		}
+		// v0.2.0 U2 (review N3): the item names the logical ID of the resource.
+		if m := res.Manual[0]; m.LogicalID != "Q1" {
+			t.Fatalf("logical ID %q", m.LogicalID)
+		}
 	})
 	t.Run("two sites", func(t *testing.T) {
 		source := stackTS + "// Tags.of(queue).add('env', 'Prod');\n"

@@ -43,7 +43,7 @@ func changeKey(c planner.Change) string {
 // manualAll puts every change of the target on the list to fix by hand.
 func manualAll(res *Result, t *target, reason ManualReason, kind DetailKind, detail string) {
 	for _, c := range t.changes {
-		res.Manual = append(res.Manual, ManualItem{ARN: t.arn, ChangeID: c.ChangeID, Key: changeKey(c),
+		res.Manual = append(res.Manual, ManualItem{ARN: t.arn, LogicalID: t.logicalID, Address: t.address, ChangeID: c.ChangeID, Key: changeKey(c),
 			Reason: reason, Detail: detail, DetailKind: kind})
 	}
 }

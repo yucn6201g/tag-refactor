@@ -44,7 +44,8 @@ input_errors:      # 書き換えの前に確かめ、終了コード 1
   - --pr-* without --pr
   - --cdk-app not a folder under --dir, or no cdk.json in it
   - --synth-timeout not a duration, or < 1s
-  - --pr-body-file missing, unreadable, larger than 1 MiB, not UTF-8
+  - --pr-body-file missing, unreadable, larger than 1 MiB, not UTF-8, or longer than 60,000 characters (U2 BR1.1)
+  - --pr-body-file has the shape of a GitHub token, an AWS access key ID or a URL with a password (U2 NFR1.6, NQ2-Q1)
   - --pr-branch not a valid git branch name
   - --pr-title empty, has a line break, or longer than 256 characters
 exit_codes:
@@ -78,6 +79,9 @@ reason_text: |
   cdkAppFailed のときは、固定の文に道具の名前(Tool: cdk | node | npx | python | typescript | helper)だけを足す。
   Failure.Detail と ManualItem.Detail のうち、外のプログラムや利用者のアプリが出した文は本文に入れない(R-03)。
 never_contains: [ARN, AWS account ID, tag values, tokens, output of cdk synth or of the user's app]
+  # 対象は tag-refactor が組み立てる部分(タイトル、intro、changed_files、to_fix_by_hand、コミットのメッセージ)。
+  # --pr-body-file の中身は利用者の文なので対象外。ただし、トークン、AWS のアクセスキーの ID、パスワードつきの URL の形があれば
+  # 書き換えの前に止め(X1 input_errors)、ARN と 12 桁の数字は標準エラーで知らせて、そのまま載せる(U2 の NFR1.6、NFR1.7)。
 redaction: |
   本文のうち tag-refactor が組み立てる部分(intro、changed_files、to_fix_by_hand)は、出す直前に次を伏せ字(<redacted>)にする。
   - ARN の形: arn:aws[a-z-]*:[^\s`)]*
@@ -444,6 +448,13 @@ owner: U1(欄と照合)、U6(理由の文)
 | R-12 | C2 に、`Language` と `CDKMajor` の判定元(`detection`)と、`needsAWS` の見分け方を足した。版が分からないアプリは synth せずに外す |
 | R-13 | X1 に `nothing_written` を足した。書き換えたファイルが無ければ Publish を呼ばない |
 | R-14 | C1 の `resume` で、どのシェル用の命令かを示し、PowerShell で実行するよう案内することにした。本文のファイル名から、Windows で使えない文字を除く決まりを足した |
+
+## Construction での直し
+
+| 時期 | 直したところ | 理由 |
+|---|---|---|
+| 2026-11-09、U2 の非機能の要件 | X1 の `input_errors` に、本文の 60,000 文字の上限(U2 の BR1.1)と、本文のトークンなどの形(U2 の NFR1.6)を足した。X2 の `never_contains` の対象を、tag-refactor が組み立てる部分に限ると書き足した | U2 の機能の設計と非機能の要件の回答(NQ2-Q1 = A)に合わせるため。X2 の `redaction` はもともと利用者の本文を変えないとしており、`never_contains` と食い違っていた |
+| 2026-11-14、U2 の Code Generation | C1 の `Plan` に `TitleRedacted`(伏せ字でタイトルが変わったら true)と `BodyNotices`(本文で知らせる形の一覧)を足した。C1 の `PublishOutcome` の `ResumeCommands` は使わずに消し、続きの命令は `ResumeCommands(plan, title, out, sh)` の関数で、シェルごとに1行ずつ作るようにした | U2 の非機能の設計(logical-components.md、security-design.md の4節)に合わせるため。タイトルの伏せ字と本文の知らせは、書き換えの前に cli が標準エラーに出すので、Check の結果に持たせる必要があった。続きの命令は、PowerShell と sh で引用の仕方が違うので、表示の直前に選んだシェルで作る |
 
 ## 未決事項
 

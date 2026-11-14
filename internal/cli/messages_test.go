@@ -45,6 +45,10 @@ func TestEveryErrorKindHasAWhatAndAFix(t *testing.T) {
 			"access denied for resource-explorer-2:Search (region eu-west-1)", "allow resource-explorer-2:Search"},
 		{&errkind.Error{Kind: errkind.Transient, Reason: errkind.ReasonTimeout, Op: "tag:GetResources", Region: "us-east-1"}, "did not answer tag:GetResources in time (region us-east-1)", "--debug"},
 		{&errkind.Error{Kind: errkind.Transient, Op: "tag:GetResources"}, "kept failing on tag:GetResources after retries", "--debug"},
+		// v0.2.0 U2: a step of git or gh that did not end in time names its
+		// own message, not one of AWS.
+		{&errkind.Error{Kind: errkind.Transient, Reason: errkind.ReasonTimeout, Op: "create", DetailID: "iac.prStepTimeout",
+			DetailArgs: []any{"create"}, HintID: "iac.prStepFix"}, "the create step of the pull request did not end in time", "git and gh"},
 		{&errkind.Error{Kind: errkind.Internal, Cause: secret}, "an unexpected error occurred in tag-refactor", "--debug"},
 		{&errkind.Error{Kind: errkind.Internal, Op: "tag:GetResources", Detail: "repeated token"}, "in tag:GetResources: repeated token", "--debug"},
 		// U6: Conflict is the lock of an account held by another apply or
