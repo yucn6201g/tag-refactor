@@ -140,6 +140,44 @@ func hclKey(q quoteStyle, s string) string {
 	return hclText(s)
 }
 
+// tsText writes s as a TypeScript string in the quote of the text it replaces
+// (v0.2.0 BR3.1): the quote, the backslash and the line breaks are escaped,
+// and in a template literal ${ too, so that it stays without substitutions.
+func tsText(q quoteStyle, s string) string {
+	quote := byte('\'')
+	switch q {
+	case quoteDouble:
+		quote = '"'
+	case quoteBacktick:
+		quote = '`'
+	}
+	var b strings.Builder
+	b.WriteByte(quote)
+	for i, r := range s {
+		switch {
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == rune(quote):
+			b.WriteByte('\\')
+			b.WriteByte(quote)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f || r == 0x2028 || r == 0x2029:
+			fmt.Fprintf(&b, `\u%04X`, r)
+		case quote == '`' && r == '$' && strings.HasPrefix(s[i:], "${"):
+			b.WriteString(`\$`)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte(quote)
+	return b.String()
+}
+
 // writeTextForTest, when set, replaces what writeText writes, so that a test can
 // see a fault of this tool end at the check after the edits.
 var writeTextForTest func(string) string
@@ -152,6 +190,8 @@ func writeText(format fileFormat, q quoteStyle, s string, isKey bool) string {
 	switch format {
 	case formatJSON:
 		return jsonText(s)
+	case formatTypeScript:
+		return tsText(q, s)
 	case formatTerraform:
 		if isKey {
 			return hclKey(q, s)

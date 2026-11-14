@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/yucn6201g/tag-refactor/internal/cdk"
 )
 
 // The limits of the files of --dir (NFR3.19). They are variables so that the
@@ -34,6 +36,9 @@ const (
 	formatTerraform
 	// formatTemplate is a .template file: YAML or JSON, told from its content.
 	formatTemplate
+	// formatTypeScript is a source of a CDK app the helper named (v0.2.0); the
+	// walk never collects it.
+	formatTypeScript
 )
 
 // candidate is a file that can define resources.
@@ -45,10 +50,21 @@ type candidate struct {
 }
 
 func (c *candidate) tool() Tool {
-	if c.format == formatTerraform {
+	switch c.format {
+	case formatTerraform:
 		return ToolTerraform
+	case formatTypeScript:
+		return ToolCDK
 	}
 	return ToolCloudFormation
+}
+
+// language is the language of a CDK source, empty for the others.
+func (c *candidate) language() string {
+	if c.format == formatTypeScript {
+		return string(cdk.TypeScript)
+	}
+	return ""
 }
 
 // walked is what walking the folder finds.
