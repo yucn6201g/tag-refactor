@@ -2,6 +2,7 @@ package rules
 
 import (
 	"maps"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -126,6 +127,53 @@ func TestUnifiedTagsRenameAliasesUnifyValuesAndDropRemovedKeys(t *testing.T) {
 				t.Fatal("the input tags were changed")
 			}
 		})
+	}
+}
+
+// RequiredValue looks up the keys of its conditions one by one (NFR1.12);
+// each lookup must give what UnifiedTags gives for the key, for random tags
+// over the keys, aliases, spellings and removed keys of the rule set. The
+// rule set built by hand also has what Parse rejects: an alias under two
+// canonical keys, an alias that is a canonical key, a removed alias.
+func TestUnifiedValueAgreesWithUnifiedTags(t *testing.T) {
+	parsed := mustParse(t, queryRules)
+	byHand := &RuleSet{
+		KeyRules: []KeyRule{
+			{CanonicalKey: "A", Aliases: []string{"a", "x", "B"}, Values: []ValueRule{{CanonicalValue: "one", Spellings: []string{"1", "One"}}}},
+			{CanonicalKey: "B", Aliases: []string{"b", "y", "x"}},
+			{CanonicalKey: "C", Aliases: []string{"c", "tmp"}},
+		},
+		RemoveKeys: []RemoveKey{{Key: "tmp"}, {Key: "C"}},
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	for _, rs := range []*RuleSet{parsed, byHand} {
+		idx := rs.lookup()
+		var universe []string
+		for _, r := range rs.KeyRules {
+			universe = append(universe, r.CanonicalKey)
+			universe = append(universe, r.Aliases...)
+		}
+		for _, k := range rs.RemoveKeys {
+			universe = append(universe, k.Key)
+		}
+		universe = append(universe, "Other", "aws:createdBy")
+		values := []string{"prod", "Prod", "production", "1", "One", "v", ""}
+		for range 2000 {
+			tags := map[string]string{}
+			for _, k := range universe {
+				if rng.IntN(3) == 0 {
+					tags[k] = values[rng.IntN(len(values))]
+				}
+			}
+			want := rs.UnifiedTags(tags)
+			for _, k := range universe {
+				got, ok := unifiedValue(idx, tags, k)
+				w, wok := want[k]
+				if got != w || ok != wok {
+					t.Fatalf("tags %v, key %q: got %q %v, UnifiedTags has %q %v", tags, k, got, ok, w, wok)
+				}
+			}
+		}
 	}
 }
 

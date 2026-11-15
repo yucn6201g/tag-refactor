@@ -13,6 +13,8 @@ type index struct {
 	canonicalLine map[string]int
 	// aliasRank orders the aliases of one canonical key as the file does.
 	aliasRank map[string]int
+	// aliasesOf lists the aliases that canonicalOf maps to each canonical key.
+	aliasesOf map[string][]string
 	// values maps a canonical key and a spelling to its canonical value.
 	values map[string]map[string]valueEntry
 	// removed maps a removed key to its line.
@@ -31,6 +33,7 @@ func newIndex(rs *RuleSet) *index {
 		canonicalOf:   map[string]string{},
 		canonicalLine: make(map[string]int, len(rs.KeyRules)),
 		aliasRank:     map[string]int{},
+		aliasesOf:     map[string][]string{},
 		values:        map[string]map[string]valueEntry{},
 		removed:       make(map[string]int, len(rs.RemoveKeys)),
 		required:      make(map[string]int, len(rs.RequiredTags)),
@@ -51,6 +54,18 @@ func newIndex(rs *RuleSet) *index {
 			}
 		}
 		idx.values[r.CanonicalKey] = spellings
+	}
+	// aliasesOf follows the file order, so two reads of one file build equal
+	// tables. A rule set built by hand may list an alias twice; canonicalOf
+	// keeps the last one, and so does aliasesOf.
+	listed := make(map[string]bool, len(idx.canonicalOf))
+	for _, r := range rs.KeyRules {
+		for _, a := range r.Aliases {
+			if idx.canonicalOf[a] == r.CanonicalKey && !listed[a] {
+				listed[a] = true
+				idx.aliasesOf[r.CanonicalKey] = append(idx.aliasesOf[r.CanonicalKey], a)
+			}
+		}
 	}
 	for _, k := range rs.RemoveKeys {
 		idx.removed[k.Key] = k.Line
@@ -167,12 +182,12 @@ func (rs *RuleSet) RequiredValue(key string, res Resource) RequiredValueAnswer {
 		return RequiredValueAnswer{Key: key, Status: StatusUnspecified, DecidedBy: DecidedByNone}
 	}
 	tag := rs.RequiredTags[i]
-	if len(tag.When) > 0 {
-		tags := rs.unifiedTags(idx, res.Tags)
-		for _, c := range tag.When {
-			if c.matches(res, tags) {
-				return RequiredValueAnswer{Key: key, Status: StatusResolved, Value: c.Value, DecidedBy: DecidedByWhen, Line: c.Line}
-			}
+	// The conditions look up their few keys one by one instead of building
+	// UnifiedTags for every call: plan asks every required tag of every
+	// resource (NFR1.12).
+	for _, c := range tag.When {
+		if c.matches(res, func(k string) (string, bool) { return unifiedValue(idx, res.Tags, k) }) {
+			return RequiredValueAnswer{Key: key, Status: StatusResolved, Value: c.Value, DecidedBy: DecidedByWhen, Line: c.Line}
 		}
 	}
 	if tag.HasDefault {
@@ -183,8 +198,9 @@ func (rs *RuleSet) RequiredValue(key string, res Resource) RequiredValueAnswer {
 
 // matches reports whether every field the condition sets matches (BR3.2). A
 // global resource has no region of its own: the region it was read in
-// depends on the regions read, so a region condition never matches it.
-func (c RequiredCondition) matches(res Resource, tags map[string]string) bool {
+// depends on the regions read, so a region condition never matches it. tag
+// returns the value of a key in the resource's UnifiedTags.
+func (c RequiredCondition) matches(res Resource, tag func(string) (string, bool)) bool {
 	if c.ResourceType != "" && c.ResourceType != res.ResourceType {
 		return false
 	}
@@ -192,7 +208,7 @@ func (c RequiredCondition) matches(res Resource, tags map[string]string) bool {
 		return false
 	}
 	for k, v := range c.Tags {
-		if got, ok := tags[k]; !ok || got != v {
+		if got, ok := tag(k); !ok || got != v {
 			return false
 		}
 	}
@@ -248,4 +264,39 @@ func (rs *RuleSet) unifiedTags(idx *index, tags map[string]string) map[string]st
 		}
 	}
 	return out
+}
+
+// unifiedValue returns unifiedTags(idx, tags)[key] and whether the key is
+// there, with a few map lookups and without building the map. It takes the
+// same steps as unifiedTags for the one key.
+func unifiedValue(idx *index, tags map[string]string, key string) (string, bool) {
+	if _, ok := idx.removed[key]; ok {
+		return "", false
+	}
+	v, own := tags[key]
+	if own {
+		// An alias is renamed; the aliases of the key do not count when the
+		// resource carries the key itself.
+		if _, isAlias := idx.canonicalOf[key]; isAlias {
+			return "", false
+		}
+	} else {
+		rank := -1
+		for _, a := range idx.aliasesOf[key] {
+			av, ok := tags[a]
+			if !ok {
+				continue
+			}
+			if r := idx.aliasRank[a]; rank < 0 || r < rank {
+				v, rank = av, r
+			}
+		}
+		if rank < 0 {
+			return "", false
+		}
+	}
+	if e, ok := idx.values[key][v]; ok {
+		return e.value, true
+	}
+	return v, true
 }
