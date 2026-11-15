@@ -55,10 +55,17 @@ func newIndex(rs *RuleSet) *index {
 		}
 		idx.values[r.CanonicalKey] = spellings
 	}
-	// A rule set built by hand may list an alias twice; canonicalOf keeps the
-	// last one, and so does aliasesOf.
-	for a, c := range idx.canonicalOf {
-		idx.aliasesOf[c] = append(idx.aliasesOf[c], a)
+	// aliasesOf follows the file order, so two reads of one file build equal
+	// tables. A rule set built by hand may list an alias twice; canonicalOf
+	// keeps the last one, and so does aliasesOf.
+	listed := make(map[string]bool, len(idx.canonicalOf))
+	for _, r := range rs.KeyRules {
+		for _, a := range r.Aliases {
+			if idx.canonicalOf[a] == r.CanonicalKey && !listed[a] {
+				listed[a] = true
+				idx.aliasesOf[r.CanonicalKey] = append(idx.aliasesOf[r.CanonicalKey], a)
+			}
+		}
 	}
 	for _, k := range rs.RemoveKeys {
 		idx.removed[k.Key] = k.Line
