@@ -510,10 +510,15 @@ func TestV02U3AppsThatNeedAWSFail(t *testing.T) {
 }
 
 // AC2.1.4 (US2.1, NFR3.11, NFR3.16): Given a cdk that answers nothing and
-// starts a grandchild, When iac runs with --synth-timeout 1s, Then synth stops
-// after about one second, the app fails as not done in time, and no
-// grandchild is left. A --synth-timeout that is not a duration of 1s or more
-// stops iac with exit code 1 before any program runs.
+// starts a grandchild, When iac runs with --synth-timeout, Then synth stops at
+// the limit, the app fails as not done in time, and no grandchild is left. A
+// --synth-timeout that is not a duration of 1s or more stops iac with exit code
+// 1 before any program runs.
+//
+// The limit is 8s, not the smallest 1s: on a slow Windows runner the limit
+// stopped the fake cdk, a copy of this large test binary, before it started
+// its grandchild, leaving nothing to check (the same 8s as
+// TestCDKStopsLeaveNothingBehind, plan deviation 1).
 func TestV02U3SynthTimeout(t *testing.T) {
 	w := newIacWorld(t)
 	w.givenAppSources("infra")
@@ -521,10 +526,10 @@ func TestV02U3SynthTimeout(t *testing.T) {
 	fake := testutil.InstallFakeCDK(t, testutil.FakeCDKSettings{Hang: true})
 	start := time.Now()
 
-	r := w.iacWith(context.Background(), nil, plan, "--lang", "en", "--synth-timeout", "1s")
+	r := w.iacWith(context.Background(), nil, plan, "--lang", "en", "--synth-timeout", "8s")
 
-	if took := time.Since(start); took > 15*time.Second {
-		t.Errorf("iac took %v with --synth-timeout 1s", took)
+	if took := time.Since(start); took > 25*time.Second {
+		t.Errorf("iac took %v with --synth-timeout 8s", took)
 	}
 	r.requireExit(t, 2)
 	requireMatch(t, "stderr", r.stderr, `(?m)^infra: failed \(\d+s\): it did not end in time$`)
