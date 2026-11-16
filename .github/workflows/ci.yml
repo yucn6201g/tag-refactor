@@ -82,11 +82,18 @@ jobs:
           "$py" -m pip install --disable-pip-version-check --only-binary=:all: --no-input -r requirements.txt
           "$py" -m pip check
           npm ci --ignore-scripts --no-audit --no-fund
-      - name: Test (acceptance, unit, performance, output guard, IAM example)
+      - name: Test (acceptance, unit, output guard, IAM example)
         env:
           # As the published binaries (U8 NFR9.12); only the race job turns cgo on.
           CGO_ENABLED: "0"
-        run: go test -mod=readonly ./...
+        # The large tests time themselves, so they run alone in the next step:
+        # beside the cdk and cli tests, which start many programs, they took
+        # longer than their limits on the Windows runner (v0.2 U3).
+        run: go test -mod=readonly -skip '^TestLarge' ./...
+      - name: Test (performance, the large tests alone)
+        env:
+          CGO_ENABLED: "0"
+        run: go test -mod=readonly -run '^TestLarge' ./...
 
   race:
     # The race detector needs cgo and a C compiler, which only this Linux job
