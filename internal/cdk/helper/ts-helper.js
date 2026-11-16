@@ -159,7 +159,9 @@ function traceSites(ts, files, request, out) {
     if (!source) {
       continue;
     }
-    const id = site.constructPath.slice(site.constructPath.lastIndexOf("/") + 1);
+    const id = site.constructPath.slice(
+      site.constructPath.lastIndexOf("/") + 1,
+    );
     const found = traceNew(ts, source, site.line, id, request.mode);
     if (!found) {
       continue;

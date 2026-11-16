@@ -770,6 +770,25 @@ func TestV02U3MissingPythonToolsFailInCIAndSkipLocally(t *testing.T) {
 	})
 }
 
+// pathWithoutPython is a PATH with the folder of node and, outside Windows, a
+// folder with only sh: npx (of the app command npx ts-node) starts its command
+// with the sh of PATH there, and the folder of sh (/usr/bin) has python3.
+func pathWithoutPython(t *testing.T, node string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		return filepath.Dir(node)
+	}
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Fatalf("sh is not on PATH: %v", err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(sh, filepath.Join(bin, "sh")); err != nil {
+		t.Fatalf("link sh: %v", err)
+	}
+	return filepath.Dir(node) + string(os.PathListSeparator) + bin
+}
+
 // reasonTB keeps the text of the skip or the failure.
 type reasonTB struct{ text string }
 
@@ -804,7 +823,7 @@ func TestV02U3MissingAndOldPython(t *testing.T) {
 		// The app has its cdk, as py-minimal has: only Python is missing.
 		testutil.LinkNodeModules(t, app, filepath.Join(w.dir, "infra", "py"))
 		w.givenApp(app, "infra/ts")
-		t.Setenv("PATH", filepath.Dir(node))
+		t.Setenv("PATH", pathWithoutPython(t, node))
 		if _, err := exec.LookPath("python3"); err == nil {
 			t.Skip("python3 is in the folder of node")
 		}
