@@ -6,10 +6,12 @@
 
 ## Deviations
 <!-- example: 2026-05-29T10:14:32Z — skipped the optional caching layer the stage prose suggested; the dataset is small enough that it adds risk -->
+- 2026-11-15T08:19:05Z [unit u3-cdk-synth] — 要件の文面から広げたところ: CI の Python の準備は、3つの OS のテストの仕事だけでなく、go test を動かす race、coverage、release.yml の build にも足す(足さないと落ちる)。--app の二重引用符は、空白に加えて & ( ; などシェルが読み替える文字があるときも付ける。NFR3.12 の見積もりは、今の Analyzer が補助のプログラムを呼ぶたびに node --version を動かすので、(30秒+2分)×3 で数える。
 
 ## Tradeoffs
 <!-- example: 2026-05-29T10:14:32Z — picked TDD over BDD this run; the team is unit-first and the domain is well-understood -->
 
 ## Open questions
 <!-- example: 2026-05-29T10:14:32Z — confirm the retention window with compliance before the next stage hardens the schema -->
+- 2026-11-15T08:19:05Z [unit u3-cdk-synth] — Code Generation の計画で「Construction での直し」として書くもの: 契約 C6 に任意の口 cdk.ToolFailureSink(道具の名前を進み具合に渡す。ProgressSink のメソッドは変えない)、契約 C2 と C7 に toolTooOld、契約 X2 の resource_name を BR3.2(どのアプリかは書かない、FD3-Q3)に合わせる。
 - 2026-11-08T13:30:00Z — U1 の非機能の設計の2回目のレビュー(READY)で残った Minor 2件は、U1 の Code Generation の計画で決める。(1) 補助のプログラムの結果の JSON を返す標準出力は 64 KiB の打ち切りから外し、別の上限(例 16 MiB)にする。(2) CI の race、coverage、prettier、github-pr の timeout、github-pr の checkout と setup-go と最小の permissions、prettier の版を決める。

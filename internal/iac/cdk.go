@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yucn6201g/tag-refactor/internal/cdk"
@@ -18,18 +19,24 @@ import (
 	"github.com/yucn6201g/tag-refactor/internal/redact"
 )
 
-// The CDK apps in the flow of iac (v0.2.0 U1, functional spec §2). Before the
-// templates are looked for, the first app below --dir is synthesized, the
-// targets are matched with its resources (BR2.1), and the helper reads its
-// sources once (BR2.2). Each change of a matched target is decided on the tag
-// sites whose scope holds the resource (BR3.1 to BR3.3), placed in the file of
-// the key, and edited there with the code of the templates: simulate,
+// The CDK apps in the flow of iac (v0.2.0 U1 and U3, functional spec W1 to
+// W3). Before the templates are looked for, every app below --dir (or those
+// --cdk-app picks) is synthesized, one after the other in name order; an app
+// that fails does not stop the others (U3 BR1.4, BR2.7). The targets are
+// matched with the resources of every app that was synthesized (U3 BR3.1),
+// and the helper reads the sources of each TypeScript app with matched
+// targets once; when the sources do not show where a resource is made, the
+// app is synthesized once more with --debug and the trace gives the place
+// (U3 BR4.1 to BR4.4). Each change of a matched target is decided on the tag
+// sites whose scope holds the resource (BR3.1 to BR3.3), placed in the file
+// of the key, and edited there with the code of the templates: simulate,
 // buildEdits, the difference and the writing. After the edits, the helper
 // reads the app again with the edited contents (BR3.4).
 //
-// U1 reflects the rename of a key written as a string in Tags.of(x).add; the
+// The rename of a key written as a string in Tags.of(x).add is reflected; the
 // other kinds of change and the other ways of writing go on the list to fix
-// by hand with cdkUnsupportedShape (U4 takes them).
+// by hand with cdkUnsupportedShape (U4 takes them), and so do the changes of
+// the resources of Python apps until U5 reads their sources.
 
 // cdkTarget is what a target matched with synth carries.
 type cdkTarget struct {
@@ -42,7 +49,26 @@ type cdkRun struct {
 	app      cdk.App
 	syn      cdk.Synthesis
 	analysis cdk.Analysis
+	// traces are the trace sites given to the second Analyze, when its
+	// analysis is the one used; Recheck gets them too (U3 BR4.4).
+	traces []cdk.TraceSite
+	// entry is the index of the app in Result.CDKApps.
+	entry int
 }
+
+// traceSink is the sink of the trace synth: a failure is shown as done with
+// the same elapsed time, since the first synth is used (U3 BR4.3, BR5.4). It
+// does not implement cdk.ToolFailureSink, so that every failure reaches
+// AppFailed.
+type traceSink struct{ inner cdk.ProgressSink }
+
+func (s traceSink) AppsWaiting(apps []string)                 { s.inner.AppsWaiting(apps) }
+func (s traceSink) AppStarted(app, language string)           { s.inner.AppStarted(app, language) }
+func (s traceSink) AppDone(app string, elapsed time.Duration) { s.inner.AppDone(app, elapsed) }
+func (s traceSink) AppFailed(app string, elapsed time.Duration, _ string) {
+	s.inner.AppDone(app, elapsed)
+}
+func (s traceSink) AppSkipped(app, reason string) { s.inner.AppSkipped(app, reason) }
 
 // rel returns a file of the app relative to --dir.
 func (c *cdkRun) rel(file string) string { return path.Join(c.app.Dir, file) }
@@ -107,10 +133,43 @@ func (r *runner) sink() cdk.ProgressSink {
 	return r.req.Progress
 }
 
-// prepareCDK finds, synthesizes and reads the app, and matches the targets
-// made by CloudFormation with its resources. It returns the work on the
-// sources. Nothing runs when no target was made by CloudFormation (BR1.1,
-// NFR5).
+// selectApps checks the values of --cdk-app against the apps found below
+// --dir and returns the apps they pick, in name order (U3 BR1.2, NFR2.7). It
+// reads no file: a value can only name an app of the list, so neither a link
+// nor .. reaches outside --dir. No value returns apps as they are.
+func selectApps(apps []cdk.App, values []string, windows bool) ([]cdk.App, error) {
+	if len(values) == 0 {
+		return apps, nil
+	}
+	var picked []cdk.App
+	for _, v := range values {
+		p := v
+		if windows {
+			p = strings.ReplaceAll(p, `\`, "/")
+		}
+		p = path.Clean(p)
+		if v == "" || p == ".." || strings.HasPrefix(p, "../") {
+			return nil, usageError("--cdk-app", "iac.cdkAppOutside", "iac.cdkAppFix", v)
+		}
+		i := slices.IndexFunc(apps, func(a cdk.App) bool {
+			return a.Dir == p || windows && strings.EqualFold(a.Dir, p)
+		})
+		if i < 0 {
+			return nil, usageError("--cdk-app", "iac.cdkAppNotFound", "iac.cdkAppFix", v)
+		}
+		if !slices.ContainsFunc(picked, func(a cdk.App) bool { return a.Dir == apps[i].Dir }) {
+			picked = append(picked, apps[i])
+		}
+	}
+	slices.SortFunc(picked, func(a, b cdk.App) int { return strings.Compare(a.Dir, b.Dir) })
+	return picked, nil
+}
+
+// prepareCDK finds (or takes the apps --cdk-app picked), synthesizes and reads
+// the apps, and matches the targets made by CloudFormation with their
+// resources. It returns the work on the sources. Nothing runs when no target
+// was made by CloudFormation (BR1.1, NFR5). An error is a stop (Ctrl+C) or a
+// fault of the build; nothing is written then (BR2.5).
 func (r *runner) prepareCDK(ctx context.Context, targets []*target) ([]*cdkTask, error) {
 	var stacked []*target
 	for _, t := range targets {
@@ -121,71 +180,260 @@ func (r *runner) prepareCDK(ctx context.Context, targets []*target) ([]*cdkTask,
 	if len(stacked) == 0 || r.w == nil || r.w.synth == nil {
 		return nil, nil
 	}
-	apps, err := r.w.synth.Discover(ctx, r.root, nil)
-	if err != nil || len(apps) == 0 {
-		return nil, err
+	apps := r.apps
+	if !r.discovered {
+		var err error
+		if apps, err = r.w.synth.Discover(ctx, r.root, nil); err != nil {
+			return nil, err
+		}
 	}
-	run, entry, err := r.synthesizeFirst(ctx, apps)
-	if err != nil || run == nil {
-		r.res.CDKApps = append(r.res.CDKApps, entry)
-		return nil, err
-	}
-	matched := r.matchTargets(stacked, run)
-	if len(matched) == 0 {
-		r.res.CDKApps = append(r.res.CDKApps, entry)
+	if len(apps) == 0 {
 		return nil, nil
 	}
+	apps = slices.Clone(apps)
+	slices.SortFunc(apps, func(a, b cdk.App) int { return strings.Compare(a.Dir, b.Dir) })
+	runs, err := r.synthesizeAll(ctx, apps)
+	if err != nil {
+		return nil, err
+	}
+	matched := r.matchTargets(stacked, runs)
+	var tasks []*cdkTask
+	for _, run := range runs {
+		mine := matched[run]
+		if len(mine) == 0 {
+			continue
+		}
+		if run.app.Language == cdk.Python {
+			// U5 reads the sources of Python apps (BR3.3).
+			for _, t := range mine {
+				manualAll(r.res, t, ReasonCDKUnsupportedShape, DetailNone, "")
+			}
+			continue
+		}
+		ok, err := r.analyzeRun(ctx, run, mine)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			tasks = append(tasks, r.planCDK(run, mine)...)
+		}
+	}
+	return tasks, nil
+}
+
+// synthesizeAll synthesizes the apps one after the other in name order (BR1.4).
+// The apps that are not synthesized go to Synthesize first, which tells the
+// sink they are skipped, so that AppsWaiting lists only the others (contract
+// C2). An app that fails does not stop the others (BR2.7). It returns the
+// apps synthesized.
+func (r *runner) synthesizeAll(ctx context.Context, apps []cdk.App) ([]*cdkRun, error) {
+	sink := r.sink()
+	opts := cdk.Options{Timeout: r.req.SynthTimeout}
+	var waiting []string
+	for _, a := range apps {
+		if a.Synthesizable() {
+			waiting = append(waiting, a.Dir)
+			continue
+		}
+		syn, err := r.w.synth.Synthesize(ctx, a, opts, sink)
+		if err != nil {
+			return nil, err
+		}
+		r.addApp(a, syn)
+	}
+	if len(waiting) > 0 {
+		sink.AppsWaiting(waiting)
+	}
+	var runs []*cdkRun
+	for _, a := range apps {
+		if !a.Synthesizable() {
+			continue
+		}
+		syn, err := r.w.synth.Synthesize(ctx, a, opts, sink)
+		r.res.Debug = append(r.res.Debug, syn.Debug...)
+		if err != nil {
+			return nil, err
+		}
+		entry := r.addApp(a, syn)
+		if syn.Failure == nil {
+			runs = append(runs, &cdkRun{app: a, syn: syn, entry: entry})
+		}
+	}
+	r.cdkReason, r.cdkTool = unattributedReason(r.res.CDKApps)
+	return runs, nil
+}
+
+// addApp records an app with the result of its synth and returns its index in
+// Result.CDKApps.
+func (r *runner) addApp(a cdk.App, syn cdk.Synthesis) int {
+	entry := CDKApp{Dir: a.Dir, Language: string(a.Language), Status: CDKAppDone, Elapsed: syn.Elapsed}
+	if f := syn.Failure; f != nil {
+		entry.Status, _ = failureStatus(f.Reason)
+		entry.FailureReason, entry.Tool = string(f.Reason), f.Tool
+	}
+	r.res.CDKApps = append(r.res.CDKApps, entry)
+	return len(r.res.CDKApps) - 1
+}
+
+// unattributedReason decides the reason of the resources of no app that no
+// template has either, from the apps that were not synthesized (BR3.2): a
+// failed synth first, then a CDK v1 app or one of unknown version, then an app
+// of another language. The program is named only when exactly one synth
+// failed. Nothing is decided when every app was synthesized; the failures of
+// the helper come later and are not counted.
+func unattributedReason(apps []CDKApp) (ManualReason, string) {
+	failed, v1, other := 0, false, false
+	tool := ""
+	for _, a := range apps {
+		if a.Status == CDKAppDone {
+			continue
+		}
+		switch cdk.FailureReason(a.FailureReason) {
+		case cdk.ReasonCDKV1, cdk.ReasonUnknownVersion:
+			v1 = true
+		case cdk.ReasonUnsupportedLanguage:
+			other = true
+		default:
+			failed++
+			tool = a.Tool
+		}
+	}
+	switch {
+	case failed == 1:
+		return ReasonCDKAppFailed, tool
+	case failed > 1:
+		return ReasonCDKAppFailed, ""
+	case v1:
+		return ReasonCDKV1, ""
+	case other:
+		return ReasonCDKUnsupportedLanguage, ""
+	}
+	return "", ""
+}
+
+// analyzeRun reads the sources of a TypeScript app for its matched targets. When
+// the sources do not show where some of them are made, the app is synthesized
+// once more with the trace, and read again with the places of the trace
+// (BR4.1 to BR4.4). It reports false when the helper failed: the app is then
+// failed and its targets are on the list (BR3.3).
+func (r *runner) analyzeRun(ctx context.Context, run *cdkRun, matched []*target) (bool, error) {
 	paths := make([]string, 0, len(matched))
 	for _, t := range matched {
 		paths = append(paths, t.cdk.resource.ConstructPath)
 	}
-	run.analysis, err = r.w.analyzer.Analyze(ctx, run.app, cdk.AnalyzeRequest{ConstructPaths: paths})
-	r.res.Debug = append(r.res.Debug, run.analysis.Debug...)
+	an, err := r.w.analyzer.Analyze(ctx, run.app, cdk.AnalyzeRequest{ConstructPaths: paths})
+	r.res.Debug = append(r.res.Debug, an.Debug...)
 	if err != nil {
 		var hf *cdk.HelperFailure
 		if !errors.As(err, &hf) {
-			return nil, helperError(err)
+			return false, helperError(err)
 		}
-		entry.Status, entry.FailureReason, entry.Tool = CDKAppFailed, "helper", hf.Tool
-		r.res.CDKApps = append(r.res.CDKApps, entry)
-		r.sink().AppFailed(run.app.Dir, run.syn.Elapsed, "helper")
-		for _, t := range matched {
-			manualAll(r.res, t, ReasonCDKAppFailed, DetailTool, hf.Tool)
-		}
-		return nil, nil
+		r.helperFailed(run, matched, hf)
+		return false, nil
 	}
-	r.res.CDKApps = append(r.res.CDKApps, entry)
-	return r.planCDK(run, matched), nil
+	run.analysis = an
+	var missing []string
+	for _, p := range paths {
+		if _, ok := findConstructSite(an, p); !ok {
+			missing = append(missing, p)
+		}
+	}
+	if len(missing) == 0 {
+		return true, nil
+	}
+	traces, err := r.traceSynth(ctx, run, missing)
+	if err != nil || len(traces) == 0 {
+		return err == nil, err
+	}
+	again, err := r.w.analyzer.Analyze(ctx, run.app, cdk.AnalyzeRequest{ConstructPaths: paths, TraceSites: traces})
+	r.res.Debug = append(r.res.Debug, again.Debug...)
+	if err != nil {
+		var hf *cdk.HelperFailure
+		if !errors.As(err, &hf) {
+			return false, helperError(err)
+		}
+		r.res.Debug = append(r.res.Debug, fmt.Sprintf("cdk: %s: the helper failed with the trace (%s); the first reading is used",
+			run.app.Dir, hf.Reason))
+		return true, nil
+	}
+	run.analysis, run.traces = again, traces
+	return true, nil
 }
 
-// synthesizeFirst synthesizes the first app in name order; U1 skips the others
-// (scalability design). The run is nil when the app was not synthesized.
-func (r *runner) synthesizeFirst(ctx context.Context, apps []cdk.App) (*cdkRun, CDKApp, error) {
-	sink := r.sink()
-	first := apps[0]
-	if first.Synthesizable() {
-		sink.AppsWaiting([]string{first.Dir})
+// helperFailed makes the app failed with the program of the helper and puts
+// its targets on the list (BR3.3, contract C7 helper_failure_to_manual).
+func (r *runner) helperFailed(run *cdkRun, matched []*target, hf *cdk.HelperFailure) {
+	e := &r.res.CDKApps[run.entry]
+	e.Status, e.FailureReason, e.Tool = CDKAppFailed, "helper", hf.Tool
+	r.sink().AppFailed(run.app.Dir, e.Elapsed, "helper")
+	for _, t := range matched {
+		manualAll(r.res, t, ReasonCDKAppFailed, DetailTool, hf.Tool)
 	}
-	for _, a := range apps[1:] {
-		sink.AppSkipped(a.Dir, ReasonNotInU1)
-		r.res.CDKApps = append(r.res.CDKApps, CDKApp{Dir: a.Dir, Language: string(a.Language), Status: CDKAppSkipped,
-			FailureReason: ReasonNotInU1})
-	}
-	syn, err := r.w.synth.Synthesize(ctx, first, cdk.Options{}, sink)
+}
+
+// traceSynth synthesizes the app once more with the trace (BR4.1) and returns
+// the trace sites of the missing construct paths: a path that ends with
+// Resource or Default asks for its parent, the construct the source makes.
+// Nothing is returned when that synth failed or made other stacks; the first
+// result is then used (BR4.3, BR4.4). Only a stop is an error.
+func (r *runner) traceSynth(ctx context.Context, run *cdkRun, missing []string) ([]cdk.TraceSite, error) {
+	syn, err := r.w.synth.Synthesize(ctx, run.app, cdk.Options{Timeout: r.req.SynthTimeout, WithTrace: true},
+		traceSink{inner: r.sink()})
 	r.res.Debug = append(r.res.Debug, syn.Debug...)
-	entry := CDKApp{Dir: first.Dir, Language: string(first.Language), Status: CDKAppDone, Elapsed: syn.Elapsed}
+	r.res.CDKApps[run.entry].Elapsed += syn.Elapsed
 	if err != nil {
-		return nil, entry, err
+		return nil, err
 	}
 	if f := syn.Failure; f != nil {
-		entry.Status, r.cdkReason = failureStatus(f.Reason)
-		entry.FailureReason, entry.Tool = string(f.Reason), f.Tool
-		if r.cdkReason == ReasonCDKAppFailed {
-			r.cdkTool = f.Tool
-		}
-		return nil, entry, nil
+		r.res.Debug = append(r.res.Debug, fmt.Sprintf("cdk: %s: the synth with the trace failed (%s); the first result is used",
+			run.app.Dir, f.Reason))
+		return nil, nil
 	}
-	return &cdkRun{app: first, syn: syn}, entry, nil
+	if !sameStacks(run.syn.Stacks, syn.Stacks) {
+		r.res.Debug = append(r.res.Debug, fmt.Sprintf("cdk: %s: the synth with the trace made other stacks; the trace is not used",
+			run.app.Dir))
+		return nil, nil
+	}
+	want := map[string]bool{}
+	for _, p := range missing {
+		want[makerPath(p)] = true
+	}
+	var traces []cdk.TraceSite
+	for _, s := range syn.TraceSites {
+		p := makerPath(s.ConstructPath)
+		if !want[p] {
+			continue
+		}
+		want[p] = false
+		s.ConstructPath = p
+		traces = append(traces, s)
+	}
+	slices.SortFunc(traces, func(a, b cdk.TraceSite) int { return strings.Compare(a.ConstructPath, b.ConstructPath) })
+	if len(traces) == 0 {
+		r.res.Debug = append(r.res.Debug, fmt.Sprintf("cdk: %s: the trace does not show where the resources are made", run.app.Dir))
+	}
+	return traces, nil
+}
+
+// makerPath is the construct the source makes for a construct path: the parent
+// of an L1 resource named Resource or Default.
+func makerPath(p string) string {
+	if parent, last, ok := cutLast(p); ok && (last == "Resource" || last == "Default") {
+		return parent
+	}
+	return p
+}
+
+// sameStacks reports that two synths made the same stacks: the names,
+// accounts and regions, and in each the logical IDs and construct paths of the
+// resources, in the same order (BR4.4).
+func sameStacks(a, b []cdk.Stack) bool {
+	return slices.EqualFunc(a, b, func(x, y cdk.Stack) bool {
+		return x.Name == y.Name && x.Account == y.Account && x.Region == y.Region &&
+			slices.EqualFunc(x.Resources, y.Resources, func(u, v cdk.SynthesizedResource) bool {
+				return u.LogicalID == v.LogicalID && u.ConstructPath == v.ConstructPath
+			})
+	})
 }
 
 // failureStatus maps a failure of synth to the state of the app and the reason
@@ -210,22 +458,26 @@ func helperError(err error) error {
 	return err
 }
 
-// matchTargets matches the targets with the resources of synth by stack name,
-// logical ID, account and region (BR2.1, contract C7 match_rule). An axis that
-// is empty on either side is not used. A target with no candidate stays a
-// CloudFormation target; one with several goes on the list (cdkAmbiguous).
-func (r *runner) matchTargets(targets []*target, run *cdkRun) []*target {
-	var matched []*target
+// matchTargets matches the targets with the resources of every app synthesized
+// by stack name, logical ID, account and region (U3 BR3.1, contract C7
+// match_rule), and returns the matched targets by app. An axis that is empty
+// on either side is not used. A target with no candidate stays a
+// CloudFormation target; one with several, in one app or in more, goes on the
+// list (cdkAmbiguous).
+func (r *runner) matchTargets(targets []*target, runs []*cdkRun) map[*cdkRun][]*target {
+	matched := map[*cdkRun][]*target{}
 	for _, t := range targets {
 		var found []cdkTarget
-		for _, st := range run.syn.Stacks {
-			if st.Name != t.stackName || st.Account != "" && t.account != "" && st.Account != t.account ||
-				st.Region != "" && !t.global && t.region != "" && st.Region != t.region {
-				continue
-			}
-			for _, res := range st.Resources {
-				if res.LogicalID == t.logicalID {
-					found = append(found, cdkTarget{run: run, resource: res})
+		for _, run := range runs {
+			for _, st := range run.syn.Stacks {
+				if st.Name != t.stackName || st.Account != "" && t.account != "" && st.Account != t.account ||
+					st.Region != "" && !t.global && t.region != "" && st.Region != t.region {
+					continue
+				}
+				for _, res := range st.Resources {
+					if res.LogicalID == t.logicalID {
+						found = append(found, cdkTarget{run: run, resource: res})
+					}
 				}
 			}
 		}
@@ -233,7 +485,7 @@ func (r *runner) matchTargets(targets []*target, run *cdkRun) []*target {
 		case 0:
 		case 1:
 			t.tool, t.cdk = ToolCDK, &found[0]
-			matched = append(matched, t)
+			matched[found[0].run] = append(matched[found[0].run], t)
 		default:
 			t.tool = ToolCDK
 			manualAll(r.res, t, ReasonCDKAmbiguous, DetailNone, "")
@@ -381,12 +633,17 @@ func (p *cdkPlanner) sameChangeUnder(t *target, c planner.Change, scope string) 
 // its path, or of its parent when the path ends with Resource or Default (the
 // L1 resource of an L2 construct).
 func (p *cdkPlanner) constructSite(resPath string) (cdk.ConstructSite, bool) {
+	return findConstructSite(p.run.analysis, resPath)
+}
+
+// findConstructSite is constructSite in an analysis.
+func findConstructSite(an cdk.Analysis, resPath string) (cdk.ConstructSite, bool) {
 	want := []string{resPath}
-	if parent, last, ok := cutLast(resPath); ok && (last == "Resource" || last == "Default") {
-		want = append(want, parent)
+	if maker := makerPath(resPath); maker != resPath {
+		want = append(want, maker)
 	}
 	for _, w := range want {
-		for _, cs := range p.run.analysis.ConstructSites {
+		for _, cs := range an.ConstructSites {
 			if cs.ConstructPath == w {
 				return cs, true
 			}
@@ -663,7 +920,7 @@ func (r *runner) recheckCDK(ctx context.Context, outs []*fileOutcome) error {
 				expect[k] = v
 			}
 		}
-		again, err := r.w.analyzer.Recheck(ctx, run.app, edited)
+		again, err := r.w.analyzer.Recheck(ctx, run.app, edited, run.traces)
 		r.res.Debug = append(r.res.Debug, again.Debug...)
 		var why string
 		var hf *cdk.HelperFailure
@@ -691,7 +948,7 @@ func compareAnalyses(before, after cdk.Analysis, expect map[string]string) strin
 	if len(after.TagSites) != len(before.TagSites) {
 		return "the number of tag sites changed"
 	}
-	if !slices.Equal(after.ConstructSites, before.ConstructSites) {
+	if !sameConstructSites(before.ConstructSites, after.ConstructSites) {
 		return "the construct sites changed"
 	}
 	for i := range before.TagSites {
@@ -712,4 +969,36 @@ func compareAnalyses(before, after cdk.Analysis, expect map[string]string) strin
 		}
 	}
 	return ""
+}
+
+// sameConstructSites compares the construct sites before and after the edits
+// (U3 security design §5): the sites the helper found in the sources must be
+// the same in every field and order; of those the trace gave, there must be as
+// many, each with the same construct path and file. Their lines are not
+// compared, as an edit above them moves them.
+func sameConstructSites(before, after []cdk.ConstructSite) bool {
+	fromTrace := func(cs cdk.ConstructSite) bool { return cs.From == "trace" }
+	split := func(all []cdk.ConstructSite) (source, trace []cdk.ConstructSite) {
+		for _, cs := range all {
+			if fromTrace(cs) {
+				trace = append(trace, cs)
+			} else {
+				source = append(source, cs)
+			}
+		}
+		return source, trace
+	}
+	bs, bt := split(before)
+	as, at := split(after)
+	if !slices.Equal(bs, as) || len(bt) != len(at) {
+		return false
+	}
+	for _, b := range bt {
+		if !slices.ContainsFunc(at, func(a cdk.ConstructSite) bool {
+			return a.ConstructPath == b.ConstructPath && a.File == b.File
+		}) {
+			return false
+		}
+	}
+	return true
 }

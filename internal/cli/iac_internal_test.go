@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/iac"
@@ -37,8 +38,44 @@ func TestIacPassesItsOptionsOn(t *testing.T) {
 		t.Fatal("the request has no progress sink")
 	}
 	got.Progress = nil
-	if got != (iac.Request{PlanPath: "p.json", Dir: "d", TFStatePath: "s.json", Write: true}) {
+	if !reflect.DeepEqual(got, iac.Request{PlanPath: "p.json", Dir: "d", TFStatePath: "s.json", Write: true,
+		SynthTimeout: 10 * time.Minute}) {
 		t.Fatalf("request = %+v", got)
+	}
+	// v0.2.0 U3: --cdk-app keeps each value whole, commas too, and
+	// --synth-timeout is read as a duration.
+	code, _, _ = runIacStub(t, func(_ context.Context, r iac.Request) (*iac.Result, error) {
+		got = r
+		return &iac.Result{}, nil
+	}, "--plan", "p.json", "--dir", "d", "--cdk-app", "infra/a,b", "--cdk-app", "web", "--synth-timeout", "90s")
+	if code != ExitOK || !reflect.DeepEqual(got.CDKApps, []string{"infra/a,b", "web"}) || got.SynthTimeout != 90*time.Second {
+		t.Fatalf("exit %d, request = %+v", code, got)
+	}
+}
+
+// v0.2.0 U3 NFR6.21, NFR3.11: --synth-timeout is a duration of Go of 1s or
+// more; a wrong value stops iac before the writer runs.
+func TestParseSynthTimeout(t *testing.T) {
+	for in, want := range map[string]time.Duration{"90s": 90 * time.Second, "10m": 10 * time.Minute, "1h30m": 90 * time.Minute, "1s": time.Second} {
+		if got, err := parseSynthTimeout(in); err != nil || got != want {
+			t.Errorf("parseSynthTimeout(%q) = %v, %v", in, got, err)
+		}
+	}
+	for _, in := range []string{"0s", "999ms", "10", "abc", "-5s", ""} {
+		_, err := parseSynthTimeout(in)
+		var e *errkind.Error
+		if !errors.As(err, &e) || e.Kind != errkind.InvalidInput || e.DetailID != "iac.badSynthTimeout" || e.Subject != "--synth-timeout" {
+			t.Errorf("parseSynthTimeout(%q) = %v", in, err)
+		}
+	}
+	ran := false
+	code, _, stderr := runIacStub(t, func(context.Context, iac.Request) (*iac.Result, error) {
+		ran = true
+		return &iac.Result{}, nil
+	}, "--plan", "p", "--dir", "d", "--synth-timeout", "999ms")
+	if code != ExitError || ran || !strings.Contains(stderr, "--synth-timeout 999ms is not a duration of 1s or more") ||
+		!strings.Contains(stderr, "give it like 90s, 10m or 1h30m") {
+		t.Fatalf("exit %d, ran %v, stderr:\n%s", code, ran, stderr)
 	}
 }
 
@@ -160,7 +197,8 @@ func TestIacIsPutTogetherWithoutAWS(t *testing.T) {
 	}
 	for i := range reflect.TypeFor[iac.Request]().NumField() {
 		f := reflect.TypeFor[iac.Request]().Field(i)
-		if k := f.Type.Kind(); k != reflect.String && k != reflect.Bool && f.Type.String() != "cdk.ProgressSink" {
+		if k := f.Type.Kind(); k != reflect.String && k != reflect.Bool && f.Type.String() != "cdk.ProgressSink" &&
+			f.Type.String() != "[]string" && f.Type.String() != "time.Duration" {
 			t.Fatalf("the request holds %s of type %s", f.Name, f.Type)
 		}
 	}

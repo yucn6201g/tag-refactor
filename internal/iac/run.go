@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/yucn6201g/tag-refactor/internal/cdk"
 	"github.com/yucn6201g/tag-refactor/internal/errkind"
 	"github.com/yucn6201g/tag-refactor/internal/fileout"
 	"github.com/yucn6201g/tag-refactor/internal/planner"
@@ -39,9 +40,12 @@ type runner struct {
 	res    *Result
 	budget *budget
 	// cdkReason and cdkTool say why a CDK app could not be used, for the
-	// resources no template has (v0.2.0 BR2.3).
+	// resources no template has (v0.2.0 U3 BR3.2).
 	cdkReason ManualReason
 	cdkTool   string
+	// apps are the apps --cdk-app picked, when discovered is true (U3 BR1.2).
+	apps       []cdk.App
+	discovered bool
 }
 
 // Run does workflow W1: the input, the targets, the places, the edits, the
@@ -63,10 +67,24 @@ func (w *Writer) Run(ctx context.Context, req Request) (*Result, error) {
 			return nil, err
 		}
 	}
+	// --cdk-app is checked whatever the plan holds, before anything runs or is
+	// written (U3 NFR2.7); without a synthesizer there are no CDK apps to pick.
+	var apps []cdk.App
+	discovered := false
+	if len(req.CDKApps) > 0 && w.synth != nil {
+		found, err := w.synth.Discover(ctx, root, nil)
+		if err != nil {
+			return nil, err
+		}
+		if apps, err = selectApps(found, req.CDKApps, runtime.GOOS == "windows"); err != nil {
+			return nil, err
+		}
+		discovered = true
+	}
 	defer setMemoryLimit()()
 	targets, res := buildTargets(plan, state)
 	res.HasTFState, res.WriteRequested = req.TFStatePath != "", req.Write
-	r := &runner{w: w, req: req, root: root, res: res, budget: newBudget()}
+	r := &runner{w: w, req: req, root: root, res: res, budget: newBudget(), apps: apps, discovered: discovered}
 	if len(targets) > 0 {
 		if err := r.reflect(ctx, targets); err != nil {
 			return nil, err

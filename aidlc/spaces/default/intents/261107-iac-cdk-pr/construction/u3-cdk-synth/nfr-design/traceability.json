@@ -1,0 +1,32 @@
+{
+  "stage": "nfr-design",
+  "unit": "u3-cdk-synth",
+  "upstream_ids": ["NFR1.11", "NFR1.12", "NFR1.13", "NFR2.5", "NFR2.6", "NFR2.7", "NFR3.11", "NFR3.12", "NFR3.13", "NFR3.14", "NFR3.15", "NFR3.16", "NFR3.17", "NFR4.5", "NFR5.3", "NFR8.3", "NFR8.4", "NFR10.4", "NFR10.5", "NFR6.16", "NFR6.17", "NFR6.18", "NFR6.19", "NFR6.20", "NFR6.21"],
+  "coverage": [
+    { "id": "NFR1.11", "status": "OK", "target": "security-design.md section 5 (trace.go: readTraceSites sorted by construct path, traceFrame, userFile; relative TraceSite only, absolute paths never leave the function; ts-helper.js returns from trace sites with the relative file)" },
+    { "id": "NFR1.12", "status": "OK", "target": "security-design.md section 5 (homeForms with the cleaned and the EvalSymlinks form, shortHome with the boundary 'next char is not a letter, digit, _, - or .', keptLines with homes, synth command line with --app and the .venv line, home_test.go); toolName in section 2 keeps a home path out of the tool name" },
+    { "id": "NFR1.13", "status": "OK", "target": "security-design.md section 6 (no app section in the body, Failure.Detail not copied to iac.CDKApp, catalog texts only)" },
+    { "id": "NFR2.5", "status": "OK", "target": "security-design.md section 2 (withVenv after isolate: one PATH variable with the .venv bin first, VIRTUAL_ENV replaced; used for version check, normal and trace synth)" },
+    { "id": "NFR2.6", "status": "OK", "target": "security-design.md section 2 (venvPython looks at the app folder only; nothing writes to .venv)" },
+    { "id": "NFR2.7", "status": "OK", "target": "security-design.md section 7 (selectApps in Writer.Run against the discovered apps, iac.cdkAppOutside, iac.cdkAppNotFound)" },
+    { "id": "NFR3.11", "status": "OK", "target": "security-design.md section 8 (--synth-timeout through iac.Request.SynthTimeout to cdk.Options.Timeout for normal and trace synth)" },
+    { "id": "NFR3.12", "status": "OK", "target": "security-design.md section 8 (estimate formula for README.md) and section 12. Difference from the requirement: Node.js check counted per helper call, so app time = Python check 30s + synth limit x 2 + (Node.js check 30s + helper limit 2m) x 3 = 28m by default instead of 27m; the NFR3.12 text is to be fixed in Construction (section 12)" },
+    { "id": "NFR3.13", "status": "OK", "target": "security-design.md section 8 (count table: trace synth once for a typescript app with missing construct sites only) and section 5 (ts-helper.js turns traceSites into from trace construct sites; ts-trace test app)" },
+    { "id": "NFR3.14", "status": "OK", "target": "security-design.md section 3 (checkPython with pythonVersionLimit 30s and Synthesizer.VersionTimeout, timeout with tool python)" },
+    { "id": "NFR3.15", "status": "OK", "target": "security-design.md section 7 (skippedFolders adds .venv and venv, readDir variable to count the folders read)" },
+    { "id": "NFR3.16", "status": "OK", "target": "security-design.md section 8 (procexec process tree for version check and python synth, TestMain fake python and cdk, testutil.ProcessAlive)" },
+    { "id": "NFR3.17", "status": "OK", "target": "security-design.md section 8 (count table: analyze 1 or 2, recheck once per app with the same TraceSites as the second analyze, none for python apps) and section 5 (Recheck gets traces, compareAnalyses compares from trace sites by path and file only); contract C3 Recheck and C4 traceSites changes listed in section 12" },
+    { "id": "NFR4.5", "status": "OK", "target": "security-design.md section 8 (cleanup table, Config.TempDir, interruption during Analyze and Recheck)" },
+    { "id": "NFR5.3", "status": "OK", "target": "security-design.md section 11 (no synth without stack-name resources, ReasonNotInU1 and synthesizeFirst removed, U1 tests replaced, U1 line texts kept)" },
+    { "id": "NFR8.3", "status": "OK", "target": "security-design.md section 10 (setup-python and py-minimal step in ci.yml test, race, coverage and release.yml build; PY_TEST_APP and PYTHON_VERSION also in the release.yml env; workflow test checks jobs whose go test step has no -run, so github-pr is left out; RequirePythonTools; README development steps)" },
+    { "id": "NFR8.4", "status": "OK", "target": "security-design.md section 10 (failure test apps ts-lookup, ts-profile, ts-v1, py-v1, unknown-version, other-lang; ts-trace synthesizes without AWS; workflow test with no AWS credentials)" },
+    { "id": "NFR10.4", "status": "OK", "target": "security-design.md section 9 (app table and clock in display.Printer, skipped apps held in pendingSkipped and drawn as skipped rows when AppsWaiting comes, notices for apps not in byApp ignored with one --debug line, heartbeat line every minute when not a terminal, -race test)" },
+    { "id": "NFR10.5", "status": "OK", "target": "security-design.md section 11 (iaccdk.go and iacCDKCatalog in English and Japanese, including iac.cdkToolNotFound for a missing first word that is not python)" },
+    { "id": "NFR6.16", "status": "OK", "target": "security-design.md section 3 (checkPython, pythonVersion regexp, toolMissing and toolTooOld, minPython, TestMinPythonMatchesTheTestApp) and section 12" },
+    { "id": "NFR6.17", "status": "OK", "target": "security-design.md section 4 (appCommand, windowsQuotedApp, TestQuotedArgReachesCmd on Go stable and oldstable first in Code Generation with false plus a README note if it fails, spaced and dollar folder synth tests) and section 12. Difference from the requirement: quotes also for a path without spaces that has characters a shell reads outside quotes, and on Windows no replacement when quoted args do not reach cdk.cmd; the NFR6.17 text is to be fixed in Construction (section 12)" },
+    { "id": "NFR6.18", "status": "OK", "target": "security-design.md section 10 (py-minimal with pinned requirements.txt and package-lock.json, Dependabot pip and npm)" },
+    { "id": "NFR6.19", "status": "OK", "target": "security-design.md section 10 (CI steps with --only-binary=:all:, pip check, npm ci --ignore-scripts; ci-gate needs unchanged)" },
+    { "id": "NFR6.20", "status": "OK", "target": "security-design.md section 9 (Ticker interface, SetTicker, appClock under the printer lock) and logical-components.md (internal/display)" },
+    { "id": "NFR6.21", "status": "OK", "target": "security-design.md section 8 (parseSynthTimeout with time.ParseDuration and a 1s minimum)" }
+  ]
+}

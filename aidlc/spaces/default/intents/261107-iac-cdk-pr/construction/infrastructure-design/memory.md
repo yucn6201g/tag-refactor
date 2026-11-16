@@ -12,4 +12,5 @@
 
 ## Open questions
 <!-- example: 2026-05-29T10:14:32Z — confirm the retention window with compliance before the next stage hardens the schema -->
+- 2026-11-15T08:47:11Z [unit u3-cdk-synth] — U3 の基盤の設計のレビュー(READY)で残った Minor 1件は、U3 の Code Generation の計画で直す。.gitignore にテスト用のアプリの __pycache__ も足す(release.yml の build は未追跡のファイルも変更とみなすため)か、go test のあとに git status が空であることを確かめる手順を足す。Dependabot の pip に groups を付けたのは設計担当の判断で、レビューで妥当とされた。
 - 2026-11-08T14:00:00Z — U1 のインフラの設計のレビュー(READY)で残った Major 2件と Minor 3件は、U1 の Code Generation の計画で直す。(1) 検証用のスタックを置くプロファイルは、タグの読み書きだけの tag-refactor-apply ではなく、今の README の手順と同じ管理者の tag-refactor-sandbox にする(AWS の変更は人の明示の許可を得てから)。(2) テスト用のアプリは、ブートストラップの無いアカウントに置けるよう、BootstrapVersion のルールを出さない合成器にし、stackName を tag-refactor-cdk-skeleton に固定する。synth の出力で確かめる。(3) github-pr の後片付けが取り消しで終わらないときのため、テストの始めに、前の実行が残した古いブランチとプルリクエスト(作ってから1日を超えたもの)を片付ける。(4) テスト専用のリポジトリのアプリの依存は、tag-refactor 側の ts-minimal を写す手順で合わせる(Dependabot は tag-refactor 側だけ)。

@@ -33,12 +33,32 @@ export class S extends Stack {
 
 // fakeCDK stands in for synth and the helper.
 type fakeCDK struct {
-	apps       []cdk.App
-	syn        cdk.Synthesis
-	analysis   cdk.Analysis
+	apps        []cdk.App
+	discoverErr error
+	syn         cdk.Synthesis
+	// synOf, when it has the folder of an app, is the synth of that app.
+	synOf map[string]cdk.Synthesis
+	// traceSyn, when set, is the synth with the trace; otherwise it is the
+	// normal one.
+	traceSyn *cdk.Synthesis
+	// synthErr is returned by the synth of the app traceErrApp ("" for all).
+	synthErr    error
+	synthErrApp string
+	analysis    cdk.Analysis
+	// traced, when set, is the analysis of an Analyze given trace sites.
+	traced     *cdk.Analysis
 	analyzeErr error
+	// tracedErr is the error of an Analyze given trace sites.
+	tracedErr  error
 	recheckErr error
 	recheck    func(edited map[string][]byte) cdk.Analysis
+	// recheckTraces are the traces of each Recheck, in order.
+	recheckTraces [][]cdk.TraceSite
+	// options are the options of each synth, and requests those of each
+	// Analyze, in order; events are the calls of the sink.
+	options    []cdk.Options
+	requests   []cdk.AnalyzeRequest
+	synthDirs  []string
 	discovered int
 	synthed    int
 	analyzed   int
@@ -47,13 +67,42 @@ type fakeCDK struct {
 
 func (f *fakeCDK) Discover(context.Context, string, []string) ([]cdk.App, error) {
 	f.discovered++
-	return f.apps, nil
+	return f.apps, f.discoverErr
 }
 
-func (f *fakeCDK) Synthesize(_ context.Context, app cdk.App, _ cdk.Options, sink cdk.ProgressSink) (cdk.Synthesis, error) {
+// fakeSkipReason is the reason the real synthesizer skips an app for.
+func fakeSkipReason(app cdk.App) cdk.FailureReason {
+	switch {
+	case app.Language != cdk.TypeScript && app.Language != cdk.Python:
+		return cdk.ReasonUnsupportedLanguage
+	case app.CDKMajor == 1:
+		return cdk.ReasonCDKV1
+	case app.CDKMajor != 2:
+		return cdk.ReasonUnknownVersion
+	}
+	return ""
+}
+
+func (f *fakeCDK) Synthesize(_ context.Context, app cdk.App, opts cdk.Options, sink cdk.ProgressSink) (cdk.Synthesis, error) {
+	if reason := fakeSkipReason(app); reason != "" {
+		sink.AppSkipped(app.Dir, string(reason))
+		return cdk.Synthesis{App: app, Failure: &cdk.Failure{Reason: reason}}, nil
+	}
 	f.synthed++
+	f.options = append(f.options, opts)
+	f.synthDirs = append(f.synthDirs, app.Dir)
 	s := f.syn
-	s.App = app
+	if one, ok := f.synOf[app.Dir]; ok {
+		s = one
+	}
+	if opts.WithTrace && f.traceSyn != nil {
+		s = *f.traceSyn
+	}
+	s.App, s.Elapsed = app, time.Second
+	sink.AppStarted(app.Dir, string(app.Language))
+	if f.synthErr != nil && (f.synthErrApp == "" || f.synthErrApp == app.Dir) {
+		return s, f.synthErr
+	}
 	if s.Failure != nil {
 		sink.AppFailed(app.Dir, time.Second, string(s.Failure.Reason))
 	} else {
@@ -62,13 +111,23 @@ func (f *fakeCDK) Synthesize(_ context.Context, app cdk.App, _ cdk.Options, sink
 	return s, nil
 }
 
-func (f *fakeCDK) Analyze(context.Context, cdk.App, cdk.AnalyzeRequest) (cdk.Analysis, error) {
+func (f *fakeCDK) Analyze(_ context.Context, _ cdk.App, req cdk.AnalyzeRequest) (cdk.Analysis, error) {
 	f.analyzed++
+	f.requests = append(f.requests, req)
+	if len(req.TraceSites) > 0 {
+		if f.tracedErr != nil {
+			return cdk.Analysis{}, f.tracedErr
+		}
+		if f.traced != nil {
+			return *f.traced, nil
+		}
+	}
 	return f.analysis, f.analyzeErr
 }
 
-func (f *fakeCDK) Recheck(_ context.Context, _ cdk.App, edited map[string][]byte) (cdk.Analysis, error) {
+func (f *fakeCDK) Recheck(_ context.Context, _ cdk.App, edited map[string][]byte, traces []cdk.TraceSite) (cdk.Analysis, error) {
 	f.rechecked++
+	f.recheckTraces = append(f.recheckTraces, traces)
 	if f.recheckErr != nil {
 		return cdk.Analysis{}, f.recheckErr
 	}
@@ -473,13 +532,14 @@ func TestCDKFailedAppsAndTheExitCode(t *testing.T) {
 			}
 		})
 	}
-	t.Run("the second app", func(t *testing.T) {
+	t.Run("the second app is synthesized too", func(t *testing.T) {
 		f, fake := newCDKWorld(t, stackTS)
 		fake.apps = append(fake.apps, cdk.App{Dir: "zz", Language: cdk.TypeScript, CDKMajor: 2})
+		fake.synOf = map[string]cdk.Synthesis{"zz": {}}
 
 		res := f.runCDK(fake, f.plan(stackResource(arnQ1, "Q1", rename("env", "Environment", "Prod"))), false)
 
-		if len(res.CDKApps) != 2 || res.CDKApps[1].FailureReason != ReasonNotInU1 || res.ExitCode() != 0 || fake.synthed != 1 {
+		if len(res.CDKApps) != 2 || res.CDKApps[1].Status != CDKAppDone || res.ExitCode() != 0 || fake.synthed != 2 {
 			t.Fatalf("apps %+v, exit %d, synth %d", res.CDKApps, res.ExitCode(), fake.synthed)
 		}
 	})

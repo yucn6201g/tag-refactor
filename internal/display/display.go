@@ -46,6 +46,17 @@ type Printer struct {
 	restores []func()
 	// account is the account ID shown above the progress table.
 	account string
+	// The clock of the progress of the CDK apps (v0.2.0 U3, security design
+	// §9): newTicker makes it (nil is time.NewTicker), clock is the one
+	// running, clockWG waits for its goroutine, running counts the apps
+	// running, pendingSkipped holds the apps skipped before the table, and
+	// tickDone, set by tests only, runs after each tick.
+	newTicker      func(time.Duration) Ticker
+	clock          *appClock
+	clockWG        sync.WaitGroup
+	running        int
+	pendingSkipped []skippedApp
+	tickDone       func()
 }
 
 var (
@@ -82,15 +93,17 @@ func (p *Printer) keep(restore func()) {
 // standard error and standard output (NFR9.3, NFR11.7). Progress and colors
 // stop after it. Calling it again does nothing.
 func (p *Printer) Close() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.endProgress()
-	p.redraw = false
-	p.colorOut, p.colorErr = false, false
-	for i := len(p.restores) - 1; i >= 0; i-- {
-		p.restores[i]()
-	}
-	p.restores = nil
+	p.locked(func() {
+		p.endProgress()
+		p.redraw = false
+		p.colorOut, p.colorErr = false, false
+		for i := len(p.restores) - 1; i >= 0; i-- {
+			p.restores[i]()
+		}
+		p.restores = nil
+	})
+	// The clock is stopped; its goroutine may still wait for the lock.
+	p.clockWG.Wait()
 }
 
 // SetLang sets the language of everything printed from now on (BR3.8).

@@ -26,3 +26,20 @@ updates:
       # change of the helper, not an update.
       - dependency-name: typescript
         versions: [">= 6"]
+  # The pinned packages of the Python test CDK app (v0.2.0 U3 NFR6.18): its
+  # Python packages, in one pull request, and its CDK CLI.
+  - package-ecosystem: pip
+    directory: /internal/cdk/testdata/apps/py-minimal
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      py-minimal-pip:
+        patterns: ["*"]
+  - package-ecosystem: npm
+    directory: /internal/cdk/testdata/apps/py-minimal
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"

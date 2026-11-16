@@ -34,6 +34,9 @@ env:
   # are needed, as in ci.yml, or the tests fail in CI by design (NFR8.1).
   NODE_VERSION: 22.23.4
   CDK_TEST_APP: internal/cdk/testdata/apps/ts-minimal
+  # The Python test CDK app (v0.2.0 U3 NFR8.3), as in ci.yml.
+  PY_TEST_APP: internal/cdk/testdata/apps/py-minimal
+  PYTHON_VERSION: "3.13"
 
 defaults:
   run:
@@ -59,11 +62,26 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+          cache-dependency-path: |
+            ${{ env.CDK_TEST_APP }}/package-lock.json
+            ${{ env.PY_TEST_APP }}/package-lock.json
       - name: Install the test CDK app
         # node_modules is ignored by git, so the binaries are not marked
         # "+dirty".
         run: npm ci --ignore-scripts --prefix "$CDK_TEST_APP"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ${{ env.PY_TEST_APP }}/requirements.txt
+      - name: Install the Python test CDK app
+        # .venv, node_modules and __pycache__ are ignored by git too.
+        working-directory: ${{ env.PY_TEST_APP }}
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check --only-binary=:all: --no-input -r requirements.txt
+          .venv/bin/python -m pip check
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Require Go ${{ env.MIN_GO }} or later
         run: |
           have=$(go env GOVERSION)
@@ -78,7 +96,11 @@ jobs:
             echo "tag $GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1
           fi
       - name: Test (no AWS calls)
-        run: go test -mod=readonly ./...
+        # The large tests time themselves and run alone in the next step, as in
+        # ci.yml (v0.2 U3).
+        run: go test -mod=readonly -skip '^TestLarge' ./...
+      - name: Test (the large tests alone, no AWS calls)
+        run: go test -mod=readonly -run '^TestLarge' ./...
       - name: govulncheck with the Go that builds the binaries
         run: go tool govulncheck ./...
       - name: Build for every OS and CPU

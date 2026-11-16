@@ -138,7 +138,7 @@ func TestCDKRecheckReadsTheEditedContent(t *testing.T) {
 	}
 	edited := strings.Replace(string(before), "add('Env'", "add('Environment'", 1)
 
-	an, err := NewAnalyzer(Config{}).Recheck(context.Background(), app, map[string][]byte{"lib/stack.ts": []byte(edited)})
+	an, err := NewAnalyzer(Config{}).Recheck(context.Background(), app, map[string][]byte{"lib/stack.ts": []byte(edited)}, nil)
 
 	if err != nil {
 		t.Fatal(err)
@@ -325,7 +325,7 @@ func TestCDKHelperTwoHundredFiles(t *testing.T) {
 	}
 	edited := strings.Replace(files["lib/big.ts"], "'Env'", "'Environment'", 1)
 	start = time.Now()
-	again, err := an.Recheck(context.Background(), app, map[string][]byte{"lib/big.ts": []byte(edited)})
+	again, err := an.Recheck(context.Background(), app, map[string][]byte{"lib/big.ts": []byte(edited)}, nil)
 	recheckTook := time.Since(start)
 	if err != nil {
 		t.Fatal(err)

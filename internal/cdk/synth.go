@@ -25,7 +25,9 @@ type FailureReason string
 
 // The reasons of Failure.
 const (
-	ReasonToolMissing         FailureReason = "toolMissing"
+	ReasonToolMissing FailureReason = "toolMissing"
+	// ReasonToolTooOld is a Python older than MinPythonVersion (U3 NFR6.16).
+	ReasonToolTooOld          FailureReason = "toolTooOld"
 	ReasonNeedsAWS            FailureReason = "needsAWS"
 	ReasonTimeout             FailureReason = "timeout"
 	ReasonCDKV1               FailureReason = "cdkV1"
@@ -37,7 +39,9 @@ const (
 // Failure is why an app was not synthesized.
 type Failure struct {
 	Reason FailureReason
-	// Tool is the program missing or failing: cdk or node.
+	// Tool is the program missing or failing: cdk, node or python, or for a
+	// Python app whose app command starts with another program that is not
+	// found, the last part of that word (toolName).
 	Tool string
 	// Detail is the kept lines of standard error, already redacted. It goes to
 	// --debug only, never to a pull request (contract X2).
@@ -54,6 +58,9 @@ type Synthesis struct {
 	// Debug holds the lines for --debug: the command, the names of the
 	// environment and the kept lines of standard error. No values.
 	Debug []string
+	// TraceSites are the first places of the user's sources in the trace of
+	// each construct, with Options.WithTrace only (U3 BR4.2, contract C2).
+	TraceSites []TraceSite
 }
 
 // Stack is one stack of the cloud assembly.
@@ -80,6 +87,9 @@ type SynthesizedResource struct {
 type Options struct {
 	// Timeout is the limit of cdk synth; zero means DefaultSynthTimeout.
 	Timeout time.Duration
+	// WithTrace runs cdk synth --debug, which keeps the trace of the
+	// constructs, and reads it into Synthesis.TraceSites (U3 BR4.1).
+	WithTrace bool
 }
 
 // ProgressSink receives the states of the apps (contract C6). display.Printer
@@ -93,6 +103,13 @@ type ProgressSink interface {
 	// never the detail.
 	AppFailed(app string, elapsed time.Duration, reason string)
 	AppSkipped(app, reason string)
+}
+
+// ToolFailureSink may be implemented by a ProgressSink too (U3 security design
+// §10, contract C6): Synthesize then sends a failure with the program it
+// failed with, instead of AppFailed. ProgressSink keeps its five methods.
+type ToolFailureSink interface {
+	AppToolFailed(app string, elapsed time.Duration, reason, tool string)
 }
 
 // NopSink is a ProgressSink that shows nothing.
@@ -118,6 +135,12 @@ type Config struct {
 	Runner  procexec.Runner
 	Environ func() []string
 	Now     func() time.Time
+	// TempDir is where the temporary files and folders go; empty is the
+	// temporary folder of the system (U3 NFR4.5).
+	TempDir string
+	// Home returns the home folder, which --debug writes as ~ (U3 NFR1.12);
+	// nil is os.UserHomeDir.
+	Home func() (string, error)
 }
 
 func (c Config) withDefaults() Config {
@@ -130,24 +153,44 @@ func (c Config) withDefaults() Config {
 	if c.Now == nil {
 		c.Now = time.Now
 	}
+	if c.Home == nil {
+		c.Home = os.UserHomeDir
+	}
 	return c
+}
+
+// homes reads the home folder once and returns its forms for shortHome.
+func (c Config) homes() []string {
+	home, err := c.Home()
+	if err != nil || home == "" {
+		return nil
+	}
+	return homeForms(home, filepath.EvalSymlinks)
 }
 
 // Synthesizer finds and synthesizes the apps (CdkSynthesizer).
 type Synthesizer struct {
-	cfg Config
+	cfg   Config
+	homes []string
+	// VersionTimeout is the limit of python --version; zero means
+	// pythonVersionLimit. The tests make it short.
+	VersionTimeout time.Duration
 }
 
 // NewSynthesizer returns a synthesizer.
-func NewSynthesizer(cfg Config) *Synthesizer { return &Synthesizer{cfg: cfg.withDefaults()} }
+func NewSynthesizer(cfg Config) *Synthesizer {
+	cfg = cfg.withDefaults()
+	return &Synthesizer{cfg: cfg, homes: cfg.homes()}
+}
 
-// Synthesizable reports an app U1 synthesizes: TypeScript with CDK v2 (BR1.2).
+// Synthesizable reports an app U3 synthesizes: TypeScript or Python with CDK
+// v2 (BR1.3).
 func (a App) Synthesizable() bool { return skipReason(a) == "" }
 
-// skipReason is why an app is not synthesized at all (BR1.2).
+// skipReason is why an app is not synthesized at all (BR1.3).
 func skipReason(a App) FailureReason {
 	switch {
-	case a.Language != TypeScript:
+	case a.Language != TypeScript && a.Language != Python:
 		return ReasonUnsupportedLanguage
 	case a.CDKMajor == 1:
 		return ReasonCDKV1
@@ -169,57 +212,104 @@ func (s *Synthesizer) Synthesize(ctx context.Context, app App, opts Options, sin
 	}
 	start := s.cfg.Now()
 	sink.AppStarted(app.Dir, string(app.Language))
-	stacks, failure, err := s.run(ctx, app, opts, &syn.Debug)
+	stacks, traces, failure, err := s.run(ctx, app, opts, &syn.Debug)
 	syn.Elapsed = s.cfg.Now().Sub(start)
 	if err != nil {
 		return syn, err
 	}
 	if failure != nil {
 		syn.Failure = failure
-		sink.AppFailed(app.Dir, syn.Elapsed, string(failure.Reason))
+		if tf, ok := sink.(ToolFailureSink); ok {
+			tf.AppToolFailed(app.Dir, syn.Elapsed, string(failure.Reason), failure.Tool)
+		} else {
+			sink.AppFailed(app.Dir, syn.Elapsed, string(failure.Reason))
+		}
 		return syn, nil
 	}
-	syn.Stacks = stacks
+	syn.Stacks, syn.TraceSites = stacks, traces
 	sink.AppDone(app.Dir, syn.Elapsed)
 	return syn, nil
 }
 
-// run runs cdk synth into a temporary folder and reads what it wrote.
-func (s *Synthesizer) run(ctx context.Context, app App, opts Options, debug *[]string) ([]Stack, *Failure, error) {
+// run checks the programs, makes the environment, checks the Python of a
+// Python app, runs cdk synth into a temporary folder and reads what it wrote
+// (U3 security design §3): the version check, the normal synth and the trace
+// synth get the same environment.
+func (s *Synthesizer) run(ctx context.Context, app App, opts Options, debug *[]string) ([]Stack, []TraceSite, *Failure, error) {
 	if _, err := s.cfg.Runner.LookPath("node"); err != nil {
-		return nil, &Failure{Reason: ReasonToolMissing, Tool: "node"}, nil
+		return nil, nil, &Failure{Reason: ReasonToolMissing, Tool: "node"}, nil
 	}
 	cdk := s.findCDK(app)
 	if cdk == "" {
-		return nil, &Failure{Reason: ReasonToolMissing, Tool: "cdk"}, nil
+		return nil, nil, &Failure{Reason: ReasonToolMissing, Tool: "cdk"}, nil
 	}
-	out, err := os.MkdirTemp("", "tag-refactor-synth-")
-	if err != nil {
-		return nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "no temporary folder for the output"}, nil
+	var in interpreter
+	if app.Language == Python {
+		var failure *Failure
+		if in, failure = s.pythonFor(app); failure != nil {
+			return nil, nil, failure, nil
+		}
 	}
-	defer func() { _ = os.RemoveAll(out) }()
-	env, err := isolate(s.cfg.Environ())
+	env, err := isolate(s.cfg.Environ(), s.cfg.TempDir)
 	if err != nil {
-		return nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "no temporary files for the environment"}, nil
+		return nil, nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "no temporary files for the environment"}, nil
 	}
 	defer env.close()
+	if in.venv != "" {
+		env.vars = withVenv(env.vars, in.venv, runtime.GOOS == "windows")
+		if in.appArg == "" {
+			*debug = append(*debug, "cdk: "+app.Dir+": .venv: "+shortHome(in.venv, s.homes, runtime.GOOS == "windows")+" (first on PATH, VIRTUAL_ENV)")
+			if in.notReplaced {
+				*debug = append(*debug, "cdk: "+app.Dir+": --app was not replaced, so the app command's python is the first one on PATH, not the python of the .venv unless the .venv has one of that name")
+			}
+		}
+	}
+	if in.path != "" {
+		if failure, err := s.checkPython(ctx, app, in, env.vars, debug); failure != nil || err != nil {
+			return nil, nil, failure, err
+		}
+	}
+	out, err := os.MkdirTemp(s.cfg.TempDir, "tag-refactor-synth-")
+	if err != nil {
+		return nil, nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "no temporary folder for the output"}, nil
+	}
+	defer func() { _ = os.RemoveAll(out) }()
 	timeout := opts.Timeout
 	if timeout <= 0 {
 		timeout = DefaultSynthTimeout
 	}
 	args := []string{"synth", "--quiet", "--no-notices", "--output", out}
-	*debug = append(*debug, fmt.Sprintf("cdk: %s: %s synth --quiet --no-notices --output <temporary folder>", app.Dir, filepath.Base(cdk)),
-		"cdk: "+app.Dir+": environment: "+env.names())
+	shown := filepath.Base(cdk) + " synth --quiet --no-notices --output <temporary folder>"
+	if opts.WithTrace {
+		args = append(args, "--debug")
+		shown += " --debug"
+	}
+	if in.appArg != "" {
+		args = append(args, "--app", in.appArg)
+		shown += " --app " + shortHome(in.appArg, s.homes, runtime.GOOS == "windows")
+	}
+	*debug = append(*debug, "cdk: "+app.Dir+": "+redact.String(shown), "cdk: "+app.Dir+": environment: "+env.names())
 	res, err := s.cfg.Runner.Run(ctx, procexec.Command{Name: cdk, Args: args, Dir: app.Abs, Env: env.vars, Timeout: timeout})
-	if failure, err := classifyRun(ctx, res, err, debug, app.Dir); failure != nil || err != nil {
-		return nil, failure, err
+	if failure, err := s.classifyRun(ctx, res, err, debug, app.Dir); failure != nil || err != nil {
+		return nil, nil, failure, err
 	}
 	stacks, err := readAssembly(out)
 	if err != nil {
-		*debug = append(*debug, "cdk: "+app.Dir+": the cloud assembly could not be read: "+redact.String(err.Error()))
-		return nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "the cloud assembly could not be read"}, nil
+		*debug = append(*debug, "cdk: "+app.Dir+": the cloud assembly could not be read: "+redact.String(shortHome(err.Error(), s.homes, runtime.GOOS == "windows")))
+		return nil, nil, &Failure{Reason: ReasonSynthError, Tool: "cdk", Detail: "the cloud assembly could not be read"}, nil
 	}
-	return stacks, nil, nil
+	var traces []TraceSite
+	if opts.WithTrace {
+		var dropped int
+		traces, dropped, err = readTraceSites(out, app.Abs, runtime.GOOS == "windows")
+		if err != nil {
+			*debug = append(*debug, "cdk: "+app.Dir+": trace: the trace could not be read")
+			traces = nil
+		} else {
+			*debug = append(*debug, fmt.Sprintf("cdk: %s: trace: %d construct paths, %d frames left out", app.Dir, len(traces), dropped))
+		}
+	}
+	return stacks, traces, nil, nil
 }
 
 // findCDK returns the cdk of the app's node_modules, else the cdk of PATH
@@ -239,17 +329,37 @@ func (s *Synthesizer) findCDK(app App) string {
 	return ""
 }
 
-// The known lines of cdk synth that mean it needs AWS (BR1.5); U3 adds more.
+// The known texts of cdk synth that mean it needs AWS (U3 BR2.6), compared as
+// they are, case and all. Besides them, a line with both Profile and not
+// found means it needs AWS (needsAWS).
 var needsAWSLines = []string{
 	"Unable to resolve AWS account to use",
 	"Need to perform AWS calls",
 	"Could not load credentials",
 	"Unable to locate credentials",
+	"Unable to determine the default AWS account",
+	"no credentials have been configured",
+	"could not be found or parsed in shared credentials file",
+}
+
+// needsAWS reports a standard error of cdk synth that says it needs AWS.
+func needsAWS(stderr string) bool {
+	for _, text := range needsAWSLines {
+		if strings.Contains(stderr, text) {
+			return true
+		}
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.Contains(line, "Profile") && strings.Contains(line, "not found") {
+			return true
+		}
+	}
+	return false
 }
 
 // classifyRun turns the end of cdk synth into a failure (BR1.5), or nothing
 // when it succeeded. The error is the one of the context.
-func classifyRun(ctx context.Context, res procexec.Result, err error, debug *[]string, dir string) (*Failure, error) {
+func (s *Synthesizer) classifyRun(ctx context.Context, res procexec.Result, err error, debug *[]string, dir string) (*Failure, error) {
 	var start *procexec.StartError
 	switch {
 	case errors.Is(err, procexec.ErrTimeout):
@@ -263,20 +373,20 @@ func classifyRun(ctx context.Context, res procexec.Result, err error, debug *[]s
 	case res.ExitCode == 0:
 		return nil, nil
 	}
-	detail := keptLines(res.Stderr, debug, "cdk: "+dir+": ")
+	detail := keptLines(res.Stderr, debug, "cdk: "+dir+": ", s.homes)
 	reason := ReasonSynthError
-	for _, line := range needsAWSLines {
-		if strings.Contains(string(res.Stderr), line) {
-			reason = ReasonNeedsAWS
-		}
+	if needsAWS(string(res.Stderr)) {
+		reason = ReasonNeedsAWS
 	}
 	return &Failure{Reason: reason, Tool: "cdk", Detail: detail}, nil
 }
 
 // keptLines keeps the known lines of standard error for --debug (security
-// design §4) and says how many it dropped.
-func keptLines(stderr []byte, debug *[]string, prefix string) string {
-	kept, dropped := redact.Lines(stderr)
+// design §4), with the home folder written as ~ (U3 NFR1.12), and says how
+// many it dropped.
+func keptLines(stderr []byte, debug *[]string, prefix string, homes []string) string {
+	windows := runtime.GOOS == "windows"
+	kept, dropped := redact.Lines([]byte(shortHome(string(stderr), homes, windows)))
 	for _, line := range kept {
 		*debug = append(*debug, prefix+line)
 	}

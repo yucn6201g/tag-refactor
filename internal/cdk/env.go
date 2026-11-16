@@ -29,9 +29,10 @@ type isolated struct {
 	files []string
 }
 
-// isolate makes the environment of a call from parent. The caller removes the
+// isolate makes the environment of a call from parent, with its empty files in
+// tempDir (empty: the temporary folder of the system). The caller removes the
 // empty files with close, whatever happens to the call.
-func isolate(parent []string) (*isolated, error) {
+func isolate(parent []string, tempDir string) (*isolated, error) {
 	env := &isolated{}
 	for _, kv := range parent {
 		name, _, _ := strings.Cut(kv, "=")
@@ -40,7 +41,7 @@ func isolate(parent []string) (*isolated, error) {
 		}
 	}
 	for _, name := range []string{"AWS_SHARED_CREDENTIALS_FILE", "AWS_CONFIG_FILE"} {
-		f, err := os.CreateTemp("", "tag-refactor-aws-")
+		f, err := os.CreateTemp(tempDir, "tag-refactor-aws-")
 		if err != nil {
 			env.close()
 			return nil, err

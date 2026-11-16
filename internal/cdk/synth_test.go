@@ -26,7 +26,7 @@ func TestCDKIsolatedEnvironment(t *testing.T) {
 		"GITHUB_TOKEN=ghs_x", "GH_ENTERPRISE_TOKEN=a", "GITHUB_ENTERPRISE_TOKEN=b", "TAG_REFACTOR_TEST_REPO_TOKEN=c",
 		"CDK_DISABLE_VERSION_CHECK=0"}
 
-	env, err := isolate(parent)
+	env, err := isolate(parent, "")
 
 	if err != nil {
 		t.Fatal(err)
@@ -265,14 +265,16 @@ func TestCDKSynthesizeSortsTheFailures(t *testing.T) {
 	}
 }
 
-// BR1.2: an app that is not TypeScript with CDK v2 is skipped without running
-// anything.
+// U3 BR1.3: an app that is neither TypeScript nor Python with CDK v2 is
+// skipped without running anything.
 func TestCDKSynthesizeSkipsOtherApps(t *testing.T) {
 	for _, tc := range []struct {
 		app    App
 		reason FailureReason
 	}{
-		{App{Dir: "py", Language: Python, CDKMajor: 2}, ReasonUnsupportedLanguage},
+		{App{Dir: "java", Language: Other, CDKMajor: 2}, ReasonUnsupportedLanguage},
+		{App{Dir: "py1", Language: Python, CDKMajor: 1}, ReasonCDKV1},
+		{App{Dir: "py0", Language: Python}, ReasonUnknownVersion},
 		{App{Dir: "v1", Language: TypeScript, CDKMajor: 1}, ReasonCDKV1},
 		{App{Dir: "v0", Language: TypeScript}, ReasonUnknownVersion},
 	} {

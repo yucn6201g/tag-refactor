@@ -42,8 +42,8 @@ new_flags:
   --pr-body-file:  {type: path, requires: --pr, max_size: 1MiB}
 input_errors:      # 書き換えの前に確かめ、終了コード 1
   - --pr-* without --pr
-  - --cdk-app not a folder under --dir, or no cdk.json in it
-  - --synth-timeout not a duration, or < 1s
+  - --cdk-app points outside --dir (including ".."), or is not in the list of discovered apps
+  - --synth-timeout not readable as a duration, or < 1s
   - --pr-body-file missing, unreadable, larger than 1 MiB, not UTF-8, or longer than 60,000 characters (U2 BR1.1)
   - --pr-body-file has the shape of a GitHub token, an AWS access key ID or a URL with a password (U2 NFR1.6, NQ2-Q1)
   - --pr-branch not a valid git branch name
@@ -72,7 +72,7 @@ body:
     - changed_files: "## Changed files (N)" + one bullet per file: "`<path>` (<CDK, TypeScript | CDK, Python | CloudFormation | Terraform>)"
     - to_fix_by_hand: "## To fix by hand (N)" + one bullet per item: "`<file>:<line>` <resource name>, <key>: <reason text>"   # 0 件なら節ごと省く
   override: --pr-body-file   # ファイルの中身のあとに to_fix_by_hand の節を足す。ファイルの中身は変えない
-  resource_name: CloudFormation と CDK は論理 ID(CDK はコンストラクトのパスの最後の要素)、Terraform はアドレス、synth に失敗したか外したアプリはアプリのフォルダーとリソースの種類
+  resource_name: CloudFormation と CDK は論理 ID(CDK はコンストラクトのパスの最後の要素)、Terraform はアドレス、synth に失敗したか外したアプリ、またはどのアプリのものか分からないリソースも、ほかと同じく論理 ID(無ければ ARN の最後の要素)で、アプリのフォルダーは書かない(U3 BR3.2)
   language: --lang
 reason_text: |
   ManualReason ごとの、表示の文の一覧(カタログ)にある固定の文だけを使う。
@@ -164,6 +164,7 @@ Synthesizer:
     # Language が other のアプリと、CDKMajor が 1 か 0 のアプリは、synth を動かさずに Failure を返し、AppSkipped を送る。
     # それ以外は AppStarted を送り、終わったら AppDone か AppFailed を送る。
     # AppsWaiting は、Discover のあとに IacWriter が、synth するアプリの一覧で1回送る。
+    # 外すアプリは、IacWriter が AppsWaiting の前に Synthesize に渡す。AppSkipped は Synthesize が送る(BR1.4 の順番)。
 App:       {Dir, Language: typescript | python | other, CDKMajor: 1 | 2 | 0}
 detection: |
   Language は cdk.json の "app" の命令から決める(R-12 の2回目)。
@@ -183,7 +184,10 @@ Synthesis:
   Stacks: [Stack]
   TraceSites: [{ConstructPath, File, Line}]   # WithTrace のときだけ。作成の記録から読んだ、ソースの箇所(R-05)。File はアプリのフォルダーからの相対、/ 区切り
   Elapsed: duration
-  Failure: {Reason: toolMissing | needsAWS | timeout | cdkV1 | unknownVersion | unsupportedLanguage | synthError, Tool: string, Detail: string} | null
+  Failure: {Reason: toolMissing | toolTooOld | needsAWS | timeout | cdkV1 | unknownVersion | unsupportedLanguage | synthError, Tool: string, Detail: string} | null
+    # toolTooOld は Python が最小の版(3.10)より古いとき(Tool は python)。
+    # Tool は cdk、node、python のほか、Python のアプリで app の命令の最初の語が python 系でなく見つからないときの、
+    # その語の最後の要素(toolName。例 pipenv)。
     # Detail は外のプログラムの出力から作る。端末には --debug のときだけ出し、プルリクエストの本文には入れない(X2)
 Stack:
   Name: string      # 実際にデプロイされるスタック名(クラウドアセンブリの manifest の stackName。無ければ成果物の ID)。
@@ -207,8 +211,9 @@ owner: U3(最小の形は U1)
 Analyzer:
   Analyze(ctx, App, AnalyzeRequest) -> (Analysis, error)
     # アプリごとに1回、補助のプログラムを起動する(C4)。
-  Recheck(ctx, App, edited map[string][]byte) -> (Analysis, error)
+  Recheck(ctx, App, edited map[string][]byte, traces []TraceSite) -> (Analysis, error)
     # 書き換え後の内容を渡して読み直す。ディスクには書かない(ADR-005、CD-Q1)。
+    # traces は Analyze に渡したものと同じ Synthesis.TraceSites(無ければ空)。
 AnalyzeRequest:
   ConstructPaths: [string]                      # synth から得た、対象のリソースのコンストラクトのパス
   TraceSites: [{ConstructPath, File, Line}]     # Synthesis.TraceSites をそのまま渡す(無ければ空)
@@ -264,6 +269,9 @@ insert_rules: |
 construct_rules: |
   ConstructSite は、ソースをたどって見つけたもの(From: source)を先に使う。
   ソースで見つからないコンストラクトのパスだけ、TraceSites の箇所(From: trace)を使う(ADR-004、R-05)。
+  Recheck でも同じ優先順位で traceSites を使う。recheck のときだけ、記録の行に new の式が無ければ、
+  2つ目の引数の文字列がパスの最後の要素と同じで、行が最も近い new の式を使う。
+  書き換えのあとの比べ方では、From が trace の作成の箇所はパスとファイルだけを比べる(書き換えで行がずれても食い違いにしない)。
 owner: U4(TypeScript と共通の形)、U5(Python)
 ```
 
@@ -276,7 +284,7 @@ request:
   mode: analyze | recheck
   appDir: string                     # 絶対パス
   constructPaths: [string]           # analyze のとき
-  traceSites: [{constructPath, file, line}]   # analyze のとき(無ければ空)
+  traceSites: [{constructPath, file, line}]   # analyze と recheck のとき(無ければ空)
   files: [{path: string, content: string}]    # recheck のとき。content は UTF-8 の書き換え後の内容
 response:
   version: 1
@@ -341,6 +349,9 @@ cdk.ProgressSink:                      # package internal/cdk
   AppDone(app string, elapsed duration)
   AppFailed(app string, elapsed duration, reason string)   # reason は Failure.Reason の値。Detail は渡さない
   AppSkipped(app string, reason string)                    # unsupportedLanguage、cdkV1、unknownVersion
+cdk.ToolFailureSink:                   # package internal/cdk。任意の口(実装しなくてもよい。cdk.ProgressSink の5つのメソッドは変えない)
+  AppToolFailed(app string, elapsed duration, reason string, tool string)
+    # 失敗した道具の名前(Failure.Tool)を渡す。Synthesize は、sink がこの口も実装していれば AppFailed の代わりにこれを送る
 pullrequest.ProgressSink:              # package internal/pullrequest
   Step(step string, status string, detail string)
     # step: checked | branch | commit | push | create
@@ -373,6 +384,7 @@ ManualReason (add):
   cdkUnsupportedShape     # 対応していない書き方
 failure_to_manual:        # Synthesis.Failure.Reason と CDKApps.Status から ManualReason への対応(R-08)
   toolMissing:         {status: failed,  manual: cdkAppFailed}
+  toolTooOld:          {status: failed,  manual: cdkAppFailed}   # 道具は python
   needsAWS:            {status: failed,  manual: cdkAppFailed}
   timeout:             {status: failed,  manual: cdkAppFailed}
   synthError:          {status: failed,  manual: cdkAppFailed}
@@ -455,6 +467,17 @@ owner: U1(欄と照合)、U6(理由の文)
 |---|---|---|
 | 2026-11-09、U2 の非機能の要件 | X1 の `input_errors` に、本文の 60,000 文字の上限(U2 の BR1.1)と、本文のトークンなどの形(U2 の NFR1.6)を足した。X2 の `never_contains` の対象を、tag-refactor が組み立てる部分に限ると書き足した | U2 の機能の設計と非機能の要件の回答(NQ2-Q1 = A)に合わせるため。X2 の `redaction` はもともと利用者の本文を変えないとしており、`never_contains` と食い違っていた |
 | 2026-11-14、U2 の Code Generation | C1 の `Plan` に `TitleRedacted`(伏せ字でタイトルが変わったら true)と `BodyNotices`(本文で知らせる形の一覧)を足した。C1 の `PublishOutcome` の `ResumeCommands` は使わずに消し、続きの命令は `ResumeCommands(plan, title, out, sh)` の関数で、シェルごとに1行ずつ作るようにした | U2 の非機能の設計(logical-components.md、security-design.md の4節)に合わせるため。タイトルの伏せ字と本文の知らせは、書き換えの前に cli が標準エラーに出すので、Check の結果に持たせる必要があった。続きの命令は、PowerShell と sh で引用の仕方が違うので、表示の直前に選んだシェルで作る |
+| 2026-11-16、U3 の Code Generation | C2 の `Failure.Reason` に `toolTooOld`(Python が最小の版より古い)を足した | U3 の非機能の設計(security-design.md の3節、NFR6.16)。最小の版は 3.10(`py-minimal` の `aws-cdk-lib` 2.276.0 の Requires-Python) |
+| 2026-11-16、U3 の Code Generation | C2 の `Options.WithTrace` と `Synthesis.TraceSites` を、契約のとおりコードに足した。作成の記録は、スタックの成果物の `additionalMetadataFile` の `aws:cdk:creationStack` の `data` から読む | 今のコードに無かった部分の実装(security-design.md の5節、計画の「最初の確かめの結果」) |
+| 2026-11-16、U3 の Code Generation | C2 の `Failure.Tool` に、`cdk`、`node`、`python` のほか、Python のアプリで app の命令の最初の語が python 系でなく見つからないときの、その語の最後の要素(`toolName`。例 `pipenv`)を足した | security-design.md の2節 |
+| 2026-11-16、U3 の Code Generation | C2 に注記を足した: 外すアプリは IacWriter が `AppsWaiting` の前に `Synthesize` に渡し、`AppSkipped` は `Synthesize` が送る | BR1.4 の順番(外したアプリの知らせが待ちの一覧より前に来る) |
+| 2026-11-16、U3 の Code Generation | C2 の needsAWS の一覧は変えない(`ts-lookup` と `ts-profile` の実際の標準エラーが一覧の文に当たった) | 計画の手順 4 の確かめ。`ts-profile` は `profile` だけでは synth が通るので、AWS の値を引く形にした |
+| 2026-11-16、U3 の Code Generation | C3 の `Recheck` を `Recheck(ctx, App, edited, traces []TraceSite)` に変えた。`construct_rules` に「Recheck でも同じ優先順位で `traceSites` を使う。recheck のときだけ、記録の行に `new` の式が無ければ、2つ目の引数の文字列がパスの最後の要素と同じで行が最も近い `new` の式を使う」と「書き換えのあとの比べ方では、From が trace の作成の箇所はパスとファイルだけを比べる」を足した | security-design.md の5節(BR4.4)。書き換えで行がずれても、trace 由来の作成の箇所を食い違いにしないため |
+| 2026-11-16、U3 の Code Generation | C4 の要求の `traceSites` の説明を「analyze と recheck のとき」に直した。JSON の形と `version` は変えない | 同上 |
+| 2026-11-16、U3 の Code Generation | C6 に任意の口 `cdk.ToolFailureSink`(`AppToolFailed(app, elapsed, reason, tool)`)を足した。`cdk.ProgressSink` の5つのメソッドは変えない | 表示で、失敗した道具の名前と入れ方を示すため(security-design.md の10節) |
+| 2026-11-16、U3 の Code Generation | C7 の `failure_to_manual` に `toolTooOld: {status: failed, manual: cdkAppFailed}`(道具 python)を足した | `toolTooOld` を足したため |
+| 2026-11-16、U3 の Code Generation | X1 の `input_errors` の `--cdk-app` の誤りを「`--dir` の外を指す(`..` を含む)、または発見したアプリの一覧に無い」と書き直した。`--synth-timeout` の誤り(1 秒未満か、時間として読めない)を足した | security-design.md の7節と8節(NFR2.7、NFR6.21) |
+| 2026-11-16、U3 の Code Generation | X2 の `resource_name` を「どのアプリのものか分からないリソースも、ほかと同じく論理 ID(無ければ ARN の最後の要素)で、アプリのフォルダーは書かない」に直した | BR3.2(FD3-Q3)。どのアプリかを項目に書かないため |
 
 ## 未決事項
 
