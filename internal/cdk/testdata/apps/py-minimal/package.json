@@ -1,0 +1,8 @@
+{
+  "name": "py-minimal",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "aws-cdk": "2.1148.1"
+  }
+}

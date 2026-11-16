@@ -17,25 +17,24 @@ import (
 func TestCDKProgressLines(t *testing.T) {
 	p, out, errOut := newPrinter()
 
-	p.AppsWaiting([]string{"infra"})
+	// U3 BR1.4: the skipped apps come before the apps to synthesize.
+	p.AppSkipped("py", "unsupportedLanguage")
+	p.AppSkipped("odd", "somethingNew")
+	p.AppsWaiting([]string{"api", "infra", "web"})
 	p.AppsWaiting(nil)
 	p.AppStarted("infra", "typescript")
 	p.AppDone("infra", 42*time.Second+300*time.Millisecond)
 	p.AppFailed("api", 12*time.Second, "needsAWS")
 	p.AppFailed("web", time.Second, "helper")
-	p.AppSkipped("py", "unsupportedLanguage")
-	p.AppSkipped("second", iac.ReasonNotInU1)
-	p.AppSkipped("odd", "somethingNew")
 
-	want := "CDK apps to synthesize: infra (waiting)\n" +
+	want := "py: skipped: neither TypeScript nor Python\n" +
+		"odd: skipped: somethingNew\n" +
+		"CDK apps to synthesize: api, infra, web (waiting)\n" +
 		"infra: synthesizing (TypeScript)\n" +
 		"infra: done (42s)\n" +
 		"api: failed (12s): AWS credentials needed\n" +
 		"  Fix: run cdk synth once where AWS credentials are set, so that cdk.context.json keeps the values it looked up, then run iac again\n" +
-		"web: failed (1s): its sources could not be read; add --debug to see why\n" +
-		"py: skipped: not TypeScript\n" +
-		"second: skipped: this version takes the first CDK app only\n" +
-		"odd: skipped: somethingNew\n"
+		"web: failed (1s): its sources could not be read; add --debug to see why\n"
 	if errOut.String() != want || out.Len() != 0 {
 		t.Fatalf("stderr:\n%s\nstdout:\n%s", errOut.String(), out.String())
 	}

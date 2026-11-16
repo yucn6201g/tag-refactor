@@ -28,6 +28,10 @@ aidlc/diagnostics/
 # hand writes here (the tests synth into temporary folders).
 internal/cdk/testdata/apps/*/node_modules/
 internal/cdk/testdata/apps/*/cdk.out/
+# The Python test CDK app: python -m venv makes .venv, and Python writes
+# __pycache__ next to the sources when the app is synthesized by hand.
+internal/cdk/testdata/apps/*/.venv/
+internal/cdk/testdata/apps/**/__pycache__/
 
 # Go build and test output
 /tag-refactor

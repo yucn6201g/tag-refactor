@@ -43,6 +43,10 @@ type progress struct {
 	// drawn is the number of lines of the table on the screen.
 	drawn    int
 	lastDraw time.Time
+	// apps, when not nil, makes this the table of the CDK apps of iac, by
+	// folder (v0.2.0 U3 BR5.1).
+	apps  []string
+	byApp map[string]*appRow
 }
 
 func (p *Printer) elapsed() string {
@@ -152,18 +156,21 @@ func (p *Printer) setRegion(region string, st regionProgress) bool {
 // lines that follow start below it. It is called before results, errors and
 // the final lines.
 func (p *Printer) endProgress() {
-	if p.progress == nil {
-		return
+	if p.progress != nil {
+		if p.redraw && p.progress.drawn > 0 {
+			p.drawTable(true)
+		}
+		p.progress = nil
 	}
-	if p.redraw && p.progress.drawn > 0 {
-		p.drawTable(true)
-	}
-	p.progress = nil
+	p.endAppProgress()
 }
 
 // tableLines renders the progress table.
 func (p *Printer) tableLines() []string {
 	pr := p.progress
+	if pr.apps != nil {
+		return p.appTableLines()
+	}
 	if pr.discovery {
 		return []string{p.tr("progress.tableDiscovery", pr.discoveryDone, len(pr.regions), p.elapsed())}
 	}

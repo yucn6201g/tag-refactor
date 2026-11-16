@@ -3,7 +3,9 @@
 #
 # v0.2.0 U1: the jobs that run the Go tests install Node.js and the test CDK app
 # (npm ci), because the tests run cdk synth and the helper on all three systems
-# and fail when the tools are missing (NFR8.1). The token of the test-only
+# and fail when the tools are missing (NFR8.1). U3 adds Python and the .venv of
+# the Python test CDK app to the jobs that run all the Go tests (NFR8.3); the
+# github-pr job runs one test and needs neither. The token of the test-only
 # repository reaches one step only: the GitHub integration test of github-pr
 # (security design §6).
 name: ci
@@ -31,6 +33,10 @@ env:
   PRETTIER_VERSION: 3.9.10
   # The test CDK app the tests copy; npm ci installs it before the tests.
   CDK_TEST_APP: internal/cdk/testdata/apps/ts-minimal
+  # The Python test CDK app (v0.2.0 U3 NFR8.3): its .venv and its cdk are
+  # installed before the tests, with the Python of the lint job.
+  PY_TEST_APP: internal/cdk/testdata/apps/py-minimal
+  PYTHON_VERSION: "3.13"
 
 defaults:
   run:
@@ -57,10 +63,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+          cache-dependency-path: |
+            ${{ env.CDK_TEST_APP }}/package-lock.json
+            ${{ env.PY_TEST_APP }}/package-lock.json
       - name: Install the test CDK app
         working-directory: ${{ env.CDK_TEST_APP }}
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ${{ env.PY_TEST_APP }}/requirements.txt
+      - name: Install the Python test CDK app
+        working-directory: ${{ env.PY_TEST_APP }}
+        run: |
+          python -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          "$py" -m pip install --disable-pip-version-check --only-binary=:all: --no-input -r requirements.txt
+          "$py" -m pip check
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Test (acceptance, unit, performance, output guard, IAM example)
         env:
           # As the published binaries (U8 NFR9.12); only the race job turns cgo on.
@@ -84,10 +105,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+          cache-dependency-path: |
+            ${{ env.CDK_TEST_APP }}/package-lock.json
+            ${{ env.PY_TEST_APP }}/package-lock.json
       - name: Install the test CDK app
         working-directory: ${{ env.CDK_TEST_APP }}
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ${{ env.PY_TEST_APP }}/requirements.txt
+      - name: Install the Python test CDK app
+        working-directory: ${{ env.PY_TEST_APP }}
+        run: |
+          python -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          "$py" -m pip install --disable-pip-version-check --only-binary=:all: --no-input -r requirements.txt
+          "$py" -m pip check
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Test with the race detector
         env:
           CGO_ENABLED: "1"
@@ -107,10 +143,25 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: ${{ env.CDK_TEST_APP }}/package-lock.json
+          cache-dependency-path: |
+            ${{ env.CDK_TEST_APP }}/package-lock.json
+            ${{ env.PY_TEST_APP }}/package-lock.json
       - name: Install the test CDK app
         working-directory: ${{ env.CDK_TEST_APP }}
         run: npm ci --ignore-scripts --no-audit --no-fund
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: ${{ env.PY_TEST_APP }}/requirements.txt
+      - name: Install the Python test CDK app
+        working-directory: ${{ env.PY_TEST_APP }}
+        run: |
+          python -m venv .venv
+          if [ "$RUNNER_OS" = "Windows" ]; then py=.venv/Scripts/python.exe; else py=.venv/bin/python; fi
+          "$py" -m pip install --disable-pip-version-check --only-binary=:all: --no-input -r requirements.txt
+          "$py" -m pip check
+          npm ci --ignore-scripts --no-audit --no-fund
       - name: Measure statement coverage of cmd and internal
         run: |
           go test -mod=readonly -coverpkg=./cmd/tag-refactor/...,./internal/... -coverprofile=coverage.out ./cmd/tag-refactor/... ./internal/...

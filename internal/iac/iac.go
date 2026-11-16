@@ -26,6 +26,12 @@ type Request struct {
 	// Progress receives the states of the CDK apps (v0.2.0 contract C6). Nil
 	// shows nothing.
 	Progress cdk.ProgressSink
+	// CDKApps are the folders of the CDK apps to use, relative to Dir
+	// (--cdk-app); empty uses every app found below Dir (v0.2.0 U3 BR1.2).
+	CDKApps []string
+	// SynthTimeout is the limit of each cdk synth (--synth-timeout); zero is
+	// cdk.DefaultSynthTimeout (U3 NFR3.11).
+	SynthTimeout time.Duration
 }
 
 // ManualReason says why a change is left to be fixed by hand (rules.md).
@@ -134,11 +140,6 @@ const (
 	CDKAppSkipped CDKAppStatus = "skipped"
 )
 
-// ReasonNotInU1 is why an app after the first is skipped: U1 synthesizes one
-// app (scalability design). It goes when U3 takes several apps; it puts
-// nothing on the list to fix by hand and does not change the exit code.
-const ReasonNotInU1 = "notInU1"
-
 // CDKApp is one CDK app of the run.
 type CDKApp struct {
 	// Dir is relative to --dir, with /.
@@ -146,10 +147,11 @@ type CDKApp struct {
 	Language string
 	Status   CDKAppStatus
 	Elapsed  time.Duration
-	// FailureReason is a reason of cdk.Failure, "helper" for a failure of the
-	// helper, or ReasonNotInU1.
+	// FailureReason is a reason of cdk.Failure, or "helper" for a failure of
+	// the helper.
 	FailureReason string
-	// Tool is the program the app failed with: cdk, node, typescript or helper.
+	// Tool is the program the app failed with: cdk, node, python, typescript
+	// or helper, or the first word of the app command of a Python app.
 	Tool string
 }
 
@@ -227,7 +229,7 @@ func (r *Result) ExitCode() int {
 		return 2
 	}
 	for _, a := range r.CDKApps {
-		if a.Status != CDKAppDone && a.FailureReason != ReasonNotInU1 {
+		if a.Status != CDKAppDone {
 			return 2
 		}
 	}
@@ -251,7 +253,7 @@ type (
 	}
 	cdkAnalyzer interface {
 		Analyze(ctx context.Context, app cdk.App, req cdk.AnalyzeRequest) (cdk.Analysis, error)
-		Recheck(ctx context.Context, app cdk.App, edited map[string][]byte) (cdk.Analysis, error)
+		Recheck(ctx context.Context, app cdk.App, edited map[string][]byte, traces []cdk.TraceSite) (cdk.Analysis, error)
 	}
 )
 

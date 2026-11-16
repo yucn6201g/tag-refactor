@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +25,24 @@ type iacArgs struct {
 	// (v0.2.0 U2, X1); prGiven names those given on the command line.
 	prBranch, prTitle, prBodyFile string
 	prGiven                       []string
+	// cdkApps and synthTimeout are --cdk-app and --synth-timeout (v0.2.0 U3,
+	// X1). A value of --cdk-app is one folder even with a comma in it.
+	cdkApps      []string
+	synthTimeout string
+}
+
+// minSynthTimeout is the shortest --synth-timeout (U3 NFR6.21).
+const minSynthTimeout = time.Second
+
+// parseSynthTimeout reads --synth-timeout: a duration of Go such as 90s, 10m
+// or 1h30m, of 1s or more. A number without a unit is an error.
+func parseSynthTimeout(s string) (time.Duration, error) {
+	d, err := time.ParseDuration(s)
+	if err != nil || d < minSynthTimeout {
+		return 0, &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--synth-timeout",
+			DetailID: "iac.badSynthTimeout", DetailArgs: []any{s}, HintID: "iac.badSynthTimeoutFix"}
+	}
+	return d, nil
 }
 
 // iacRunner is how the command reaches iac. Its type has no room for an AWS
@@ -42,11 +61,16 @@ const iacLong = "iac reflects the changes of a saved plan in the infrastructure 
 	"without it they count as not managed by IaC. CloudFormation resources are found by their\n" +
 	"aws:cloudformation tags in the plan, their logical ID and their type.\n" +
 	"\n" +
-	"CDK: when the plan has resources made by CloudFormation and --dir holds a CDK app, iac runs cdk synth on\n" +
-	"the first app (TypeScript, CDK v2) to find which construct made each resource, and reads its sources with\n" +
-	"the TypeScript of the app (Node.js 18 or later and the node_modules of the app are needed). This version\n" +
-	"reflects the rename of a key written as a string in Tags.of(x).add('key', 'value'); other ways of writing\n" +
-	"and other changes are listed to fix by hand. cdk synth runs the code of the app: use iac only in\n" +
+	"CDK: when the plan has resources made by CloudFormation and --dir holds CDK apps, iac runs cdk synth on\n" +
+	"every app (TypeScript or Python, CDK v2), one after the other in name order, to find which construct made\n" +
+	"each resource; --cdk-app picks the apps to use instead (a folder relative to --dir; repeat it for more).\n" +
+	"An app that fails does not stop the others. Each cdk synth stops after --synth-timeout (default 10m).\n" +
+	"TypeScript apps need Node.js 18 or later and the node_modules of the app, and their sources are read with\n" +
+	"the TypeScript of the app; when the sources do not show where a resource is made, the app is synthesized\n" +
+	"once more with --debug to find it. Python apps need Python 3.10 or later; the .venv of the app is used\n" +
+	"first. This version reflects the rename of a key written as a string in Tags.of(x).add('key', 'value') of\n" +
+	"TypeScript; other ways of writing, other changes and the resources of Python apps are listed to fix by\n" +
+	"hand. cdk synth runs the code of the app and the packages it loads, of npm or of Python: use iac only in\n" +
 	"repositories you trust. cdk synth gets no AWS and no GitHub credentials; an app that needs AWS to synth\n" +
 	"fails, with how to keep the values it looks up in cdk.context.json.\n" +
 	"\n" +
@@ -103,6 +127,8 @@ func (a *app) iacCommand() *cobra.Command {
 	f.StringVar(&o.prBranch, "pr-branch", "", "branch of the pull request (with --pr; default tag-refactor/iac-<date>-<time>Z, in UTC)")
 	f.StringVar(&o.prTitle, "pr-title", "", "title of the pull request and the commit message (with --pr; one line of up to 256 characters)")
 	f.StringVar(&o.prBodyFile, "pr-body-file", "", "file put first in the body of the pull request as it is (with --pr; UTF-8, up to 60,000 characters)")
+	f.StringArrayVar(&o.cdkApps, "cdk-app", nil, "folder of a CDK app to use, relative to --dir; repeat it for more (default every app below --dir)")
+	f.StringVar(&o.synthTimeout, "synth-timeout", "10m", "limit of each cdk synth, such as 90s or 10m (1s or more)")
 	return cmd
 }
 
@@ -118,6 +144,10 @@ func (a *app) runIac(ctx context.Context, o iacArgs) error {
 	case o.dir == "":
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: "--dir",
 			DetailID: "iac.needsDir", HintID: "iac.notFolderFix"}
+	}
+	synthTimeout, err := parseSynthTimeout(o.synthTimeout)
+	if err != nil {
+		return err
 	}
 	if !o.pr && len(o.prGiven) > 0 {
 		return &errkind.Error{Kind: errkind.InvalidInput, Reason: errkind.ReasonUsage, Subject: o.prGiven[0],
@@ -138,7 +168,6 @@ func (a *app) runIac(ctx context.Context, o iacArgs) error {
 	if o.pr {
 		o.write = true
 		publisher = a.publisher()
-		var err error
 		if plan, err = a.checkPullRequest(ctx, publisher, o); err != nil {
 			return err
 		}
@@ -147,7 +176,8 @@ func (a *app) runIac(ctx context.Context, o iacArgs) error {
 	if run == nil {
 		run = iac.NewWithOptions(iac.Options{Runner: a.deps.Exec, Now: a.deps.Now}).Run
 	}
-	res, err := run(ctx, iac.Request{PlanPath: o.plan, Dir: o.dir, TFStatePath: o.tfState, Write: o.write, Progress: a.p})
+	res, err := run(ctx, iac.Request{PlanPath: o.plan, Dir: o.dir, TFStatePath: o.tfState, Write: o.write, Progress: a.p,
+		CDKApps: o.cdkApps, SynthTimeout: synthTimeout})
 	if err != nil {
 		return err
 	}

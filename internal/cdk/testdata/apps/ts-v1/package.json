@@ -1,0 +1,9 @@
+{
+  "name": "ts-v1",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@aws-cdk/core": "*",
+    "@aws-cdk/aws-s3": "*"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "stage": "infrastructure-design",
+  "unit": "u3-cdk-synth",
+  "upstream_ids": ["NFR1.11", "NFR1.12", "NFR1.13", "NFR2.5", "NFR2.6", "NFR2.7", "NFR3.11", "NFR3.12", "NFR3.13", "NFR3.14", "NFR3.15", "NFR3.16", "NFR3.17", "NFR4.5", "NFR5.3", "NFR6.16", "NFR6.17", "NFR6.18", "NFR6.19", "NFR6.20", "NFR6.21", "NFR8.3", "NFR8.4", "NFR10.4", "NFR10.5"],
+  "coverage": [
+    { "id": "NFR1.11", "status": "OK", "target": "cicd-pipeline.md section 1 (trace_test.go in test on three systems, race, coverage and release build)" },
+    { "id": "NFR1.12", "status": "OK", "target": "cicd-pipeline.md section 1 (home_test.go and --debug line tests; the Unix link test is skipped on Windows)" },
+    { "id": "NFR1.13", "status": "OK", "target": "cicd-pipeline.md section 1 (cli acceptance tests with a fake cdk)" },
+    { "id": "NFR2.5", "status": "OK", "target": "cicd-pipeline.md section 1 and section 2.2 (withVenv and environment tests against the py-minimal .venv; the CI steps call the .venv Python directly and leave PATH and VIRTUAL_ENV of the job unchanged) and section 6 (no AWS credentials in any workflow)" },
+    { "id": "NFR2.6", "status": "OK", "target": "cicd-pipeline.md section 1 (.venv selection test and the unchanged .venv after a real synth of py-minimal)" },
+    { "id": "NFR2.7", "status": "OK", "target": "cicd-pipeline.md section 1 (--cdk-app acceptance tests with links and junctions on three systems)" },
+    { "id": "NFR3.11", "status": "OK", "target": "cicd-pipeline.md section 1 (--synth-timeout tests with the fake cdk of TestMain)" },
+    { "id": "NFR3.12", "status": "OK", "target": "cicd-pipeline.md section 1 (README formula checked by a person in review; no CI job)" },
+    { "id": "NFR3.13", "status": "OK", "target": "cicd-pipeline.md section 1 (count, traceSites, compareAnalyses and Recheck tests with ts-trace linked to the ts-minimal node_modules)" },
+    { "id": "NFR3.14", "status": "OK", "target": "cicd-pipeline.md section 1 (version check tests with the swapped runner)" },
+    { "id": "NFR3.15", "status": "OK", "target": "cicd-pipeline.md section 1 (discovery tests that count the folders read)" },
+    { "id": "NFR3.16", "status": "OK", "target": "cicd-pipeline.md section 1 (hang tests for the version check and synth on three systems)" },
+    { "id": "NFR3.17", "status": "OK", "target": "cicd-pipeline.md section 1 (count tests, Recheck with the same TraceSites) and section 5 (time of the added real synths)" },
+    { "id": "NFR4.5", "status": "OK", "target": "cicd-pipeline.md section 1 (cleanup and interruption tests)" },
+    { "id": "NFR5.3", "status": "OK", "target": "cicd-pipeline.md section 1 (earlier acceptance tests keep running) and section 4 (stages and gates unchanged, ci-gate needs unchanged)" },
+    { "id": "NFR6.16", "status": "OK", "target": "cicd-pipeline.md section 1 (TestMinPythonMatchesTheTestApp reads the METADATA in the CI .venv) and section 2.1 (PYTHON_VERSION 3.13, same as lint, Q1 = A)" },
+    { "id": "NFR6.17", "status": "OK", "target": "cicd-pipeline.md section 1 (appCommand table, spaced and dollar folder synth, TestQuotedArgReachesCmd on Windows with Go stable and oldstable) and section 7 (what to do when it fails)" },
+    { "id": "NFR6.18", "status": "OK", "target": "cicd-pipeline.md section 2.5 (Dependabot pip with groups and npm for py-minimal, weekly, chore(deps)) and section 3 (Dependabot and requirements.txt checks)" },
+    { "id": "NFR6.19", "status": "OK", "target": "cicd-pipeline.md section 2.2 and section 2.4 (setup-python pinned to 6d4fd22b20465ccc0f7354476588e8df7c9ca0e0, pip --only-binary=:all:, pip check, npm ci --ignore-scripts, before go test) and section 3 (workflow test)" },
+    { "id": "NFR6.20", "status": "OK", "target": "cicd-pipeline.md section 1 (clock unit tests and the -race test in the race job)" },
+    { "id": "NFR6.21", "status": "OK", "target": "cicd-pipeline.md section 1 (parseSynthTimeout unit tests)" },
+    { "id": "NFR8.3", "status": "OK", "target": "cicd-pipeline.md section 2.1 to section 2.4 (PY_TEST_APP and PYTHON_VERSION in ci.yml and release.yml env; Python steps in test, race, coverage and release build; github-pr left out; ci-gate needs unchanged), section 3 (workflow test of the jobs whose go test step has no -run), section 4 and section 5 (time per system)" },
+    { "id": "NFR8.4", "status": "OK", "target": "cicd-pipeline.md section 1 (needsAWS tests with ts-lookup and ts-profile), section 3 (no AWS env keys or credential actions) and section 6 (no AWS credentials, permissions unchanged)" },
+    { "id": "NFR10.4", "status": "OK", "target": "cicd-pipeline.md section 1 (progress table and clock tests, -race test in the race job)" },
+    { "id": "NFR10.5", "status": "OK", "target": "cicd-pipeline.md section 1 (--lang ja and --lang en acceptance tests)" }
+  ]
+}

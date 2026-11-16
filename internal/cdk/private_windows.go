@@ -10,9 +10,10 @@ import (
 
 // privateDir makes a temporary folder only the user can enter: its access list
 // allows the user alone and inherits nothing from above, wherever TMP points
-// (security design §5).
-func privateDir() (string, error) {
-	dir, err := os.MkdirTemp("", "tag-refactor-helper-")
+// (security design §5). It is made in base (empty: the temporary folder of the
+// system).
+func privateDir(base string) (string, error) {
+	dir, err := os.MkdirTemp(base, "tag-refactor-helper-")
 	if err != nil {
 		return "", err
 	}

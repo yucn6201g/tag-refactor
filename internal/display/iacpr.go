@@ -1,12 +1,10 @@
 package display
 
 import (
-	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/yucn6201g/tag-refactor/internal/cdk"
-	"github.com/yucn6201g/tag-refactor/internal/iac"
 	"github.com/yucn6201g/tag-refactor/internal/pullrequest"
 	"github.com/yucn6201g/tag-refactor/internal/redact"
 )
@@ -41,8 +39,7 @@ var iacPRCatalog = map[string]message{
 	"iac.cdkWhyHelper":         {en: "its sources could not be read; add --debug to see why", ja: "ソースを読めませんでした。--debug を付けると理由が分かります"},
 	"iac.cdkWhyV1":             {en: "CDK v1", ja: "CDK v1 です"},
 	"iac.cdkWhyUnknownVersion": {en: "the version of CDK is not known", ja: "CDK の版が分かりません"},
-	"iac.cdkWhyNotTypeScript":  {en: "not TypeScript", ja: "TypeScript ではありません"},
-	"iac.cdkWhyNotInU1":        {en: "this version takes the first CDK app only", ja: "この版は最初の CDK のアプリだけを扱います"},
+	"iac.cdkWhyNotTypeScript":  {en: "neither TypeScript nor Python", ja: "TypeScript でも Python でもありません"},
 	"iac.cdkWritten": {en: "A deploy of the CDK app then gives the same tags; see it first with cdk diff.",
 		ja: "CDK のアプリをデプロイすると同じタグになります。先に cdk diff で確かめてください。"},
 
@@ -122,7 +119,7 @@ var cdkWhy = map[string]string{
 	string(cdk.ReasonCDKV1):               "iac.cdkWhyV1",
 	string(cdk.ReasonUnknownVersion):      "iac.cdkWhyUnknownVersion",
 	string(cdk.ReasonUnsupportedLanguage): "iac.cdkWhyNotTypeScript",
-	iac.ReasonNotInU1:                     "iac.cdkWhyNotInU1",
+	string(cdk.ReasonToolTooOld):          "iac.cdkWhyToolTooOld",
 }
 
 func (p *Printer) why(reason string) rawString {
@@ -145,40 +142,6 @@ func languageName(language string) string {
 		return "Python"
 	}
 	return language
-}
-
-// AppsWaiting implements cdk.ProgressSink.
-func (p *Printer) AppsWaiting(apps []string) {
-	if len(apps) == 0 {
-		return
-	}
-	p.locked(func() { p.say(styleNone, "iac.cdkWaiting", strings.Join(apps, ", ")) })
-}
-
-// AppStarted implements cdk.ProgressSink.
-func (p *Printer) AppStarted(app, language string) {
-	p.locked(func() { p.say(styleNone, "iac.cdkStarted", app, languageName(language)) })
-}
-
-// AppDone implements cdk.ProgressSink.
-func (p *Printer) AppDone(app string, elapsed time.Duration) {
-	p.locked(func() { p.say(styleNone, "iac.cdkDone", app, p.seconds(elapsed)) })
-}
-
-// AppFailed implements cdk.ProgressSink. Synth that needs AWS gets the way out
-// on the next line (BR1.5).
-func (p *Printer) AppFailed(app string, elapsed time.Duration, reason string) {
-	p.locked(func() {
-		p.say(styleRemove, "iac.cdkFailed", app, p.seconds(elapsed), p.why(reason))
-		if reason == string(cdk.ReasonNeedsAWS) {
-			p.say(styleNone, "iac.cdkNeedsAWSFix")
-		}
-	})
-}
-
-// AppSkipped implements cdk.ProgressSink.
-func (p *Printer) AppSkipped(app, reason string) {
-	p.locked(func() { p.say(styleChange, "iac.cdkSkipped", app, p.why(reason)) })
 }
 
 // stepWord is the word of a step of the pull request.

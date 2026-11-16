@@ -1,0 +1,15 @@
+{
+  "name": "ts-trace",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "@types/node": "*",
+    "aws-cdk": "*",
+    "ts-node": "*",
+    "typescript": "*"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "*",
+    "constructs": "*"
+  }
+}

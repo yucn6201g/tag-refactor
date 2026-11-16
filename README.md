@@ -363,23 +363,31 @@ Windows PowerShell 5.1 のリダイレクトは UTF-16 で書くので、`terraf
 | オプション | 意味 |
 |---|---|
 | `--plan` | 必須。`plan --out` で保存した変更案。 |
-| `--dir` | 必須。IaC のソースのフォルダー。CloudFormation のテンプレート(`.yaml`、`.yml`、`.json`、`.template`)は下のフォルダーも探し、Terraform の `.tf` はこのフォルダーの直下だけを読みます(ルートモジュールを渡してください)。`.git`、`.terraform`、`node_modules`、`cdk.out` の中と、シンボリックリンク、ジャンクションは見ません。 |
+| `--dir` | 必須。IaC のソースのフォルダー。CloudFormation のテンプレート(`.yaml`、`.yml`、`.json`、`.template`)は下のフォルダーも探し、Terraform の `.tf` はこのフォルダーの直下だけを読みます(ルートモジュールを渡してください)。`.git`、`.terraform`、`node_modules`、`cdk.out` の中と、シンボリックリンク、ジャンクションは見ません。CDK のアプリ(`cdk.json` のあるフォルダー)を探すときは、`.venv` と `venv` の中も見ません。 |
 | `--tf-state` | `terraform show -json`(引数なし)の出力。ARN が完全に同じリソースを Terraform のリソースとします。渡さないと、Terraform のリソースは「管理されていない」に数えます。state のファイルそのものや、plan のファイルの出力は受け付けません。 |
 | `--write` | ファイルを書き換えます。なければ差分だけです。 |
 | `--pr` | `--write` を含みます。書き換えたファイルのプルリクエストを、`git` と `gh` で作ります(下の「プルリクエストの作成」)。 |
 | `--pr-branch` | `--pr` と一緒に使います。作るブランチの名前。既定は `tag-refactor/iac-<日付>-<時刻>Z`(UTC の時刻)。空の値、`-` で始まる名前、`git check-ref-format --branch` がそのまま返さない名前(`@{-1}`、`a..b` など)は受け付けません。 |
 | `--pr-title` | `--pr` と一緒に使います。プルリクエストのタイトルとコミットのメッセージ。1〜256 文字の1行です。ARN の形と 12 桁の数字は `<redacted>` に置き換え、置き換えたことを1行で知らせます(256 文字は置き換えたあとで数えます)。 |
 | `--pr-body-file` | `--pr` と一緒に使います。本文の先頭に、そのまま入れるファイル。ふつうのファイルで、UTF-8、1 MiB 以下、60,000 文字以下にしてください。相対のパスは、今いるフォルダーから数えます(`--dir` からではありません)。空の値は受け付けません。 |
+| `--cdk-app` | synth する CDK のアプリを選びます。`--dir` からの相対で、`cdk.json` のあるフォルダーを指定します(`infra/app`。繰り返して複数を指定。コンマでは分けません)。指定がなければ、見つかったすべてのアプリを使います。`--dir` の外を指す値(`..` を含む)や、見つかったアプリの一覧に無い値(`node_modules`、`.venv`、リンクの下を含む)は、何も動かさずに終了コード 1 で止まります。Windows では大文字と小文字を区別せず、`\` も使えます。 |
+| `--synth-timeout` | `cdk synth` 1回の上限。`90s`、`10m`、`1h30m` のように 1 秒以上で指定します。既定は `10m` です。 |
 | `--lang`、`--debug` | ほかのコマンドと同じです。`--profile` はありません。 |
 
-**CDK のアプリ(v0.2.0 の最小の形)**
+**CDK のアプリ**
 
-- 変更案に `aws:cloudformation:stack-name` のタグのリソースがあり、`--dir` の下に `cdk.json` のあるフォルダーがあるとき、名前の順で最初のアプリに `cdk synth` を動かし、どのコンストラクトが各リソースを作ったかを調べます(スタック名、論理 ID、アカウント、リージョンで照合します)。2つ目以降のアプリは、今の版では外します。
-- 扱うのは TypeScript の CDK v2 のアプリで、`Tags.of(x).add('キー', '値')` のキーと値が文字列そのままの書き方の、キーの名前の変更だけです。ほかの書き方(定数、式、辞書)、ほかの種類の変更(値の変更、追加、削除)、範囲の下にほかのリソースも同じキーを持つ `Tags.of(this)` などは、理由をつけて手で直す一覧に出します。Python のアプリと CDK v1 のアプリは synth せずに外し、そのアプリのリソースを一覧に出します。
-- アプリのソースは、埋め込んだ補助のプログラムが、アプリ自身の `node_modules/typescript`(4.0〜5.x)で読みます。Node.js 18 以上と、アプリの `node_modules`(`npm ci` 済み)が要ります。`cdk` はアプリの `node_modules/.bin/cdk` を先に使い、無ければ `PATH` の `cdk` を使います(`npx` は使いません)。synth の上限は 10 分です。
+- 変更案に `aws:cloudformation:stack-name` のタグのリソースがあり、`--dir` の下に `cdk.json` のあるフォルダーがあるとき、すべてのアプリ(`--cdk-app` があれば選んだアプリ)に、フォルダーの名前の順に1つずつ `cdk synth` を動かし、どのコンストラクトが各リソースを作ったかを調べます(スタック名、論理 ID、アカウント、リージョンで照合します)。1つのアプリが失敗しても、ほかのアプリは続けます。2つ以上のアプリが同じリソースを作ると判定したときは、どちらも書き換えずに手で直す一覧に出します。
+- synth するのは TypeScript と Python の CDK v2 のアプリです。CDK v1 のアプリ、版の分からないアプリ、ほかの言語(Java、Go など)のアプリは synth せずに外します。外したアプリと synth に失敗したアプリがあるときは、どのアプリのものか分からないリソースを、外したか失敗した理由(synth に失敗したアプリが1つだけなら、失敗した道具の名前も)をつけて手で直す一覧に出し、終了コードを 2 にします。
+- 反映するのは、TypeScript のアプリの、`Tags.of(x).add('キー', '値')` のキーと値が文字列そのままの書き方の、キーの名前の変更だけです。ほかの書き方(定数、式、辞書)、ほかの種類の変更(値の変更、追加、削除)、範囲の下にほかのリソースも同じキーを持つ `Tags.of(this)` などは、理由をつけて手で直す一覧に出します。Python のアプリは synth してどのアプリのリソースかを決めますが、ソースは読まず、そのリソースの変更を「このタグの書き方か、この種類の変更には、まだ対応していません」として一覧に出します。
+- TypeScript のアプリのソースは、埋め込んだ補助のプログラムが、アプリ自身の `node_modules/typescript`(4.0〜5.x)で読みます。Node.js 18 以上と、アプリの `node_modules`(`npm ci` 済み)が要ります。ソースをたどってもリソースを作った場所が分からない(関数の中で作っているなど)ときは、そのアプリだけ `cdk synth --debug` をもう一度動かし、CDK が残す作成の記録(どのソースの何行目で作ったか)で補います。補えないときは、そのリソースを手で直す一覧に出します。
+- Python のアプリは、アプリのフォルダーの直下の `.venv` の Python(Windows は `.venv\Scripts\python.exe`、ほかは `.venv/bin/python`)を先に使います。`.venv` の `Scripts`(`bin`)を `PATH` の先頭に置いて `VIRTUAL_ENV` を設定し、`cdk.json` の `app` の最初の語が `python`、`python3`、`py` なら、`.venv` の Python に置き換えた命令を `--app` で渡します(`cdk.json` は変えません。フォルダーの名前に空白やシェルが読み替える文字があれば、二重引用符で囲みます)。`.venv` が無ければ、`app` の最初の語を `PATH` から探します。親のフォルダーの `.venv` は使わず、`.venv` を作ったりパッケージを入れたりもしません。synth の前に `--version` で版を確かめ(上限 30 秒)、Python 3.10 より古いか、版が読めないときは synth しません。Node.js と CDK の CLI も要ります。
+- `cdk` はアプリの `node_modules/.bin/cdk` を先に使い、無ければ `PATH` の `cdk` を使います(`npx` は使いません)。synth の上限は `--synth-timeout`(既定 10 分)で、作成の記録のためのもう1回の synth にも別に効きます。上限を過ぎたときと Ctrl+C のときは、cdk が動かしたプロセス(Python など)も一緒に止め、一時的なファイルとフォルダーを消します。アプリの `cdk.out` は変えません。
+- 全体の上限は置きません。かかる時間は長くても、synth するアプリの数 ×(Python の版の確かめ 30 秒 + synth の上限 × 2 +(Node.js の版の確かめ 30 秒 + 補助のプログラムの上限 2 分)× 3)です。既定の上限では、アプリ1つあたり 28 分です。
+- 端末では、アプリごとの状態(待ち、実行中、済み、失敗、外した)と経過時間の表を標準エラーに出し、synth 中のアプリの経過時間を1秒ごとに書き直します。端末でない(リダイレクトしている)ときは1行ずつ出し、synth 中のアプリには1分ごとに「実行中」の行を足します。道具が無いか古いときは、失敗の行の下に入れ方を1行で示します。
 - 書き換えたあとのソースを補助のプログラムで読み直し、意図した形でなければそのアプリのファイルは書き換えません。
-- `cdk synth` と補助のプログラムには、`AWS_` で始まる変数と GitHub のトークンの変数を渡さず、AWS の設定ファイルを空のファイルに向けます。synth の間に AWS の値を引くアプリ(`fromLookup` など)は失敗するので、一度 AWS の認証情報のある端末で `cdk synth` を動かして `cdk.context.json` に値を保存してから、もう一度実行してください。
-- **`cdk synth` はリポジトリのアプリのコードを動かします。信頼できるリポジトリでだけ使ってください。** アプリのコードが、ホームの下のファイル(`gh` の `hosts.yml`、決め打ちのパスの AWS の設定など)を自分で読むことは止められません。これは、自分で `cdk synth` を動かすときと同じ信頼の範囲です。tag-refactor が認証情報を足すことはありません。
+- `cdk synth`、Python の版の確かめ、補助のプログラムには、`AWS_` で始まる変数と GitHub のトークンの変数を渡さず、AWS の設定ファイルを空のファイルに向けます。synth の間に AWS の値を引くアプリ(`fromLookup` など)は失敗します。`cdk.json` の `profile` は使われません(認証情報は渡しません)。AWS の値を引くアプリは、一度 AWS の認証情報のある端末で `cdk synth` を動かして `cdk.context.json` に値を保存してから、もう一度実行してください。`--debug` の行では、ホームのフォルダーを `~` と書きます。
+- **`cdk synth` はリポジトリのアプリのコードと、それが読み込む npm や Python のパッケージ(`.venv` に入っているものを含む)を動かします。信頼できるリポジトリでだけ使ってください。** アプリのコードが、ホームの下のファイル(`gh` の `hosts.yml`、決め打ちのパスの AWS の設定など)を自分で読むことは止められません。これは、自分で `cdk synth` を動かすときと同じ信頼の範囲です。tag-refactor が認証情報を足すことはありません。
+- Windows では、フォルダーの名前に空白や `&` などがあると、引用符で囲んだ `--app` が `cdk.cmd` に正しく届かないため、`--app` を渡さず、`.venv` を `PATH` の先頭に置くことだけで `.venv` の Python を使います(フォルダーの名前に `"` や `%`、Unix では `"`、`$`、`` ` ``、`\` があるときも同じです)。このとき `app` が `python3 app.py` だと、`.venv` には `python3.exe` が無いので、`PATH` のほかの `python3`(Microsoft Store の案内を含む)が使われ、版の確かめか synth が失敗することがあります。`cdk.json` の `app` を `.venv\Scripts\python.exe app.py` のように書くと動きます。`--debug` で、使った命令が分かります。
 
 **プルリクエストの作成(`--pr`)**
 
@@ -446,7 +454,8 @@ The body of the pull request is in C:\work\infra\.git\tag-refactor\pr-body-tag-r
 
 **iac の限界**
 
-- CDK は、今の版では TypeScript のアプリ1つの、文字列そのままのキーの名前の変更だけです。Python のアプリ、複数のアプリ、ほかの書き方と変更は後の版で扱います。
+- CDK で書き換えるのは、今の版では TypeScript のアプリの、文字列そのままのキーの名前の変更だけです。Python のアプリのソースの書き換え、ほかの書き方と変更は後の版で扱います。
+- Python の最小の版(3.10)は、テストに使う `aws-cdk-lib` の求める版に合わせています。アプリが使う `aws-cdk-lib` がもっと新しい Python を求めるときや、新しすぎる Python で動かないときは、版の確かめを通っても synth が失敗します。親の環境の `PYTHONHOME` と `PYTHONPATH` はそのまま渡るので、`.venv` と合わない値だと synth が失敗します(`--debug` の環境の名前の行で分かります)。
 - `--pr` は github.com のリモートだけです。途中で失敗したときの続きは、示した命令か、`git` と `gh` で行ってください。
 - `--pr-body-file` の形の確かめは、決まった形を探すだけです。形を崩した秘密の値や、ほかの種類の秘密の値は見つけられないので、本文は公開する前に自分でも確かめてください。
 - 残るリスク: `cdk synth` は利用者のアプリのコードを動かします(上の「CDK のアプリ」)。補助のプログラムは利用者のアプリの `node_modules/typescript` を読み込みます。対話の `git commit` と `git push` を上限で止めたとき、フックが起動したプロセスが残ることがあります(Unix)。
@@ -639,6 +648,21 @@ go test -mod=readonly -run '^$' -bench 'BenchmarkParse' -benchmem ./internal/iac
 go vet scripts/u6check.go                                                           # 検証のスクリプトの確かめの補助(ビルドには入らない)
 ```
 
+- `iac` の CDK のテストは、テスト用の CDK のアプリ(`internal/cdk/testdata/apps/`)を一時フォルダーに写して、実際に `cdk synth` を動かします。Node.js 18 以上を入れ、TypeScript のアプリは `internal/cdk/testdata/apps/ts-minimal` で `npm ci --ignore-scripts` を実行しておきます。Python のアプリ `py-minimal` には、Python 3.10 以上で、次の3行で `.venv` と `node_modules` を作ります(リポジトリのルートから)。
+
+  ```bash
+  cd internal/cdk/testdata/apps/py-minimal
+  python3 -m venv .venv && .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
+  npm ci --ignore-scripts --no-audit --no-fund
+  ```
+
+  ```powershell
+  cd internal/cdk/testdata/apps/py-minimal
+  py -3 -m venv .venv; .venv\Scripts\python.exe -m pip install --only-binary=:all: -r requirements.txt
+  npm ci --ignore-scripts --no-audit --no-fund
+  ```
+
+  これらが無いと、手元ではテストが理由を出して飛ばされ、CI(変数 `CI` がある)では失敗します。`.venv`、`node_modules`、`__pycache__` は `.gitignore` で除いています。
 - apply、rollback と記録のテストは、テストごとの一時のホーム(`HOME`、`USERPROFILE`)で動き、本物の `~/.tag-refactor` には触れません。
 
 - CI では、ファジングの種(`internal/rules/testdata/fuzz/FuzzParse/`、`internal/planner/testdata/fuzz/FuzzLoadPlan/`、`internal/impact/testdata/fuzz/FuzzParsePolicy/` とテストのコードの中の種)だけが普通のテストとして動きます。見つかった入力は直したうえで種に足します。

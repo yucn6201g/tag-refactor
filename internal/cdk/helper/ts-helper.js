@@ -138,8 +138,74 @@ function analyze(ts, request) {
       });
     }
   }
+  traceSites(ts, files, request, out);
   markShared(out.tagSites);
   return out;
+}
+
+// traceSites adds the construct sites the sources did not show, from the
+// places of the trace of synth (v0.2.0 U3, contract C3 construct_rules): for
+// each trace site whose path has no construct site yet, in a file that was
+// read, the new expression at its line. In recheck mode, when the line holds
+// none (an edit moved it), the nearest new expression whose second argument is
+// the last part of the path is used.
+function traceSites(ts, files, request, out) {
+  const known = new Set(out.constructSites.map((s) => s.constructPath));
+  for (const site of request.traceSites || []) {
+    if (known.has(site.constructPath) || !(site.line >= 1)) {
+      continue;
+    }
+    const source = files.get(site.file);
+    if (!source) {
+      continue;
+    }
+    const id = site.constructPath.slice(site.constructPath.lastIndexOf("/") + 1);
+    const found = traceNew(ts, source, site.line, id, request.mode);
+    if (!found) {
+      continue;
+    }
+    const arg = found.arguments && found.arguments[1];
+    out.constructSites.push({
+      constructPath: site.constructPath,
+      file: source.rel,
+      line: lineOf(source.sf, found.getStart(source.sf)),
+      constructId: stringLiteral(ts, arg) ? arg.text : id,
+      from: "trace",
+    });
+    known.add(site.constructPath);
+  }
+}
+
+// traceNew finds the new expression of a trace site: the outermost one that
+// starts on line, or, in recheck mode only, the one whose second argument is
+// the string id that starts nearest to line (the earlier one on a tie).
+function traceNew(ts, source, line, id, mode) {
+  const sf = source.sf;
+  let first = null;
+  let nearest = null;
+  let distance = Infinity;
+  const visit = (node) => {
+    if (ts.isNewExpression(node)) {
+      const at = lineOf(sf, node.getStart(sf));
+      if (at === line && !first) {
+        first = node;
+      }
+      const arg = node.arguments && node.arguments[1];
+      if (stringLiteral(ts, arg) && arg.text === id) {
+        const d = Math.abs(at - line);
+        if (d < distance) {
+          nearest = node;
+          distance = d;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  if (first) {
+    return first;
+  }
+  return mode === "recheck" ? nearest : null;
 }
 
 // Source is one parsed file with what is needed to turn positions into bytes.

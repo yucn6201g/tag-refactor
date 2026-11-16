@@ -11,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -153,13 +156,17 @@ var ErrHelperVersion = errors.New("the helper answered with another version of i
 
 // Analyzer runs the helper (CdkSourceAnalyzer).
 type Analyzer struct {
-	cfg Config
+	cfg   Config
+	homes []string
 	// Timeout is the limit of one call; zero means DefaultHelperTimeout.
 	Timeout time.Duration
 }
 
 // NewAnalyzer returns an analyzer.
-func NewAnalyzer(cfg Config) *Analyzer { return &Analyzer{cfg: cfg.withDefaults()} }
+func NewAnalyzer(cfg Config) *Analyzer {
+	cfg = cfg.withDefaults()
+	return &Analyzer{cfg: cfg, homes: cfg.homes()}
+}
 
 // Analyze reads the sources of an app once (contract C3, NFR3.5).
 func (a *Analyzer) Analyze(ctx context.Context, app App, req AnalyzeRequest) (Analysis, error) {
@@ -169,14 +176,16 @@ func (a *Analyzer) Analyze(ctx context.Context, app App, req AnalyzeRequest) (An
 
 // Recheck reads the app again with the edited contents in place of the files on
 // disk, which it does not write (contract C3, BR3.4). The keys of edited are
-// relative to the app, with /.
-func (a *Analyzer) Recheck(ctx context.Context, app App, edited map[string][]byte) (Analysis, error) {
+// relative to the app, with /. traces are the TraceSites given to the second
+// Analyze of the app, if any (U3 BR4.4): the helper uses them as it did there.
+func (a *Analyzer) Recheck(ctx context.Context, app App, edited map[string][]byte, traces []TraceSite) (Analysis, error) {
 	files := make([]helperFile, 0, len(edited))
 	for p, content := range edited {
 		files = append(files, helperFile{Path: p, Content: string(content)})
 	}
+	slices.SortFunc(files, func(x, y helperFile) int { return strings.Compare(x.Path, y.Path) })
 	return a.call(ctx, app, helperRequest{Version: HelperVersion, Mode: "recheck", AppDir: app.Abs,
-		ConstructPaths: []string{}, TraceSites: []TraceSite{}, Files: files})
+		ConstructPaths: []string{}, TraceSites: nonNilTrace(traces), Files: files})
 }
 
 type helperFile struct {
@@ -223,7 +232,7 @@ func (a *Analyzer) call(ctx context.Context, app App, req helperRequest) (Analys
 	if err != nil {
 		return fail(&HelperFailure{Reason: "nodeMissing", Tool: "node"})
 	}
-	env, err := isolate(a.cfg.Environ())
+	env, err := isolate(a.cfg.Environ(), a.cfg.TempDir)
 	if err != nil {
 		return fail(&HelperFailure{Reason: "internal", Tool: "helper"})
 	}
@@ -231,7 +240,7 @@ func (a *Analyzer) call(ctx context.Context, app App, req helperRequest) (Analys
 	if err := a.checkNode(ctx, node, env.vars, &debug); err != nil {
 		return fail(err)
 	}
-	dir, err := privateDir()
+	dir, err := privateDir(a.cfg.TempDir)
 	if err != nil {
 		debug = append(debug, "cdk: helper: no private temporary folder")
 		return fail(&HelperFailure{Reason: "internal", Tool: "helper"})
@@ -239,7 +248,7 @@ func (a *Analyzer) call(ctx context.Context, app App, req helperRequest) (Analys
 	defer func() { _ = os.RemoveAll(dir) }()
 	script, err := writeHelper(dir)
 	if err != nil {
-		debug = append(debug, "cdk: helper: "+err.Error())
+		debug = append(debug, "cdk: helper: "+redact.String(shortHome(err.Error(), a.homes, runtime.GOOS == "windows")))
 		return fail(&HelperFailure{Reason: "internal", Tool: "helper"})
 	}
 	input, err := json.Marshal(req)
@@ -249,7 +258,7 @@ func (a *Analyzer) call(ctx context.Context, app App, req helperRequest) (Analys
 	debug = append(debug, fmt.Sprintf("cdk: %s: node <helper> (%s)", app.Dir, req.Mode))
 	res, err := a.cfg.Runner.Run(ctx, procexec.Command{Name: node, Args: []string{script}, Dir: app.Abs, Env: env.vars,
 		Stdin: input, Timeout: a.timeout(), StdoutLimit: helperOutputLimit})
-	keptLines(res.Stderr, &debug, "cdk: "+app.Dir+": helper: ")
+	keptLines(res.Stderr, &debug, "cdk: "+app.Dir+": helper: ", a.homes)
 	if failure := runFailure(ctx, res, err); failure != nil {
 		return fail(failure)
 	}

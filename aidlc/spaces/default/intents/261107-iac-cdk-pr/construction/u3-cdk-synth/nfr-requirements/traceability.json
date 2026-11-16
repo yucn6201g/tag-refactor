@@ -1,0 +1,17 @@
+{
+  "stage": "nfr-requirements",
+  "unit": "u3-cdk-synth",
+  "upstream_ids": ["NFR1", "NFR2", "NFR3", "NFR4", "NFR5", "NFR6", "NFR7", "NFR8", "NFR9", "NFR10"],
+  "coverage": [
+    { "id": "NFR1", "status": "OK", "target": "U1 NFR1.1 to NFR1.5 and U2 NFR1.6 to NFR1.10 unchanged; U3 adds NFR1.11, NFR1.12, NFR1.13 (security-requirements.md)" },
+    { "id": "NFR2", "status": "OK", "target": "U1 NFR2.1 to NFR2.4 widened to Python and trace synth by NFR2.5; U3 adds NFR2.6, NFR2.7 (security-requirements.md)" },
+    { "id": "NFR3", "status": "OK", "target": "NFR3.11 replaces U1 NFR3.1 and NFR3.17 replaces U1 NFR3.5; U3 adds NFR3.12, NFR3.13, NFR3.14, NFR3.15, NFR3.16 (security-requirements.md, other categories)" },
+    { "id": "NFR4", "status": "OK", "target": "U1 NFR4.1 to NFR4.4 unchanged; U3 adds NFR4.5 (security-requirements.md, other categories)" },
+    { "id": "NFR5", "status": "OK", "target": "U1 NFR5.1 and NFR5.2 unchanged; U3 adds NFR5.3 (security-requirements.md, other categories)" },
+    { "id": "NFR6", "status": "OK", "target": "U1 NFR6.1 to NFR6.10 and U2 NFR6.11 to NFR6.15 unchanged; U3 adds NFR6.16, NFR6.17, NFR6.18, NFR6.19, NFR6.20, NFR6.21 (tech-stack-decisions.md)" },
+    { "id": "NFR7", "status": "N/A", "target": "The new code, including the python calls through the swappable runner, counts toward the 80 percent statement coverage; U1 NFR7.1 applies" },
+    { "id": "NFR8", "status": "OK", "target": "U1 NFR8.1 and NFR8.2 unchanged; U3 adds NFR8.3, NFR8.4 (security-requirements.md, other categories)" },
+    { "id": "NFR9", "status": "N/A", "target": "U3 does not change how the pull request is opened; U1 NFR9.1 and U2 NFR9.2 apply" },
+    { "id": "NFR10", "status": "OK", "target": "NFR10.4 replaces U1 NFR10.1; U3 adds NFR10.5; U1 NFR10.2 and NFR10.3 unchanged (security-requirements.md, other categories)" }
+  ]
+}

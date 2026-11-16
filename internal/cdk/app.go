@@ -18,6 +18,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -46,8 +47,12 @@ type App struct {
 	Command string
 }
 
-// The folders Discover never enters (BR1.1).
-var skippedFolders = map[string]bool{".git": true, "node_modules": true, "cdk.out": true}
+// The folders Discover never enters (BR1.1, U3 NFR3.15): the names are
+// compared as they are.
+var skippedFolders = map[string]bool{".git": true, "node_modules": true, "cdk.out": true, ".venv": true, "venv": true}
+
+// readDir reads a folder for Discover; the tests count the folders it reads.
+var readDir = os.ReadDir
 
 // maxDepth is the deepest folder Discover looks into, from --dir, as iac.
 const maxDepth = 32
@@ -76,7 +81,7 @@ func discover(ctx context.Context, root, dir, rel string, depth int, apps *[]App
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(dir)
+	entries, err := readDir(dir)
 	if err != nil {
 		// A folder that cannot be read holds no app this tool can use.
 		return nil
@@ -108,8 +113,11 @@ func newApp(root, dir, rel string) App {
 		a.Command = config.App
 	}
 	a.Language = languageOf(a.Command)
-	if a.Language == TypeScript {
+	switch a.Language {
+	case TypeScript:
 		a.CDKMajor = cdkMajor(root, dir)
+	case Python:
+		a.CDKMajor = pythonMajor(root, dir)
 	}
 	return a
 }
@@ -181,6 +189,154 @@ func majorOf(packageJSON []byte) int {
 		return 1
 	}
 	return 0
+}
+
+// pythonFiles are the files that declare the dependencies of a Python app
+// (U3 BR1.3, contract C2).
+var pythonFiles = []string{"requirements.txt", "setup.py", "pyproject.toml"}
+
+// pythonMajor reads the dependencies of a Python app (U3 BR1.3): from the app
+// folder up to root, the first folder with one of pythonFiles decides, with
+// every one of them it has. aws-cdk-lib is 2, aws-cdk-core (aws-cdk.core) is
+// 1, nothing is 0. No file is run.
+func pythonMajor(root, dir string) int {
+	for {
+		var names map[string]bool
+		for _, name := range pythonFiles {
+			data, err := readLimited(filepath.Join(dir, name))
+			if err != nil {
+				continue
+			}
+			if names == nil {
+				names = map[string]bool{}
+			}
+			for _, n := range dependencyNames(name, string(data)) {
+				names[n] = true
+			}
+		}
+		switch {
+		case names["aws-cdk-lib"]:
+			return 2
+		case names["aws-cdk-core"]:
+			return 1
+		case names != nil:
+			return 0
+		}
+		if samePath(dir, root) {
+			return 0
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return 0
+		}
+		dir = parent
+	}
+}
+
+var (
+	// leadingName is the name at the start of a requirement: letters, digits,
+	// dots, underscores and hyphens, before extras, versions, markers or a URL.
+	leadingName = regexp.MustCompile(`^[A-Za-z0-9._-]+`)
+	// quoted is a string in single or double quotes.
+	quoted = regexp.MustCompile(`"([^"\n]*)"|'([^'\n]*)'`)
+	// separators are the runs that normalized names write as one hyphen.
+	separators = regexp.MustCompile(`[-_.]+`)
+)
+
+// dependencyNames reads the names of the dependencies of one file, normalized
+// (BR1.3 table).
+func dependencyNames(file, content string) []string {
+	var names []string
+	add := func(requirement string) {
+		if n, ok := requirementName(requirement); ok {
+			names = append(names, n)
+		}
+	}
+	// pyproject.toml: quoted strings are read in the dependencies array of
+	// [project] and in the dependency tables only (R-09).
+	section, inArray := "", false
+	for _, line := range strings.Split(content, "\n") {
+		switch file {
+		case "requirements.txt":
+			line, _, _ = strings.Cut(line, "#")
+			add(line)
+		case "setup.py":
+			for _, s := range quotedStrings(line) {
+				add(s)
+			}
+		default: // pyproject.toml
+			line = withoutComment(line)
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") && !inArray {
+				section = strings.ToLower(strings.Trim(trimmed, "[] "))
+				continue
+			}
+			key, value, hasKey := strings.Cut(trimmed, "=")
+			key = strings.Trim(strings.TrimSpace(key), `"'`)
+			switch {
+			case section == "project":
+				if !inArray && hasKey && key == "dependencies" {
+					inArray = true
+					trimmed = value
+				}
+				if inArray {
+					for _, s := range quotedStrings(trimmed) {
+						add(s)
+					}
+					inArray = !strings.Contains(quoted.ReplaceAllString(trimmed, ""), "]")
+				}
+			case section == "project.optional-dependencies" || section == "dependency-groups":
+				// The keys are group names; the strings are requirements.
+				for _, s := range quotedStrings(trimmed) {
+					add(s)
+				}
+			case strings.HasSuffix(section, "dependencies") && hasKey:
+				// [tool.poetry.dependencies] and the like: the keys are names.
+				add(key)
+			}
+		}
+	}
+	return names
+}
+
+// requirementName takes the name of one requirement, or nothing for an empty
+// line, an option (-r, -e, --index-url), a URL or a path. The URL of a
+// "name @ URL" requirement comes after the name, which is read.
+func requirementName(requirement string) (string, bool) {
+	r := strings.TrimSpace(requirement)
+	beforeAt, _, _ := strings.Cut(r, "@")
+	if r == "" || strings.HasPrefix(r, "-") || strings.Contains(beforeAt, "://") || strings.HasPrefix(r, ".") || strings.HasPrefix(r, "/") {
+		return "", false
+	}
+	name := leadingName.FindString(r)
+	if name == "" {
+		return "", false
+	}
+	return separators.ReplaceAllString(strings.ToLower(name), "-"), true
+}
+
+func quotedStrings(line string) []string {
+	var out []string
+	for _, m := range quoted.FindAllStringSubmatch(line, -1) {
+		out = append(out, m[1]+m[2])
+	}
+	return out
+}
+
+// withoutComment cuts a line of TOML at a # outside quotes.
+func withoutComment(line string) string {
+	var quote rune
+	for i, r := range line {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote == 0 && (r == '"' || r == '\''):
+			quote = r
+		case quote == 0 && r == '#':
+			return line[:i]
+		}
+	}
+	return line
 }
 
 func samePath(a, b string) bool {
