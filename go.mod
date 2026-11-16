@@ -13,7 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/resourceexplorer2 v1.33.5
 	github.com/aws/aws-sdk-go-v2/service/resourcegroupstaggingapi v1.41.5
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.5
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.50.4
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.51.0
 	github.com/aws/aws-sdk-go-v2/service/sns v1.48.0
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.53.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.52.0
