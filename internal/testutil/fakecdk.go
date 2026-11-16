@@ -22,7 +22,7 @@ import (
 // tests and writes each call to a file of that folder. The variable reaches the
 // programs synth starts: it is neither an AWS variable nor a token.
 //
-// cdk can hang after starting a grandchild that writes its process number to
+// cdk can hang after starting a grandchild whose process number it writes to
 // a file, so that the tests see the limit of synth and the stop of the whole
 // tree of processes (NFR3.11, NFR3.16).
 
@@ -130,7 +130,7 @@ func (f *FakeCDK) Calls() []ArgsCall {
 }
 
 // Grandchild waits up to limit for the process number the grandchild of a
-// hanging cdk wrote.
+// hanging cdk wrote for it.
 func (f *FakeCDK) Grandchild(limit time.Duration) (int, bool) {
 	f.t.Helper()
 	deadline := time.Now().Add(limit)
@@ -162,9 +162,7 @@ func FakeCDKRequested() (string, bool) {
 // from the test file, as for PlayFakeGH.
 func PlayFakeCDK(dir string, args []string, stdout, stderr io.Writer) int {
 	if os.Getenv(fakeCDKRoleEnv) == "grandchild" {
-		if err := os.WriteFile(filepath.Join(dir, "grandchild.pid"), []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
-			return 3
-		}
+		// Its parent wrote its process number when it started it.
 		time.Sleep(time.Hour)
 		return 0
 	}
@@ -186,10 +184,10 @@ func PlayFakeCDK(dir string, args []string, stdout, stderr io.Writer) int {
 		}
 		return 0
 	case "cdk":
-		return playCDK(s, stderr)
+		return playCDK(dir, s, stderr)
 	}
 	if s.PythonHang {
-		return hang(s)
+		return hang(dir, s)
 	}
 	version := s.PythonVersion
 	if version == "" {
@@ -199,17 +197,19 @@ func PlayFakeCDK(dir string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-func playCDK(s FakeCDKSettings, stderr io.Writer) int {
+func playCDK(dir string, s FakeCDKSettings, stderr io.Writer) int {
 	if !s.Hang {
 		_, _ = io.WriteString(stderr, s.CDKStderr)
 		return s.CDKExit
 	}
-	return hang(s)
+	return hang(dir, s)
 }
 
-// hang starts a grandchild that writes its process number, creates the file
-// Started and waits.
-func hang(s FakeCDKSettings) int {
+// hang starts a grandchild, writes its process number, creates the file
+// Started and waits. The number is written as soon as the grandchild exists,
+// not by the grandchild once it runs: on a busy Windows runner a copy of the
+// large test binary can take longer than the limit of synth to start running.
+func hang(dir string, s FakeCDKSettings) int {
 	self, err := os.Executable()
 	if err != nil {
 		return 3
@@ -219,6 +219,9 @@ func hang(s FakeCDKSettings) int {
 	if err := child.Start(); err != nil {
 		return 3
 	}
+	if err := writeGrandchildPID(dir, child.Process.Pid); err != nil {
+		return 3
+	}
 	if s.Started != "" {
 		_ = os.WriteFile(s.Started, nil, 0o600)
 	}
@@ -226,4 +229,14 @@ func hang(s FakeCDKSettings) int {
 	// before.
 	time.Sleep(time.Hour)
 	return 0
+}
+
+// writeGrandchildPID writes the number through a temporary file and a rename,
+// so that Grandchild never reads half of it.
+func writeGrandchildPID(dir string, pid int) error {
+	tmp := filepath.Join(dir, "grandchild.pid.tmp")
+	if err := os.WriteFile(tmp, []byte(strconv.Itoa(pid)), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "grandchild.pid"))
 }
